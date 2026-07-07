@@ -269,6 +269,19 @@ export function useExtensionMessages(
             machine: machines[id],
           });
         }
+        // Standalone server sends layoutLoaded BEFORE existingAgents, so the
+        // layoutLoaded flush above has already run by the time agents arrive
+        // here — flush immediately or pre-existing sessions never spawn
+        // characters (upstream ordering bug flagged in M1).
+        if (layoutReadyRef.current) {
+          for (const p of pendingAgents) {
+            os.addAgent(p.id, p.palette, p.hueShift, p.seatId, true, p.folderName, p.machine);
+          }
+          pendingAgents = [];
+          if (os.characters.size > 0) {
+            saveAgentSeats(os);
+          }
+        }
         setAgents((prev) => {
           const ids = new Set(prev);
           const merged = [...prev];
