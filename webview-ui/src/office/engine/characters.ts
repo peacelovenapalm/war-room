@@ -88,6 +88,12 @@ export function createCharacter(
   };
 }
 
+/** Emergence (v1 mechanic #4): odds an idle wanderer drifts toward the
+ *  oldest burning desk instead of a random tile, and how close they gather.
+ *  Cheap rule — the crowd emerges from many wanderers sharing one pull. */
+const CROWD_PULL_CHANCE = 0.65;
+const CROWD_RADIUS_TILES = 2;
+
 export function updateCharacter(
   ch: Character,
   dt: number,
@@ -95,6 +101,7 @@ export function updateCharacter(
   seats: Map<string, Seat>,
   tileMap: TileTypeVal[][],
   blockedTiles: Set<string>,
+  crowdTarget?: { col: number; row: number } | null,
 ): void {
   ch.frameTimer += dt;
 
@@ -186,7 +193,18 @@ export function updateCharacter(
           }
         }
         if (walkableTiles.length > 0) {
-          const target = walkableTiles[Math.floor(Math.random() * walkableTiles.length)];
+          // Emergence rule: a long-blocked desk draws a crowd — most idle
+          // wanderers drift to tiles near the oldest fire instead of anywhere.
+          let target: { col: number; row: number } | undefined;
+          if (crowdTarget && Math.random() < CROWD_PULL_CHANCE) {
+            const near = walkableTiles.filter(
+              (t) =>
+                Math.abs(t.col - crowdTarget.col) <= CROWD_RADIUS_TILES &&
+                Math.abs(t.row - crowdTarget.row) <= CROWD_RADIUS_TILES,
+            );
+            if (near.length > 0) target = near[Math.floor(Math.random() * near.length)];
+          }
+          if (!target) target = walkableTiles[Math.floor(Math.random() * walkableTiles.length)];
           const path = findPath(
             ch.tileCol,
             ch.tileRow,

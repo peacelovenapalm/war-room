@@ -81,6 +81,9 @@ export const OVERLAY_GLYPH_OUTLINE_COLOR = '#0a0a14';
 export const OVERLAY_GLYPH_COLOR = '#ffffff';
 /** 1px pixel-art drop shadow for HUD text drawn over the canvas (not a state signal) */
 export const PIXEL_TEXT_SHADOW = '1px 1px 0 #0a0a14';
+/** Night-shift dim over the office when no sessions run (v1 emergence rule;
+ *  the DOM "NIGHT SHIFT" text label carries the signal — this is atmosphere) */
+export const NIGHT_DIM_COLOR = 'rgba(8, 8, 20, 0.45)';
 
 // ── Camera ───────────────────────────────────────────────────
 export const CAMERA_FOLLOW_LERP = 0.1;

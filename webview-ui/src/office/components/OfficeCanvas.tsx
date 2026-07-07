@@ -273,6 +273,7 @@ export function OfficeCanvas({
             debris: officeState.debris.values(),
             effects: officeState.crisisEffects,
             now: Date.now(),
+            nightMode: officeState.characters.size === 0,
           },
         );
         offsetRef.current = { x: offsetX, y: offsetY };

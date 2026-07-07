@@ -22,6 +22,7 @@ import {
   GHOST_VALID_TINT,
   GRID_LINE_COLOR,
   HOVERED_OUTLINE_ALPHA,
+  NIGHT_DIM_COLOR,
   OUTLINE_Z_SORT_OFFSET,
   OVERLAY_GLYPH_COLOR,
   OVERLAY_GLYPH_OUTLINE_COLOR,
@@ -697,7 +698,13 @@ export function renderFrame(
   layoutCols?: number,
   layoutRows?: number,
   pets?: Pet[],
-  crisis?: { debris: Iterable<DebrisRecord>; effects: Iterable<ExtinguishEffect>; now: number },
+  crisis?: {
+    debris: Iterable<DebrisRecord>;
+    effects: Iterable<ExtinguishEffect>;
+    now: number;
+    /** Emergence (v1 #4): office empty → dim the lights (label lives in DOM). */
+    nightMode?: boolean;
+  },
 ): { offsetX: number; offsetY: number } {
   // Clear
   ctx.clearRect(0, 0, canvasWidth, canvasHeight);
@@ -768,6 +775,12 @@ export function renderFrame(
       zoom,
       crisis.now,
     );
+    // Night shift (v1 #4): nobody in the office → dim the lights. The DOM
+    // "NIGHT SHIFT" text label carries the signal; this dim is atmosphere.
+    if (crisis.nightMode) {
+      ctx.fillStyle = NIGHT_DIM_COLOR;
+      ctx.fillRect(offsetX, offsetY, mapW, mapH);
+    }
   }
 
   // Editor overlays

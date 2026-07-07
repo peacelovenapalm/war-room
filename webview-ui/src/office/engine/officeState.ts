@@ -18,7 +18,7 @@ import {
 import type { AgentVisualState } from '../agentState.js';
 import { deriveVisualState } from '../agentState.js';
 import type { DebrisRecord, ExtinguishEffect } from '../crisis.js';
-import { computeCrisisUpdate, debrisKey, EXTINGUISH_DURATION_MS } from '../crisis.js';
+import { computeCrisisUpdate, debrisKey, EXTINGUISH_DURATION_MS, FIRE_AT_MS } from '../crisis.js';
 import { getAnimationFrames, getCatalogEntry, getOnStateType } from '../layout/furnitureCatalog.js';
 import {
   createDefaultLayout,
@@ -1060,6 +1060,23 @@ export class OfficeState {
       this.rebuildFurnitureInstances();
     }
 
+    // Emergence (v1 #4): the OLDEST desk burning at FIRE stage or worse
+    // draws a crowd — idle wanderers below bias their next stroll toward it.
+    let crowdTarget: { col: number; row: number } | null = null;
+    let oldestSince = Infinity;
+    const crowdNow = Date.now();
+    for (const ch of this.characters.values()) {
+      if (
+        ch.crisis &&
+        ch.matrixEffect !== 'despawn' &&
+        crowdNow - ch.crisis.since >= FIRE_AT_MS &&
+        ch.crisis.since < oldestSince
+      ) {
+        oldestSince = ch.crisis.since;
+        crowdTarget = { col: ch.tileCol, row: ch.tileRow };
+      }
+    }
+
     const toDelete: number[] = [];
     for (const ch of this.characters.values()) {
       // Handle matrix effect animation
@@ -1081,7 +1098,15 @@ export class OfficeState {
 
       // Temporarily unblock own seat so character can pathfind to it
       this.withOwnSeatUnblocked(ch, () =>
-        updateCharacter(ch, dt, this.walkableTiles, this.seats, this.tileMap, this.blockedTiles),
+        updateCharacter(
+          ch,
+          dt,
+          this.walkableTiles,
+          this.seats,
+          this.tileMap,
+          this.blockedTiles,
+          crowdTarget,
+        ),
       );
 
       // Tick bubble timer for waiting bubbles
