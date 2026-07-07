@@ -94,20 +94,43 @@ type:"http" hooks — Claude Code blocks them for private IPs and it breaks
 every session). MINI hooks + the per-machine pollers are NOT installed yet.
 Simulated agents via the authed ingest remain fine for dev (the M2 pattern).
 
-Task: build the v1 visual pass from the brief, in this order: (1) mechanic #1,
-the crisis & triage layer (blocked session = aging fire at the agent's desk,
-shape+label only; triage queue by age×severity; visible calm on resolution);
-(2) the in-dashboard HELP SCREEN from the brief's Additions section (`?` key +
-visible HELP button; explains every signal and mechanic; a mechanic isn't done
-until its help section exists). Then, if capacity remains, start mechanic #6a
-(Codex/Gemini sessions rendered as coworkers with provider text labels) — read
-the brief's staged scope first; #6b dispatch needs a design pass before any
-code. Work on a new branch war-room/v1 from war-room/v0. Colorblind grayscale
-test and the existing 236+48 tests stay green. Verify by exercising with
-simulated crises, screenshot evidence to .planning/evidence/, atomic commits
-(em-dash convention), no push, gated actions → runbooks only. Redeploy to
-NEXUS is Greg re-running .planning/runbooks/nexus-war-room-deploy.sh — never
-deploy yourself.
+Task: the v1 VISUAL + FUNCTIONALITY pass. Load the frontend-design skill
+before writing any webview code and use it for every visual decision (it
+governs layout, hierarchy, motion, and polish; the colorblind guardrails
+below override it wherever they conflict). Build in this order:
+
+1. Mechanic #1 — crisis & triage layer. Blocked session = a visible FIRE at
+   that agent's desk that AGES (smoke → fire → alarm as minutes pass), each
+   stage a distinct SILHOUETTE + text label, never a tint. Concurrent crises
+   form a triage queue panel ordered by age×severity with one-line cause
+   (waitingFor) per row. Resolving a crisis visibly calms the room (brief,
+   satisfying transition — the feedback loop is the point). Failed/stopped
+   agents leave labeled debris until acknowledged.
+2. Help screen — in-dashboard, reachable at all times via `?` key + a visible
+   HELP button (word, not icon-only). Explains every signal on screen (state
+   chips, fire stages, debris, triage queue, briefing panel, machine labels)
+   and where the data comes from (real sessions, real tokens, real gates).
+   A mechanic is not done until its help section exists. The help screen
+   itself must pass the grayscale test.
+3. If capacity remains: mechanic #6a — Codex/Gemini sessions rendered as
+   coworkers (distinct sprite/silhouette + [CODEX]/[GEMINI] text label) via a
+   per-provider ingest adapter to the existing authed ingest. Read the
+   brief's staged scope FIRST. #6b dispatch is design-only this iteration:
+   write the design note, build nothing.
+
+Functionality acceptance: exercise with simulated crises over the authed
+ingest (spawn ≥3 concurrent blocked/failed states, resolve them, watch the
+queue reorder and the room calm). Screenshot evidence (normal + grayscale)
+to .planning/evidence/. Existing tests stay green (server 236, webview 48)
+and new mechanics get tests in the same style.
+
+Constraints: branch war-room/v1 from war-room/v0. Colorblind deuteranopia
+rules are HARD (shape + text label first, color reinforcement only; grayscale
+screenshot must stay fully readable). Never gate real function behind game
+progress. Token mechanics reward LOW spend. Atomic commits (conventional
+prefix + em-dash), explicit-path staging, no push, gated actions → runbooks
+only. Redeploy to NEXUS is Greg re-running
+.planning/runbooks/nexus-war-room-deploy.sh — never deploy yourself.
 ```
 
 ## 8 · ADDENDUM 2026-07-07 (later) — hooks incident + rework
