@@ -2,26 +2,34 @@
 # =============================================================================
 # macbook-hooks-install.sh — GATED RUNBOOK (human-run only, never automated)
 #
-# Installs native Claude Code `type:"http"` hooks into ~/.claude/settings.json
-# so THIS machine streams session events to the War Room server on NEXUS.
+# Installs Claude Code `type:"command"` hooks into ~/.claude/settings.json so
+# THIS machine streams session events to the War Room server on NEXUS.
 # Parameterized by machine name — the Mac-Mini variant is the same script:
 #
 #   bash macbook-hooks-install.sh MACBOOK
 #   bash macbook-hooks-install.sh MINI
 #
-# What it changes:
-#   1. ~/.war-room/env            — stores WAR_ROOM_TOKEN (chmod 600)
-#   2. ~/.zshenv                  — one marked line sourcing that env file
-#      (the token must be in Claude Code's environment for $WAR_ROOM_TOKEN
-#       interpolation; `allowedEnvVars` whitelists it for hook headers)
-#   3. ~/.claude/settings.json    — adds one http hook entry per event
-#      (BACKED UP FIRST; entries are marked by the server URL, idempotent)
+# WHY command hooks, not `type:"http"` (redesigned 2026-07-07):
+#   Claude Code hard-blocks http hooks whose URL resolves to a private or
+#   link-local address — Tailscale 100.x IPs included. The first install
+#   attempt used http hooks and broke EVERY session on the machine with
+#   "HTTP hook blocked" errors on every tool call. Command hooks are not
+#   subject to that guard: each event runs ~/.war-room/hook.sh, which curls
+#   the server in a detached background job and always exits 0.
 #
-# Hook delivery is fire-and-forget: non-2xx / timeout NEVER blocks Claude Code.
+# What it changes:
+#   1. ~/.war-room/env      — WAR_ROOM_TOKEN + WAR_ROOM_URL + WAR_ROOM_MACHINE
+#                             (chmod 600; existing token is kept)
+#   2. ~/.war-room/hook.sh  — the forwarder script (written by this runbook)
+#   3. ~/.claude/settings.json — one command hook entry per event
+#      (BACKED UP FIRST; idempotent; also REMOVES any legacy http entries
+#       from the 2026-07-06 design and the legacy ~/.zshenv token line)
+#
+# Hook delivery is fire-and-forget: server down / non-2xx / timeout NEVER
+# blocks Claude Code. The forwarder backgrounds curl and exits immediately.
 #
 # UNDO (inline, also printed at the end):
 #   cp ~/.claude/settings.json.bak.war-room.<TS> ~/.claude/settings.json
-#   sed -i '' '/war-room-token/d' ~/.zshenv
 #   rm -rf ~/.war-room
 # =============================================================================
 set -euo pipefail
@@ -31,6 +39,7 @@ SERVER_URL="${WAR_ROOM_URL:-https://nexus.tail722a2e.ts.net:8484}"
 SETTINGS="${HOME}/.claude/settings.json"
 ENV_DIR="${HOME}/.war-room"
 ENV_FILE="${ENV_DIR}/env"
+HOOK_SCRIPT="${ENV_DIR}/hook.sh"
 TS="$(date +%Y%m%d-%H%M%S)"
 
 ok()   { printf '[OK]   %s\n' "$1"; }
@@ -42,86 +51,130 @@ case "${MACHINE}" in
   *) fail "usage: bash $(basename "$0") <MACHINE-NAME>   (e.g. MACBOOK or MINI, uppercase)" ;;
 esac
 command -v jq >/dev/null || fail "jq is required (brew install jq)"
+command -v curl >/dev/null || fail "curl is required"
 [ -f "${SETTINGS}" ] || fail "${SETTINGS} not found — is Claude Code set up on this machine?"
 jq empty "${SETTINGS}" 2>/dev/null || fail "${SETTINGS} is not valid JSON — fix it before running this"
 
 echo "=============================================================="
-echo " War Room hooks install"
+echo " War Room hooks install (command-hook forwarder design)"
 echo "   machine : ${MACHINE}"
 echo "   server  : ${SERVER_URL}/api/hooks/claude"
+echo "   forwarder: ${HOOK_SCRIPT}"
 echo "   settings: ${SETTINGS} (will be backed up first)"
 echo "=============================================================="
 read -r -p "Type 'install' to proceed: " CONFIRM
 [ "${CONFIRM}" = "install" ] || fail "aborted (no changes made)"
 
-# ── 1. Token (prompted silently, never echoed) ───────────────────────────────
-if [ -f "${ENV_FILE}" ] && grep -q 'WAR_ROOM_TOKEN=' "${ENV_FILE}"; then
+# ── 1. Token (existing token is kept; prompted silently otherwise) ───────────
+EXISTING_TOKEN=""
+if [ -f "${ENV_FILE}" ]; then
+  EXISTING_TOKEN="$(sed -n 's/^export WAR_ROOM_TOKEN=//p' "${ENV_FILE}" | head -1)"
+fi
+if [ -n "${EXISTING_TOKEN}" ]; then
+  TOKEN="${EXISTING_TOKEN}"
   ok "token already stored in ${ENV_FILE} — keeping it"
 else
   printf 'Paste WAR_ROOM_TOKEN (from nexus ~/apps/war-room/war-room.env; input hidden): '
   read -r -s TOKEN; echo
   [ -n "${TOKEN}" ] || fail "empty token"
-  mkdir -p "${ENV_DIR}"; umask 077
-  printf 'export WAR_ROOM_TOKEN=%s\n' "${TOKEN}" > "${ENV_FILE}"
-  chmod 600 "${ENV_FILE}"
-  ok "token stored in ${ENV_FILE} (mode 600, not displayed)"
+fi
+mkdir -p "${ENV_DIR}"
+umask 077
+cat > "${ENV_FILE}" <<EOF
+export WAR_ROOM_TOKEN=${TOKEN}
+export WAR_ROOM_URL=${SERVER_URL}
+export WAR_ROOM_MACHINE=${MACHINE}
+EOF
+chmod 600 "${ENV_FILE}"
+ok "env written to ${ENV_FILE} (mode 600; token not displayed)"
+
+# ── 2. Forwarder script (the command-hook target) ────────────────────────────
+cat > "${HOOK_SCRIPT}" <<'HOOKEOF'
+#!/bin/sh
+# ~/.war-room/hook.sh — War Room event forwarder.
+# Installed by macbook-hooks-install.sh; invoked by Claude Code command hooks.
+# Reads the hook event JSON on stdin, POSTs it to the War Room server in a
+# detached background job. ALWAYS exits 0 — a dead server never blocks Claude.
+# Set WAR_ROOM_HOOK_SYNC=1 to run the POST in the foreground and print the
+# HTTP status (used by the runbook smoke test).
+ENV_FILE="${HOME}/.war-room/env"
+[ -f "${ENV_FILE}" ] || exit 0
+. "${ENV_FILE}"
+[ -n "${WAR_ROOM_TOKEN:-}" ] || exit 0
+[ -n "${WAR_ROOM_URL:-}" ] || exit 0
+PAYLOAD="$(cat)"
+[ -n "${PAYLOAD}" ] || exit 0
+if [ "${WAR_ROOM_HOOK_SYNC:-}" = "1" ]; then
+  printf '%s' "${PAYLOAD}" | curl -s -o /dev/null -w '%{http_code}' -m 8 -X POST \
+    "${WAR_ROOM_URL}/api/hooks/claude" \
+    -H 'Content-Type: application/json' \
+    -H "Authorization: Bearer ${WAR_ROOM_TOKEN}" \
+    -H "X-Machine: ${WAR_ROOM_MACHINE:-UNKNOWN}" \
+    --data-binary @-
+  exit 0
+fi
+(
+  printf '%s' "${PAYLOAD}" | curl -s -o /dev/null -m 5 -X POST \
+    "${WAR_ROOM_URL}/api/hooks/claude" \
+    -H 'Content-Type: application/json' \
+    -H "Authorization: Bearer ${WAR_ROOM_TOKEN}" \
+    -H "X-Machine: ${WAR_ROOM_MACHINE:-UNKNOWN}" \
+    --data-binary @-
+) </dev/null >/dev/null 2>&1 &
+exit 0
+HOOKEOF
+chmod 700 "${HOOK_SCRIPT}"
+ok "forwarder written to ${HOOK_SCRIPT} (mode 700)"
+
+# ── 3. Legacy cleanup: 2026-07-06 http-hook design leftovers ─────────────────
+if grep -qs 'war-room-token' "${HOME}/.zshenv"; then
+  sed -i '' '/war-room-token/d' "${HOME}/.zshenv"
+  ok "removed legacy war-room-token line from ~/.zshenv (no longer needed)"
 fi
 
-# ── 2. Shell env sourcing (marked line, idempotent) ──────────────────────────
-MARK='# war-room-token'
-if grep -qs "${MARK}" "${HOME}/.zshenv"; then
-  ok "~/.zshenv already sources the token env"
-else
-  printf '[ -f "%s" ] && source "%s"  %s\n' "${ENV_FILE}" "${ENV_FILE}" "${MARK}" >> "${HOME}/.zshenv"
-  ok "added marked source line to ~/.zshenv (undo: sed -i '' '/war-room-token/d' ~/.zshenv)"
-fi
-
-# ── 3. Backup, then merge hook entries ───────────────────────────────────────
+# ── 4. Backup, then merge hook entries ───────────────────────────────────────
 BACKUP="${SETTINGS}.bak.war-room.${TS}"
 cp "${SETTINGS}" "${BACKUP}" && ok "backup -> ${BACKUP}"
 
 # Same event set the app's own installer uses (server/src/providers/hook/claude/constants.ts).
 EVENTS='["SessionStart","SessionEnd","Stop","PermissionRequest","Notification","UserPromptSubmit","PreToolUse","PostToolUse","PostToolUseFailure","SubagentStart","SubagentStop","TeammateIdle","TaskCreated","TaskCompleted"]'
 
-# NOTE on allowedEnvVars: required for $WAR_ROOM_TOKEN interpolation in http
-# hook headers (known trap, verified 2026-07-04). It is written per hook entry
-# here; if your Claude Code version expects it at hooks-top-level instead,
-# move it to .hooks.allowedEnvVars — first run will tell (fire-and-forget,
-# failures are non-blocking; check the server log for 401s).
-jq --arg url "${SERVER_URL}/api/hooks/claude" --arg machine "${MACHINE}" --argjson events "${EVENTS}" '
+# Idempotent merge: strip any prior war-room entry (this design's command hook
+# OR the legacy 2026-07-06 http hook, matched by its ingest path), then append
+# one fresh command entry per event.
+jq --arg cmd "/bin/sh \"${HOOK_SCRIPT}\"" --arg script "${HOOK_SCRIPT}" --argjson events "${EVENTS}" '
+  def is_war_room_entry:
+    (.hooks // []) | any(
+      (((.type // "") == "http") and ((.url // "") | contains("/api/hooks/claude")))
+      or ((.command // "") | contains(".war-room/hook.sh"))
+    );
   .hooks = (.hooks // {}) |
   reduce $events[] as $ev (.;
     .hooks[$ev] = (
-      ((.hooks[$ev] // []) | map(select((.hooks // []) | any(.url == $url) | not))) + [{
+      ((.hooks[$ev] // []) | map(select(is_war_room_entry | not))) + [{
         matcher: "",
-        hooks: [{
-          type: "http",
-          url: $url,
-          method: "POST",
-          headers: { "Authorization": "Bearer $WAR_ROOM_TOKEN", "X-Machine": $machine },
-          allowedEnvVars: ["WAR_ROOM_TOKEN"],
-          timeout: 5
-        }]
+        hooks: [{ type: "command", command: $cmd, timeout: 10 }]
       }]
     )
-  )
+  ) |
+  # Legacy http entries may exist on events outside $events too — sweep all.
+  .hooks = (.hooks | with_entries(
+    .value |= map(select(
+      ((.hooks // []) | any(((.type // "") == "http") and ((.url // "") | contains("/api/hooks/claude")))) | not
+    ))
+  ) | with_entries(select(.value | length > 0)))
 ' "${BACKUP}" > "${SETTINGS}.war-room-tmp"
 jq empty "${SETTINGS}.war-room-tmp" || { rm -f "${SETTINGS}.war-room-tmp"; fail "generated settings invalid — original untouched"; }
 mv "${SETTINGS}.war-room-tmp" "${SETTINGS}"
-ok "http hooks installed for $(echo "${EVENTS}" | jq length) events (X-Machine: ${MACHINE})"
+ok "command hooks installed for $(echo "${EVENTS}" | jq length) events (machine: ${MACHINE})"
 
-# ── 4. Smoke test the ingest path (does not involve Claude Code) ────────────
-# shellcheck disable=SC1090
-source "${ENV_FILE}"
-CODE="$(curl -s -o /dev/null -w '%{http_code}' -m 8 -X POST "${SERVER_URL}/api/hooks/claude" \
-  -H 'Content-Type: application/json' \
-  -H "Authorization: Bearer ${WAR_ROOM_TOKEN}" \
-  -H "X-Machine: ${MACHINE}" \
-  -d '{"hook_event_name":"Ping","session_id":"runbook-smoke-test"}' || true)"
+# ── 5. Smoke test: full path THROUGH the forwarder script ────────────────────
+CODE="$(printf '{"hook_event_name":"Ping","session_id":"runbook-smoke-test"}' \
+  | WAR_ROOM_HOOK_SYNC=1 sh "${HOOK_SCRIPT}" || true)"
 if [ "${CODE}" = "200" ]; then
-  ok "smoke test: server accepted an authenticated POST (200)"
+  ok "smoke test: forwarder POSTed an authenticated event, server said 200"
 elif [ "${CODE}" = "401" ]; then
-  warn "smoke test: 401 — token mismatch with the server's WAR_ROOM_TOKEN"
+  warn "smoke test: 401 — token mismatch with the server's WAR_ROOM_TOKEN (rm ${ENV_FILE} and re-run to re-enter it)"
 else
   warn "smoke test: HTTP ${CODE:-none} — server unreachable? (hooks stay non-blocking either way)"
 fi
@@ -129,10 +182,9 @@ fi
 echo
 echo "=============================================================="
 ok "INSTALL COMPLETE on ${MACHINE}"
-echo "  Restart Claude Code sessions (new shells) to pick up the env + hooks."
+echo "  Restart open Claude Code sessions — hook config loads at session start."
 echo
 echo "  UNDO:"
 echo "    cp ${BACKUP} ${SETTINGS}"
-echo "    sed -i '' '/war-room-token/d' ~/.zshenv"
 echo "    rm -rf ${ENV_DIR}"
 echo "=============================================================="
