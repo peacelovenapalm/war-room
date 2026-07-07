@@ -9,6 +9,7 @@ import { EditActionBar } from './components/EditActionBar.js';
 import { HelpModal } from './components/HelpModal.js';
 import { MigrationNotice } from './components/MigrationNotice.js';
 import { SettingsModal } from './components/SettingsModal.js';
+import { ShiftPanel } from './components/ShiftPanel.js';
 import { Tooltip } from './components/Tooltip.js';
 import { TriagePanel } from './components/TriagePanel.js';
 import { Modal } from './components/ui/Modal.js';
@@ -97,6 +98,7 @@ function App() {
   const [isDebugMode, setIsDebugMode] = useState(false);
   const [alwaysShowOverlay, setAlwaysShowOverlay] = useState(false);
   const [isBriefingOpen, setIsBriefingOpen] = useState(false);
+  const [isShiftOpen, setIsShiftOpen] = useState(false);
   const [isHelpOpen, setIsHelpOpen] = useState(false);
 
   // Help is reachable at all times: `?` toggles, Escape closes. Skip when
@@ -287,6 +289,16 @@ function App() {
 
           {/* TRIAGE incident board (v1): auto-appears when a crisis exists */}
           <TriagePanel officeState={officeState} />
+
+          {/* Night shift (v1 #4): empty office → dimmed canvas + TEXT label */}
+          {agents.length === 0 && subagentCharacters.length === 0 && (
+            <div
+              className="absolute top-40 left-1/2 -translate-x-1/2 z-10 pixel-panel py-4 px-14 text-sm text-text-muted pointer-events-none whitespace-nowrap"
+              data-testid="night-shift-label"
+            >
+              ◐ NIGHT SHIFT — no active sessions
+            </div>
+          )}
         </>
       ) : (
         <DebugView
@@ -367,11 +379,15 @@ function App() {
         workspaceFolders={workspaceFolders}
         isBriefingOpen={isBriefingOpen}
         onToggleBriefing={() => setIsBriefingOpen((v) => !v)}
+        isShiftOpen={isShiftOpen}
+        onToggleShift={() => setIsShiftOpen((v) => !v)}
         isHelpOpen={isHelpOpen}
         onToggleHelp={() => setIsHelpOpen((v) => !v)}
       />
 
       <BriefingPanel isOpen={isBriefingOpen} onClose={() => setIsBriefingOpen(false)} />
+
+      <ShiftPanel isOpen={isShiftOpen} onClose={() => setIsShiftOpen(false)} />
 
       <HelpModal isOpen={isHelpOpen} onClose={() => setIsHelpOpen(false)} />
 

@@ -18,8 +18,10 @@ const REQUIRED_SECTION_IDS = [
   'debris',
   'triage-board',
   'briefing',
+  'shift-report',
   'machines',
   'coworkers',
+  'emergence',
   'data-sources',
 ];
 

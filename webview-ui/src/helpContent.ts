@@ -132,6 +132,23 @@ export const HELP_SECTIONS: HelpSection[] = [
     ],
   },
   {
+    id: 'shift-report',
+    title: 'SHIFT REPORT',
+    intro: undefined,
+    entries: [
+      {
+        glyph: '✦',
+        word: 'SCORECARD',
+        text: 'The Shift button shows today’s numbers from real events: completed turns, tokens spent, crises ignited/resolved with mean time-to-unblock, and todos/gates that moved since the day started. Resets at midnight.',
+      },
+      {
+        glyph: '✦',
+        word: 'EFFICIENCY',
+        text: 'Graded LEAN / STEADY / HEAVY by average output tokens per completed turn — LOWER is always better. Tokens are real money; nothing on this dashboard ever rewards spending more.',
+      },
+    ],
+  },
+  {
     id: 'coworkers',
     title: 'AI COWORKERS (CODEX / GEMINI)',
     intro: undefined,
@@ -145,6 +162,23 @@ export const HELP_SECTIONS: HelpSection[] = [
         glyph: '◆',
         word: 'GEMINI',
         text: 'Gemini CLI sessions wear a DIAMOND badge and a [GEMINI] text label. Gemini logs are sparse, so its presence is heartbeat-level: working when it is actively used, idle after it goes quiet.',
+      },
+    ],
+  },
+  {
+    id: 'emergence',
+    title: 'OFFICE LIFE (EMERGENT RULES)',
+    intro: 'Cheap simple rules that interact — none deeper than a few lines:',
+    entries: [
+      {
+        glyph: '◎',
+        word: 'CROWD',
+        text: 'A desk that has burned to FIRE or ALARM draws a crowd: idle agents bias their wandering toward the oldest fire. A knot of onlookers forming is itself a signal something has been stuck too long.',
+      },
+      {
+        glyph: '◐',
+        word: 'NIGHT SHIFT',
+        text: 'When no sessions are running anywhere, the lights dim and a NIGHT SHIFT label appears. An empty office should look empty.',
       },
     ],
   },

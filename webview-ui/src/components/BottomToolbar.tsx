@@ -15,6 +15,8 @@ interface BottomToolbarProps {
   workspaceFolders: WorkspaceFolder[];
   isBriefingOpen: boolean;
   onToggleBriefing: () => void;
+  isShiftOpen: boolean;
+  onToggleShift: () => void;
   isHelpOpen: boolean;
   onToggleHelp: () => void;
 }
@@ -28,6 +30,8 @@ export function BottomToolbar({
   workspaceFolders,
   isBriefingOpen,
   onToggleBriefing,
+  isShiftOpen,
+  onToggleShift,
   isHelpOpen,
   onToggleHelp,
 }: BottomToolbarProps) {
@@ -141,6 +145,13 @@ export function BottomToolbar({
         title="Today's briefing"
       >
         Briefing
+      </Button>
+      <Button
+        variant={isShiftOpen ? 'active' : 'default'}
+        onClick={onToggleShift}
+        title="Today's shift report"
+      >
+        Shift
       </Button>
       <Button
         variant={isSettingsOpen ? 'active' : 'default'}
