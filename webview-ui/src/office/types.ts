@@ -225,6 +225,10 @@ export interface Character {
    *  needs-input. `since` anchors the smoke → fire → alarm aging. Maintained
    *  by OfficeState.updateCrises. */
   crisis?: { since: number };
+  /** Set when the last poll-state CLEAR was caused by poller silence (stale)
+   *  rather than an observed change — the next crisis resolution must NOT
+   *  celebrate (the session may still be blocked). Consumed by updateCrises. */
+  pollClearStale?: boolean;
   /** Visual state from the previous crisis tick (transition detection). */
   lastVisualState?: string;
 

@@ -147,8 +147,9 @@ export function ShiftPanel({ isOpen, onClose }: ShiftPanelProps) {
               )}
             </div>
             <p className="text-2xs text-text-muted mt-8">
-              Counted from real events since midnight: hook turn-ends, JSONL token usage, poller
-              blocked-episodes, briefing deltas. Lower spend is always the better score.
+              Counted from real events today: hook turn-ends, JSONL token usage, poller
+              blocked-episodes. Todo/gate deltas measure from the day&apos;s first activity. Lower
+              spend is always the better score.
             </p>
           </>
         )}

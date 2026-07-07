@@ -15,8 +15,7 @@ import {
   PET_HIT_HEIGHT,
   WAITING_BUBBLE_DURATION_SEC,
 } from '../../constants.js';
-import type { AgentVisualState } from '../agentState.js';
-import { deriveVisualState } from '../agentState.js';
+import { AgentVisualState, deriveVisualState, getFreshPollState } from '../agentState.js';
 import type { DebrisRecord, ExtinguishEffect } from '../crisis.js';
 import { computeCrisisUpdate, debrisKey, EXTINGUISH_DURATION_MS, FIRE_AT_MS } from '../crisis.js';
 import { getAnimationFrames, getCatalogEntry, getOnStateType } from '../layout/furnitureCatalog.js';
@@ -763,14 +762,23 @@ export class OfficeState {
   }
 
   /** Set/clear poll-derived state (M4 needs-input poller). No state = clear.
-   *  `ageMs` (server-computed) anchors crisis aging: since = now - ageMs. */
-  setAgentPollState(id: number, state?: PollStateValue, waitingFor?: string, ageMs?: number): void {
+   *  `ageMs` (server-computed) anchors crisis aging: since = now - ageMs.
+   *  `stale` marks a clear caused by poller SILENCE — the badge drops but
+   *  the crisis layer must not celebrate a resolution it never observed. */
+  setAgentPollState(
+    id: number,
+    state?: PollStateValue,
+    waitingFor?: string,
+    ageMs?: number,
+    stale?: boolean,
+  ): void {
     const ch = this.characters.get(id);
     if (!ch) return;
     const now = Date.now();
     ch.pollState = state
       ? { state, waitingFor, at: now, since: ageMs !== undefined ? now - ageMs : undefined }
       : undefined;
+    ch.pollClearStale = !state && stale === true;
   }
 
   // ── Crisis & triage layer (v1 mechanic #1) ──────────────────────
@@ -806,7 +814,17 @@ export class OfficeState {
         pollSince: poll?.state === 'blocked' ? poll.since : undefined,
         now,
       });
-      if (update.resolved) this.spawnExtinguish(ch.x, ch.y, now);
+      if (update.resolved) {
+        // Honest feedback rule: celebrate only OBSERVED resolutions. A fire
+        // that "went out" because the poller went silent (server stale-clear
+        // or the client's own TTL expiry) drops quietly — the session may
+        // still be blocked on the other side of the dead telemetry.
+        const clientTtlExpired = poll !== undefined && getFreshPollState(ch, now) === undefined;
+        if (!ch.pollClearStale && !clientTtlExpired) {
+          this.spawnExtinguish(ch.x, ch.y, now);
+        }
+      }
+      if (vState !== AgentVisualState.NEEDS_INPUT) ch.pollClearStale = false;
       ch.crisis = update.crisis;
       if (update.spawnDebris) {
         const key = debrisKey(id, update.spawnDebris);

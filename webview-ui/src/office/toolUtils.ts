@@ -21,9 +21,11 @@ export function extractToolName(status: string): string | null {
   return first || null;
 }
 
-/** Compute a default integer zoom level (device pixels per sprite pixel) */
+/** Compute a default integer zoom level (device pixels per sprite pixel).
+ *  globalThis (not window) so this module loads under the node test project
+ *  too — engine tests import the character FSM, which imports this file. */
 export function defaultZoom(): number {
-  const dpr = window.devicePixelRatio || 1;
+  const dpr = (globalThis as { devicePixelRatio?: number }).devicePixelRatio ?? 1;
   return Math.max(ZOOM_MIN, Math.round(ZOOM_DEFAULT_DPR_FACTOR * dpr));
 }
 

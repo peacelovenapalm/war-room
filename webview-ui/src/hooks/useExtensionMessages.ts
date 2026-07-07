@@ -446,6 +446,7 @@ export function useExtensionMessages(
           state,
           msg.waitingFor as string | undefined,
           msg.ageMs as number | undefined,
+          msg.stale as boolean | undefined,
         );
         if (state === 'blocked' && !wasBlocked) {
           playPermissionSound();
