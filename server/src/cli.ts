@@ -8,6 +8,7 @@
  * Each connecting WebSocket client receives the full state on webviewReady.
  */
 
+import * as os from 'os';
 import * as path from 'path';
 
 import { AgentRuntime } from './agentRuntime.js';
@@ -55,6 +56,18 @@ Options:
 }
 
 // ── Main ──────────────────────────────────────────────────────
+
+/** Resolve this machine's TEXT label: WAR_ROOM_MACHINE env, else short hostname.
+ *  Uppercased, restricted to [A-Z0-9_-], max 32 chars. */
+function resolveMachineLabel(): string {
+  const raw = process.env.WAR_ROOM_MACHINE || os.hostname().split('.')[0] || 'LOCAL';
+  const label = raw
+    .trim()
+    .toUpperCase()
+    .replace(/[^A-Z0-9_-]/g, '-')
+    .slice(0, 32);
+  return label || 'LOCAL';
+}
 
 async function main(): Promise<void> {
   const args = parseArgs(process.argv.slice(2));
@@ -115,6 +128,12 @@ async function main(): Promise<void> {
       }
     };
 
+    // Machine identity + stable ingest token (M2: second machine over Tailscale).
+    // WAR_ROOM_TOKEN makes the bearer token stable across restarts so remote
+    // machines' hook configs keep working; without it the token is random per start.
+    const machineLabel = resolveMachineLabel();
+    const envToken = process.env.WAR_ROOM_TOKEN;
+
     const config = await server.start({
       store,
       runtime,
@@ -124,8 +143,13 @@ async function main(): Promise<void> {
       staticDir,
       assetCache,
       onSetHooksEnabled,
+      token: envToken,
+      machineLabel,
     });
     currentConfig = { port: config.port, token: config.token };
+    console.log(
+      `[Pixel Agents] Machine label: ${machineLabel} | ingest token: ${envToken ? 'from WAR_ROOM_TOKEN env (stable)' : 'random per start'}`,
+    );
 
     // Sync runtime refs with persisted settings BEFORE first scan tick
     runtime.hooksEnabled.current = adapter.getSetting('pixel-agents.hooksEnabled', true);

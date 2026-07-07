@@ -31,11 +31,14 @@ export interface HookEvent {
 /** Callback for session lifecycle events detected via hooks. */
 interface SessionLifecycleCallbacks {
   /** Called when an external session is detected (unknown session_id in SessionStart).
-   *  transcriptPath is undefined for providers without transcripts (OpenCode, Copilot). */
+   *  transcriptPath is undefined for providers without transcripts (OpenCode, Copilot)
+   *  AND for remote machines (transcript lives on the remote host — hooks-only).
+   *  machine is the remote machine's TEXT label, undefined for local sessions. */
   onExternalSessionDetected?: (
     sessionId: string,
     transcriptPath: string | undefined,
     cwd: string,
+    machine?: string,
   ) => void;
   /** Called when /clear is detected via hooks (SessionEnd reason=clear + SessionStart source=clear). */
   onSessionClear?: (
@@ -142,6 +145,10 @@ export class HookEventHandler {
     if (!normalized) return; // unknown / uninteresting event -- silently drop
     const normEvent = normalized.event;
     const eventName = event.hook_event_name; // retained for logs only
+    // Machine identity label injected at the HTTP boundary (httpServer.ts) for
+    // authenticated remote hook events. Present => this event came from another
+    // machine; its transcript_path was already stripped (hooks-only adoption).
+    const machine = typeof event.__machine === 'string' ? event.__machine : undefined;
     // CI / e2e diagnostic: see agentStateStore.ts debugLogBroadcast comment.
     if (process.env['PIXEL_AGENTS_DEBUG_LOG']) {
       try {
@@ -241,6 +248,7 @@ export class HookEventHandler {
           sessionId: event.session_id,
           transcriptPath,
           cwd: cwd ?? '',
+          machine,
         });
       } else {
         if (debug && tracked)
@@ -262,6 +270,27 @@ export class HookEventHandler {
       return;
     }
 
+    // Remote sessions (authenticated hook path) that we have no record of --
+    // e.g. the session was already running when this server started, so we never
+    // saw its SessionStart. Instead of silently dropping, store a pending record
+    // now; the confirmPending block below immediately promotes it to an agent.
+    // Local unknown sessions keep the original behavior (drop/buffer) because the
+    // JSONL scanner is the authority for local discovery.
+    if (
+      machine &&
+      normEvent.kind !== 'sessionEnd' && // don't resurrect a session just to end it
+      this.sessionRouter.resolve(event.session_id) === undefined &&
+      !this.sessionRouter.hasPending(event.session_id) &&
+      ![...this.agents.values()].some((a) => a.sessionId === event.session_id)
+    ) {
+      this.sessionRouter.storePending(event.session_id, {
+        sessionId: event.session_id,
+        transcriptPath: undefined,
+        cwd: typeof event.cwd === 'string' ? event.cwd : '',
+        machine,
+      });
+    }
+
     // If a confirmation event arrives for a pending external session, create the agent first
     const pending = this.sessionRouter.confirmPending(event.session_id);
     if (pending) {
@@ -273,6 +302,7 @@ export class HookEventHandler {
         pending.sessionId,
         pending.transcriptPath,
         pending.cwd,
+        pending.machine,
       );
       // Re-process this event now that the agent exists
       this.handleEvent(_providerId, event);

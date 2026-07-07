@@ -812,6 +812,7 @@ export function adoptExternalSessionFromHook(
 
   persistAgents: () => void,
   onAgentCreated?: (agent: AgentState) => void,
+  machine?: string,
 ): void {
   if (transcriptPath) {
     // File-based provider (Claude, Codex): adopt with JSONL file watching
@@ -850,6 +851,7 @@ export function adoptExternalSessionFromHook(
     if (adoptedAgent) {
       adoptedAgent.sessionId = sessionId;
       adoptedAgent.hookDelivered = true;
+      if (machine) adoptedAgent.machine = machine;
       onAgentCreated?.(adoptedAgent);
     }
   } else {
@@ -876,6 +878,7 @@ export function adoptExternalSessionFromHook(
       hadToolsInTurn: false,
       hookDelivered: true,
       hooksOnly: true,
+      machine,
       lastDataAt: Date.now(),
       linesProcessed: 0,
       seenUnknownRecordTypes: new Set(),
@@ -887,7 +890,7 @@ export function adoptExternalSessionFromHook(
     persistAgents();
     if (debug) {
       console.log(
-        `[Pixel Agents] Hook: Agent ${id} - detected hooks-only external session${folderName ? ` (${folderName})` : ''}`,
+        `[Pixel Agents] Hook: Agent ${id} - detected hooks-only external session${folderName ? ` (${folderName})` : ''}${machine ? ` [machine=${machine}]` : ''}`,
       );
     }
     onAgentCreated?.(agent);

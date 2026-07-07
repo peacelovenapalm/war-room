@@ -30,6 +30,9 @@ export interface HttpServerOptions {
   staticDir?: string;
   /** Cached assets loaded at startup (standalone only) */
   assetCache?: AssetCache;
+  /** TEXT label identifying the machine this server runs on (e.g. "MACBOOK").
+   *  Local agents inherit it; remote hook events carry their own via X-Machine. */
+  machineLabel?: string;
   /** Callback when a hook event is received */
   onHookEvent?: (providerId: string, event: Record<string, unknown>) => void;
   /** Invoked when setHooksEnabled is toggled via WebSocket. Standalone installs/uninstalls hooks here. */
@@ -120,6 +123,18 @@ function registerHookRoute(app: FastifyInstance, options: HttpServerOptions): vo
       const { providerId } = request.params;
       const event = request.body;
 
+      // Machine identity: remote machines tag their hook events with an
+      // X-Machine header (installed by the hooks runbook). A label that
+      // differs from this server's own label marks the event as REMOTE:
+      //   - strip transcript_path (it points at a file on the remote machine;
+      //     watching it here would fail) so adoption takes the hooks-only path
+      //   - carry the label through on __machine for agent tagging
+      const machine = sanitizeMachineLabel(request.headers['x-machine']);
+      if (machine && machine !== options.machineLabel) {
+        delete event.transcript_path;
+        event.__machine = machine;
+      }
+
       if (event.session_id && event.hook_event_name) {
         options.onHookEvent?.(providerId, event);
       }
@@ -127,6 +142,14 @@ function registerHookRoute(app: FastifyInstance, options: HttpServerOptions): vo
       reply.send('ok');
     },
   );
+}
+
+/** Normalize an X-Machine header value to an uppercase label, or undefined if invalid. */
+export function sanitizeMachineLabel(raw: unknown): string | undefined {
+  const value = Array.isArray(raw) ? raw[0] : raw;
+  if (typeof value !== 'string') return undefined;
+  const label = value.trim().toUpperCase();
+  return /^[A-Z0-9_-]{1,32}$/.test(label) ? label : undefined;
 }
 
 // ── WebSocket ──────────────────────────────────────────────────
@@ -161,6 +184,7 @@ function registerWebSocketRoute(app: FastifyInstance, options: HttpServerOptions
         parentAgentId: agent.leadAgentId,
         teamName: agent.teamName,
         hooksOnly: agent.hooksOnly || undefined,
+        machine: agent.machine ?? options.machineLabel,
       });
     };
 
@@ -188,6 +212,7 @@ function registerWebSocketRoute(app: FastifyInstance, options: HttpServerOptions
           runtime: options.runtime,
           cache: options.assetCache ?? null,
           onSetHooksEnabled: options.onSetHooksEnabled,
+          machineLabel: options.machineLabel,
         });
       } catch {
         // Malformed JSON, ignore

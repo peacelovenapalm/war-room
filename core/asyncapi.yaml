@@ -175,6 +175,9 @@ components:
           type: string
         isExternal:
           type: boolean
+        machine:
+          type: string
+          description: TEXT label of the machine this agent runs on (e.g. "MACBOOK", "NEXUS").
 
     AgentClosed:
       description: An agent has been removed from the office.
@@ -227,6 +230,11 @@ components:
           description: Map of agent ID (string) to external flag.
           additionalProperties:
             type: boolean
+        machines:
+          type: object
+          description: Map of agent ID (string) to machine TEXT label (e.g. "MACBOOK", "NEXUS").
+          additionalProperties:
+            type: string
 
     AgentStatus:
       description: Active vs waiting state for an agent (drives character animation).

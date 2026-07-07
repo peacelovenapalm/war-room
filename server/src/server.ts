@@ -70,6 +70,10 @@ export class PixelAgentsServer {
     staticDir?: string;
     assetCache?: AssetCache;
     onSetHooksEnabled?: SetHooksEnabledSideEffect;
+    /** Stable bearer token (e.g. from WAR_ROOM_TOKEN env). Default: random UUID per start. */
+    token?: string;
+    /** TEXT label identifying this machine (e.g. "NEXUS"). */
+    machineLabel?: string;
   }): Promise<ServerConfig> {
     // Check if another instance already has a server running
     const existing = this.readServerJson();
@@ -82,8 +86,9 @@ export class PixelAgentsServer {
       return existing;
     }
 
-    // Start our own server
-    const token = crypto.randomUUID();
+    // Start our own server. A caller-supplied token (WAR_ROOM_TOKEN) stays stable
+    // across restarts so remote machines' hook configs don't need re-provisioning.
+    const token = options?.token || crypto.randomUUID();
     const store = options?.store;
 
     const { app, port } = await createHttpServer({
@@ -95,6 +100,7 @@ export class PixelAgentsServer {
       runtime: options?.runtime,
       staticDir: options?.staticDir,
       assetCache: options?.assetCache,
+      machineLabel: options?.machineLabel,
       onHookEvent: (providerId, event) => this.callback?.(providerId, event),
       onSetHooksEnabled: options?.onSetHooksEnabled,
     });

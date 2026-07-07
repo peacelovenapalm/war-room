@@ -32,6 +32,9 @@ export interface AgentState {
   hookDelivered: boolean;
   /** True when agent has no transcript file (provider doesn't use JSONL). All state from hooks. */
   hooksOnly?: boolean;
+  /** Machine identity label (e.g. "MACBOOK", "MINI"). Set for remote agents ingested
+   *  via the authenticated hook path; absent = local machine (server fills its own label). */
+  machine?: string;
   /** Provider that created this agent (defaults to 'claude') */
   providerId?: string;
   /** Set when SessionEnd(reason=clear) fires; cleared when SessionStart(source=clear) reassigns */

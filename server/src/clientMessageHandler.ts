@@ -26,6 +26,8 @@ export interface ClientMessageContext {
   cache: AssetCache | null;
   /** Install/uninstall hooks side effect. Needs server url+token known only to cli.ts. */
   onSetHooksEnabled?: SetHooksEnabledSideEffect;
+  /** TEXT label of the local machine; default machine identity for local agents. */
+  machineLabel?: string;
 }
 
 // ── Setting key constants (mirror adapters/vscode/constants.ts) ──
@@ -202,6 +204,7 @@ function handleWebviewReady(send: WsSend, ctx: ClientMessageContext): void {
   const agentIds: number[] = [];
   const folderNames: Record<number, string> = {};
   const externalAgents: Record<number, boolean> = {};
+  const machines: Record<number, string> = {};
   for (const [id, agent] of store) {
     agentIds.push(id);
     if (agent.folderName) {
@@ -209,6 +212,10 @@ function handleWebviewReady(send: WsSend, ctx: ClientMessageContext): void {
     }
     if (agent.isExternal) {
       externalAgents[id] = true;
+    }
+    const machine = agent.machine ?? ctx.machineLabel;
+    if (machine) {
+      machines[id] = machine;
     }
   }
   const seats = adapter?.loadSeats() ?? {};
@@ -218,5 +225,6 @@ function handleWebviewReady(send: WsSend, ctx: ClientMessageContext): void {
     agentMeta: seats,
     folderNames,
     externalAgents,
+    machines,
   });
 }
