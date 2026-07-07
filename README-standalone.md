@@ -141,6 +141,26 @@ labels, coworker badges, and where the data comes from.
 `webview-ui/test/helpContent.test.ts` fails if a new state or stage ships
 without a help entry.
 
+## Shift report (v1 mechanic #2)
+
+The **Shift** toolbar button opens today's scorecard, computed server-side
+from real events since midnight (`GET /api/shift`, unauthenticated like
+`/api/briefing`): completed turns (hook Stop events), token spend (JSONL
+usage records), crisis throughput with mean/worst time-to-unblock
+(poll-state blocked episodes), and todos closed / gates advanced vs the
+day's first briefing snapshot. Efficiency is average output tokens per
+completed turn, graded **LEAN / STEADY / HEAVY — lower is always better**
+(tokens are money; nothing rewards volume). State survives restarts via
+`~/.pixel-agents/shift-stats.json`. In-dashboard only; push delivery is an
+open design question.
+
+## Emergence rules (v1 mechanic #4)
+
+- **Crowd:** idle agents bias their wandering toward the OLDEST desk burning
+  at FIRE stage or worse — a knot of onlookers forming is itself a signal.
+- **Night shift:** zero sessions anywhere → the office dims and a
+  `◐ NIGHT SHIFT` text label appears.
+
 ## Coworker adapter — Codex / Gemini (v1 mechanic #6a)
 
 Codex and Gemini CLI sessions render as coworkers: a distinct badge

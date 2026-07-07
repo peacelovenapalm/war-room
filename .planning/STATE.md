@@ -563,3 +563,32 @@ entry — "a mechanic isn't done until its help section exists" is CI-enforced.
 3. **Gated on Greg:** brief's 3 open questions (progression storage, shift
    delivery, sound); MINI hooks + poller runbooks; NEXUS redeploy to take v1
    live; push decision for both branches.
+
+### Iteration 2 (2026-07-07, same night) — mechanics #2 + #4 ✓ BUILT
+
+- **Shift report (mechanic #2, in-dashboard only):** `GET /api/shift` +
+  Shift toolbar button. Day-scoped scorecard from REAL events: completed
+  turns (hook Stop), token deltas (JSONL usage), blocked episodes with
+  mean/worst time-to-unblock (poll transitions incl. clears, sweep, agent
+  removal — an episode leak found and fixed same session), todos/gates
+  deltas vs the day's first briefing snapshot. Efficiency = avg OUTPUT
+  tokens per completed turn graded LEAN/STEADY/HEAVY — LOWER is better
+  (no-dark-patterns guardrail). Survives restarts
+  (~/.pixel-agents/shift-stats.json). Push delivery NOT built (open
+  question #1). Live-verified: sim Stop events + blocked→resolved episodes
+  counted correctly (3 turns, 2 crises, 2.1 s mean unblock).
+- **Emergence (mechanic #4, two cheap interacting rules):** idle wanderers
+  bias toward the OLDEST ≥FIRE desk (crowd forms at stuck work — RNG-mocked
+  unit test); empty office dims + "◐ NIGHT SHIFT" text label (evidence:
+  v1-night-shift.png). Crowd rule not visually soaked (probabilistic —
+  verify during M5 soak).
+- Help sections added for both (registry test enforces); evidence:
+  v1-shift-report.png, v1-night-shift.png.
+- Gates: server 245/245 (+7 shiftStats), webview 68/68 (+2 crowd rule),
+  bin 20/20, lint + tsc clean.
+- **Brief scorecard after iteration 2:** principles #2 (multi-crisis) and
+  #7 (feedback loops) fully served; #1 (decisions) via triage ordering;
+  #4 (emergence) starter pair; #3 progression + #5 expression GATED on
+  Greg's open questions; #6 supplied by real life. Everything buildable
+  without Greg's input is built — remaining scope needs his answers,
+  the MINI/poller runbooks, and a NEXUS redeploy.
