@@ -35,6 +35,27 @@ loopback only — remote/tailnet exposure is a separate, gated milestone (M2).
   over the existing WebSocket event plane at `ws://127.0.0.1:<port>/ws`.
 - Health check: `GET /api/health` → `{"status":"ok",...}`.
 
+## Multi-machine ingest (M2)
+
+Remote machines ship native Claude Code `type:"http"` hook events to
+`POST /api/hooks/claude` on the existing event plane (no new service):
+
+- **Auth:** `Authorization: Bearer $WAR_ROOM_TOKEN`. Set `WAR_ROOM_TOKEN`
+  in the server env to pin a stable token (otherwise it is random per
+  start and remote hooks break on restart).
+- **Machine identity:** requests carry an `X-Machine: <LABEL>` header
+  (e.g. `MACBOOK`, `MINI`). The label renders as TEXT in the UI
+  (`[MINI]` line in the agent overlay — shape + text, never color-only).
+  Set `WAR_ROOM_MACHINE` in the server env to label local agents
+  (default: hostname).
+- **Remote sessions are hooks-only:** their JSONL transcript lives on the
+  remote machine, so `transcript_path` is stripped at ingress and the
+  agent renders from hook events alone (label + state; tool detail comes
+  from `PreToolUse` payloads). This is the accepted v0 limitation.
+- Deployment to NEXUS (Docker + Caddy on the tailnet listener) and hook
+  installation on the Macs are **gated runbooks** in `.planning/runbooks/`
+  — human-run only.
+
 ## Config guard (do not undo)
 
 `~/.pixel-agents/config.json` must keep `standalone.hooksEnabled: false`
