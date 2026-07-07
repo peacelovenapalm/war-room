@@ -227,4 +227,17 @@ function handleWebviewReady(send: WsSend, ctx: ClientMessageContext): void {
     externalAgents,
     machines,
   });
+
+  // 7. Replay live poll states (M4) so a page refresh keeps NEEDS INPUT badges
+  // instead of waiting up to a full poller tick for the next broadcast.
+  for (const [id, agent] of store) {
+    if (agent.pollState) {
+      send({
+        type: 'agentPollState',
+        id,
+        state: agent.pollState.state,
+        waitingFor: agent.pollState.waitingFor,
+      });
+    }
+  }
 }

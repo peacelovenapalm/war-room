@@ -19,6 +19,7 @@ export type ServerMessage =
   | AgentToolsClear
   | AgentToolPermission
   | AgentToolPermissionClear
+  | AgentPollState
   | SubagentToolStart
   | SubagentToolDone
   | SubagentClear
@@ -134,6 +135,15 @@ export interface AgentToolPermissionClear {
   type: 'agentToolPermissionClear';
   id: number;
 }
+
+export interface AgentPollState {
+  type: 'agentPollState';
+  id: number;
+  state?: AgentPollStateValue;
+  waitingFor?: string;
+}
+
+export type AgentPollStateValue = 'working' | 'blocked' | 'done' | 'failed' | 'stopped';
 
 export interface SubagentToolStart {
   type: 'subagentToolStart';

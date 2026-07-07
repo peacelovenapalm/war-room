@@ -10,6 +10,7 @@ import type { AgentStateStore } from './agentStateStore.js';
 import type { AssetCache, SetHooksEnabledSideEffect } from './clientMessageHandler.js';
 import { handleClientMessage } from './clientMessageHandler.js';
 import { HOOK_API_PREFIX, MAX_HOOK_BODY_SIZE } from './constants.js';
+import { applyPollStates, parsePollBody, startPollStateSweep } from './pollStateHandler.js';
 import type { AgentState } from './types.js';
 
 /** Options for creating the HTTP + WebSocket server. */
@@ -78,6 +79,7 @@ export async function createHttpServer(options: HttpServerOptions): Promise<Http
 
   registerHealthRoute(app);
   registerHookRoute(app, options);
+  registerPollRoute(app, options);
   registerWebSocketRoute(app, options);
 
   // ── Listen ──────────────────────────────────────────────────
@@ -140,6 +142,41 @@ function registerHookRoute(app: FastifyInstance, options: HttpServerOptions): vo
       }
 
       reply.send('ok');
+    },
+  );
+}
+
+// ── Needs-input poll ingest (M4) ───────────────────────────────
+
+/**
+ * POST /api/agents/poll — authed ingest for the per-machine needs-input
+ * poller (bin/needs-input-poller.mjs). Body: { agents: [normalized entries] }.
+ * The X-Machine label scopes matching AND clearing to that machine's agents.
+ */
+function registerPollRoute(app: FastifyInstance, options: HttpServerOptions): void {
+  // Staleness sweep lives with the route: a dead poller must not leave a
+  // permanent NEEDS INPUT badge on screen.
+  const sweepTimer = startPollStateSweep(options.store);
+  app.addHook('onClose', () => clearInterval(sweepTimer));
+
+  app.post<{ Body: Record<string, unknown> }>(
+    '/api/agents/poll',
+    { preHandler: bearerAuth(options.token) },
+    async (request, reply) => {
+      const machine =
+        sanitizeMachineLabel(request.headers['x-machine']) ?? options.machineLabel ?? 'LOCAL';
+      const entries = parsePollBody(request.body);
+      if (entries === null) {
+        reply.code(400).send({ error: 'expected body { agents: [...] }' });
+        return;
+      }
+      const result = applyPollStates(options.store, machine, options.machineLabel, entries);
+      if (!options.embedded && (result.matched > 0 || result.cleared > 0)) {
+        console.log(
+          `[Pixel Agents] Poll: machine=${machine} entries=${entries.length} matched=${result.matched} cleared=${result.cleared}`,
+        );
+      }
+      reply.send(result);
     },
   );
 }

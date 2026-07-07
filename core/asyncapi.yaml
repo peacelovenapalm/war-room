@@ -91,6 +91,7 @@ components:
         - $ref: '#/components/schemas/AgentToolsClear'
         - $ref: '#/components/schemas/AgentToolPermission'
         - $ref: '#/components/schemas/AgentToolPermissionClear'
+        - $ref: '#/components/schemas/AgentPollState'
         # Sub-agent activity
         - $ref: '#/components/schemas/SubagentToolStart'
         - $ref: '#/components/schemas/SubagentToolDone'
@@ -327,6 +328,35 @@ components:
           const: agentToolPermissionClear
         id:
           type: integer
+
+    AgentPollState:
+      description: >-
+        Session state reported by the per-machine needs-input poller
+        (`claude agents --json`, research preview surface). Absent `state`
+        means the poll state was cleared (client falls back to local
+        JSONL/hook signals). `blocked` renders as the loudest ⚠ NEEDS INPUT
+        badge — SHAPE + TEXT label, color as reinforcement only (colorblind
+        rule).
+      type: object
+      additionalProperties: false
+      required: [type, id]
+      properties:
+        type:
+          const: agentPollState
+        id:
+          type: integer
+        state:
+          $ref: '#/components/schemas/AgentPollStateValue'
+        waitingFor:
+          type: string
+          description: >-
+            What the blocked agent is waiting on (verbatim from the CLI).
+            Rendered as TEXT detail under the NEEDS INPUT badge.
+
+    AgentPollStateValue:
+      description: Agent session state from `claude agents --json`.
+      type: string
+      enum: [working, blocked, done, failed, stopped]
 
     SubagentToolStart:
       description: Sub-agent (e.g. Task) started a tool.

@@ -1,5 +1,9 @@
 import type * as vscode from 'vscode';
 
+/** Agent session states surfaced by `claude agents --json` (research preview). */
+export const POLL_STATE_VALUES = ['working', 'blocked', 'done', 'failed', 'stopped'] as const;
+export type PollStateValue = (typeof POLL_STATE_VALUES)[number];
+
 export interface AgentState {
   id: number;
   sessionId: string;
@@ -37,6 +41,10 @@ export interface AgentState {
   machine?: string;
   /** Provider that created this agent (defaults to 'claude') */
   providerId?: string;
+  /** Latest state from the per-machine needs-input poller (`claude agents --json`).
+   *  `at` = receipt time (ms epoch) for staleness sweeps. Cleared when the poller
+   *  stops reporting the session or goes silent past the TTL. */
+  pollState?: { state: PollStateValue; waitingFor?: string; at: number };
   /** Set when SessionEnd(reason=clear) fires; cleared when SessionStart(source=clear) reassigns */
   pendingClear?: boolean;
   /** Hook-generated tool ID for PreToolUse/PostToolUse correlation */
