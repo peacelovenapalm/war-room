@@ -6,6 +6,7 @@ import { BriefingPanel } from './components/BriefingPanel.js';
 import { ChangelogModal } from './components/ChangelogModal.js';
 import { DebugView } from './components/DebugView.js';
 import { EditActionBar } from './components/EditActionBar.js';
+import { HelpModal } from './components/HelpModal.js';
 import { MigrationNotice } from './components/MigrationNotice.js';
 import { SettingsModal } from './components/SettingsModal.js';
 import { Tooltip } from './components/Tooltip.js';
@@ -96,6 +97,24 @@ function App() {
   const [isDebugMode, setIsDebugMode] = useState(false);
   const [alwaysShowOverlay, setAlwaysShowOverlay] = useState(false);
   const [isBriefingOpen, setIsBriefingOpen] = useState(false);
+  const [isHelpOpen, setIsHelpOpen] = useState(false);
+
+  // Help is reachable at all times: `?` toggles, Escape closes. Skip when
+  // typing in an input/textarea (none today, but cheap insurance).
+  useEffect(() => {
+    const onKeyDown = (e: KeyboardEvent) => {
+      const target = e.target as HTMLElement | null;
+      if (target && (target.tagName === 'INPUT' || target.tagName === 'TEXTAREA')) return;
+      if (e.key === '?') {
+        e.preventDefault();
+        setIsHelpOpen((v) => !v);
+      } else if (e.key === 'Escape') {
+        setIsHelpOpen(false);
+      }
+    };
+    window.addEventListener('keydown', onKeyDown);
+    return () => window.removeEventListener('keydown', onKeyDown);
+  }, []);
 
   const currentMajorMinor = toMajorMinor(extensionVersion);
 
@@ -348,9 +367,13 @@ function App() {
         workspaceFolders={workspaceFolders}
         isBriefingOpen={isBriefingOpen}
         onToggleBriefing={() => setIsBriefingOpen((v) => !v)}
+        isHelpOpen={isHelpOpen}
+        onToggleHelp={() => setIsHelpOpen((v) => !v)}
       />
 
       <BriefingPanel isOpen={isBriefingOpen} onClose={() => setIsBriefingOpen(false)} />
+
+      <HelpModal isOpen={isHelpOpen} onClose={() => setIsHelpOpen(false)} />
 
       <VersionIndicator
         currentVersion={extensionVersion}

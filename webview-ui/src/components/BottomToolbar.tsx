@@ -15,6 +15,8 @@ interface BottomToolbarProps {
   workspaceFolders: WorkspaceFolder[];
   isBriefingOpen: boolean;
   onToggleBriefing: () => void;
+  isHelpOpen: boolean;
+  onToggleHelp: () => void;
 }
 
 export function BottomToolbar({
@@ -26,6 +28,8 @@ export function BottomToolbar({
   workspaceFolders,
   isBriefingOpen,
   onToggleBriefing,
+  isHelpOpen,
+  onToggleHelp,
 }: BottomToolbarProps) {
   const [isFolderPickerOpen, setIsFolderPickerOpen] = useState(false);
   const [isBypassMenuOpen, setIsBypassMenuOpen] = useState(false);
@@ -144,6 +148,10 @@ export function BottomToolbar({
         title="Settings"
       >
         Settings
+      </Button>
+      {/* Word button, not icon-only (colorblind/help hard rule); ? also opens it */}
+      <Button variant={isHelpOpen ? 'active' : 'default'} onClick={onToggleHelp} title="Help (?)">
+        Help
       </Button>
     </div>
   );
