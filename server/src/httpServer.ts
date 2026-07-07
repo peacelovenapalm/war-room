@@ -7,6 +7,7 @@ import Fastify from 'fastify';
 
 import type { AgentRuntime } from './agentRuntime.js';
 import type { AgentStateStore } from './agentStateStore.js';
+import { getBriefing } from './briefingProvider.js';
 import type { AssetCache, SetHooksEnabledSideEffect } from './clientMessageHandler.js';
 import { handleClientMessage } from './clientMessageHandler.js';
 import { HOOK_API_PREFIX, MAX_HOOK_BODY_SIZE } from './constants.js';
@@ -78,6 +79,7 @@ export async function createHttpServer(options: HttpServerOptions): Promise<Http
   // ── Routes ──────────────────────────────────────────────────
 
   registerHealthRoute(app);
+  registerBriefingRoute(app);
   registerHookRoute(app, options);
   registerPollRoute(app, options);
   registerWebSocketRoute(app, options);
@@ -99,6 +101,13 @@ function registerHealthRoute(app: FastifyInstance): void {
     uptime: Math.floor((Date.now() - startTime) / 1000),
     pid: process.pid,
   }));
+}
+
+// ── Briefing (post-v0) ─────────────────────────────────────────
+
+/** GET /api/briefing -- unauthenticated, like /api/health; the server is tailnet-only. */
+function registerBriefingRoute(app: FastifyInstance): void {
+  app.get('/api/briefing', async () => getBriefing());
 }
 
 // ── Hook Events ────────────────────────────────────────────────
