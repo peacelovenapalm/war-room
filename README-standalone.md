@@ -89,9 +89,12 @@ WAR_ROOM_TOKEN=<token> node bin/needs-input-poller.mjs \
 
 ## Config guard (do not undo)
 
-`~/.pixel-agents/config.json` must keep `standalone.hooksEnabled: false`
-until hook wiring ships as a human-run runbook (M2). With hooks disabled
-the server never writes to `~/.claude/settings.json`.
+`hooksEnabled` now **defaults to `false`** in this fork (upstream default
+was `true`): a fresh `node dist/cli.js` on a new machine never writes hook
+entries into `~/.claude/settings.json`. Hook wiring is always a human-run
+runbook (`.planning/runbooks/macbook-hooks-install.sh`). The pre-seeded
+`~/.pixel-agents/config.json` guard (`standalone.hooksEnabled: false`)
+stays as belt-and-suspenders — do not flip it on outside a runbook.
 
 ## VS Code extension (quarantined)
 

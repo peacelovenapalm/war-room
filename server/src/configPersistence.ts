@@ -39,7 +39,13 @@ const DEFAULT_ADAPTER_SETTINGS: AdapterSettings = {
   lastSeenVersion: '',
   alwaysShowLabels: false,
   watchAllSessions: false,
-  hooksEnabled: true,
+  // War Room gate: hook installation writes into the user's live
+  // ~/.claude/settings.json — that is ALWAYS a human-run runbook
+  // (.planning/runbooks/macbook-hooks-install.sh), never an implicit
+  // side effect of starting the server on a fresh machine. Upstream
+  // defaulted this to true; the fork defaults it to false. Opt back in
+  // per machine via config.json standalone.hooksEnabled or the UI toggle.
+  hooksEnabled: false,
   hooksInfoShown: false,
 };
 
