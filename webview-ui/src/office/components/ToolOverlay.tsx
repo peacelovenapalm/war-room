@@ -202,7 +202,7 @@ export function ToolOverlay({
         const teamRoleLabel = ch.isTeamLead ? 'LEAD' : ch.agentName || null;
         const totalTokens = ch.inputTokens + ch.outputTokens;
         const tokenRatio = totalTokens / MAX_CONTEXT_TOKENS;
-        const hasExtraLines = !!(ch.folderName || teamRoleLabel);
+        const hasExtraLines = !!(ch.folderName || teamRoleLabel || ch.machine);
 
         return (
           <div
@@ -247,9 +247,16 @@ export function ToolOverlay({
                 >
                   {activityText}
                 </span>
-                {ch.folderName && (
-                  <span className="text-2xs leading-none overflow-hidden text-ellipsis block">
-                    {ch.folderName}
+                {(ch.machine || ch.folderName) && (
+                  <span
+                    className="text-2xs leading-none overflow-hidden text-ellipsis block"
+                    data-testid="agent-machine-label"
+                  >
+                    {/* Machine identity as TEXT (colorblind rule: never color-only).
+                        Bracketed label distinguishes machine from folder name. */}
+                    {ch.machine ? `[${ch.machine}]` : ''}
+                    {ch.machine && ch.folderName ? ' ' : ''}
+                    {ch.folderName ?? ''}
                   </span>
                 )}
               </div>

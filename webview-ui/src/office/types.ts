@@ -188,6 +188,9 @@ export interface Character {
   matrixEffectSeeds: number[];
   /** Workspace folder name (only set for multi-root workspaces) */
   folderName?: string;
+  /** Machine identity TEXT label (e.g. "MACBOOK", "NEXUS"). Rendered in the overlay
+   *  so cross-machine sessions are distinguishable by text, never color alone. */
+  machine?: string;
 
   // -- Agent Teams --
   /** Team name this agent belongs to */
