@@ -50,8 +50,13 @@ rendering work, and tell Greg the kill criterion fired.
 - The JSONL poller always runs and is inherently LOCAL. Remote machines send
   hook events only → remote agents will lack tool content in v0. Accept it;
   a per-machine tailer/forwarder is parking-lot.
-- Claude Code `type:"http"` hooks: non-2xx/timeout = non-blocking, fire and
-  forget (safe). `allowedEnvVars` is required for bearer-token interpolation.
+- Claude Code `type:"http"` hooks are UNUSABLE here (verified the hard way
+  2026-07-07): Claude Code blocks any http hook whose URL resolves to a
+  private/link-local address — Tailscale 100.x included — so every hook
+  firing errors on every tool call in every session. Remote delivery must be
+  a `type:"command"` hook running `~/.war-room/hook.sh`, which sources
+  `~/.war-room/env` and curls the server in a detached background job
+  (fire-and-forget, always exit 0 — a dead server never blocks Claude).
 - `claude agents --json` is a research-preview surface (v2.1.139+): fields
   `id, state ∈ {working, blocked, done, failed, stopped}, waitingFor, cwd,
 pid, startedAt`. Wrap it in a normalizer; expect churn.
@@ -70,8 +75,10 @@ pid, startedAt`. Wrap it in a normalizer; expect churn.
       `node`/`npx` start on macOS, no VS Code, no Electron, no Tauri.
 - [ ] **M2 Second machine over Tailscale.** Server runs on NEXUS (Docker +
       Caddy route = GATED runbook). MacBook Claude Code ships events via
-      native `type:"http"` hooks to it. Acceptance: sessions from two
-      machines visible in one browser view, machine identity labeled in text.
+      `type:"command"` hooks running the `~/.war-room/hook.sh` forwarder
+      (http hooks are blocked for private IPs — see Known traps). Acceptance:
+      sessions from two machines visible in one browser view, machine
+      identity labeled in text.
 - [ ] **M3 Colorblind pass.** Shape + text label for every state; per-agent
       name tags; needs-input as a distinct SHAPE (e.g. ⚠ badge + "NEEDS
       INPUT" text), not a tint. Acceptance: grayscale screenshot of the

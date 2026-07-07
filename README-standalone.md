@@ -37,8 +37,16 @@ loopback only — remote/tailnet exposure is a separate, gated milestone (M2).
 
 ## Multi-machine ingest (M2)
 
-Remote machines ship native Claude Code `type:"http"` hook events to
-`POST /api/hooks/claude` on the existing event plane (no new service):
+Remote machines ship Claude Code hook events to `POST /api/hooks/claude`
+on the existing event plane (no new service). Delivery is a
+`type:"command"` hook running the `~/.war-room/hook.sh` forwarder, which
+sources `~/.war-room/env` (token, server URL, machine label) and curls
+the server in a detached background job — always exits 0, so a dead
+server never blocks Claude Code. Native `type:"http"` hooks CANNOT be
+used: Claude Code blocks http hooks whose URL resolves to a
+private/link-local address, which includes every Tailscale 100.x IP
+(learned 2026-07-07 — the http-hook install broke every session on the
+machine).
 
 - **Auth:** `Authorization: Bearer $WAR_ROOM_TOKEN`. Set `WAR_ROOM_TOKEN`
   in the server env to pin a stable token (otherwise it is random per

@@ -101,3 +101,17 @@ green. Verify by exercising with simulated crises, screenshot evidence to
 actions → runbooks only. Redeploy to NEXUS is Greg re-running
 .planning/runbooks/nexus-war-room-deploy.sh — never deploy yourself.
 ```
+
+## 8 · ADDENDUM 2026-07-07 (later) — hooks incident + rework
+
+§6 step 1 was run and BROKE Claude Code on the MacBook: Claude Code blocks
+`type:"http"` hooks whose URL resolves to a private IP (Tailscale 100.x), so
+all 14 installed hooks errored on every tool call in every session. Cleaned
+up same day (http entries stripped from `~/.claude/settings.json`; backup
+`~/.claude/settings.json.bak-war-room-2026-07-07`).
+
+The runbook is REWORKED to `type:"command"` hooks running a
+`~/.war-room/hook.sh` forwarder (backgrounded curl, always exit 0, no
+`.zshenv` hack) and sandbox-verified. §6 step 1 is again safe to run —
+same command, new design. Details: STATE.md
+"2026-07-07 (later) — INCIDENT" section.

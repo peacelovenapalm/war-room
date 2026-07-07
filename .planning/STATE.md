@@ -380,13 +380,12 @@ build + start + curl + headless screenshot
   `.planning/runbooks/macbook-hooks-install.sh` (chmod +x, backup-first,
   inline undo, parameterized by machine name — same script for both Macs):
   `bash .planning/runbooks/macbook-hooks-install.sh MACBOOK` (then `MINI` on
-  the Mini). Installs native `type:"http"` hooks with
-  `Authorization: Bearer $WAR_ROOM_TOKEN` + `X-Machine`, `allowedEnvVars:
-["WAR_ROOM_TOKEN"]`, and ends with an authenticated smoke POST.
-  ⚠ Verify on first run: `allowedEnvVars` is written per hook entry; if the
-  installed Claude Code version expects it at hooks-top-level, move it (the
-  runbook header documents this; failures are fire-and-forget, check the
-  server log for 401s).
+  the Mini). REWORKED 2026-07-07 (see the incident section below): installs
+  `type:"command"` hooks running the `~/.war-room/hook.sh` forwarder
+  (sources `~/.war-room/env` for token/URL/machine, backgrounds a curl,
+  always exits 0), cleans up any legacy http entries + the legacy
+  `~/.zshenv` token line, and ends with a smoke POST through the forwarder
+  itself.
 - ✗ **BLOCKED — poller launchd install NOT RUN** (M4; per machine, after the
   hooks runbook stored the token). `.planning/runbooks/install-poller-launchd.sh`
   (chmod +x, confirm prompt, plist backup, inline undo):
@@ -430,3 +429,37 @@ build + start + curl + headless screenshot
   seed: `.planning/GAMIFICATION-BRIEF.md` (crisis/triage layer → shift-report
   scorecard → real-milestone progression → emergence → expression; hard
   guardrails carried over). Read it FIRST before building v1.
+
+---
+
+## 2026-07-07 (later) — INCIDENT: http hooks broke Claude Code; design reworked
+
+- ✗→✓ **Incident:** Greg ran the http-hook version of
+  `macbook-hooks-install.sh MACBOOK`. Every Claude Code session on the
+  MacBook then errored on every tool call: Claude Code hard-blocks
+  `type:"http"` hooks whose URL resolves to a private/link-local address
+  ("HTTP hook blocked: nexus.tail722a2e.ts.net resolves to 100.77.128.49"),
+  and the runbook had installed that hook on 14 events. Recovery: all 14
+  http entries stripped from `~/.claude/settings.json` (backup:
+  `~/.claude/settings.json.bak-war-room-2026-07-07`); GSD/command hooks
+  untouched. The 2026-07-04 "http hooks are safe" trap note was WRONG —
+  non-2xx is non-blocking, but the private-IP guard rejects the hook before
+  any request is made, loudly, every time.
+- ✓ **Rework (this session):** delivery is now a `type:"command"` hook —
+  `~/.war-room/hook.sh` reads the event JSON on stdin, sources
+  `~/.war-room/env` (token + URL + machine label), POSTs via curl in a
+  detached background job, always exits 0. No `.zshenv` sourcing needed
+  (the script owns its env); the runbook removes the legacy `.zshenv` line
+  and any legacy http entries (idempotent, sweeps ALL events). Smoke test
+  now goes THROUGH the forwarder (`WAR_ROOM_HOOK_SYNC=1` foreground mode).
+- ✓ **Verified in a sandboxed fake HOME against a local stub server:**
+  install → 14 command entries, legacy http entries removed (including on
+  events outside the install set), unrelated hooks preserved; background
+  path delivers authenticated events with `X-Machine`; dead server → exit 0
+  in 0.15s; re-run → still exactly 14 entries (no dupes).
+- **State on the Macs:** MACBOOK has the token stored in `~/.war-room/env`
+  (kept by the new runbook) but NO war-room hooks installed — re-run
+  `bash .planning/runbooks/macbook-hooks-install.sh MACBOOK` to go live.
+  MINI never ran the broken version (nothing to clean).
+- Docs updated: GOAL.md known-traps + M2 wording, README-standalone.md M2
+  ingest section, SESSION-HANDOFF-2026-07-07.md addendum.
