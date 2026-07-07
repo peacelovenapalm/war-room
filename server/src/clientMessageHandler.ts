@@ -205,6 +205,7 @@ function handleWebviewReady(send: WsSend, ctx: ClientMessageContext): void {
   const folderNames: Record<number, string> = {};
   const externalAgents: Record<number, boolean> = {};
   const machines: Record<number, string> = {};
+  const providers: Record<number, string> = {};
   for (const [id, agent] of store) {
     agentIds.push(id);
     if (agent.folderName) {
@@ -217,6 +218,10 @@ function handleWebviewReady(send: WsSend, ctx: ClientMessageContext): void {
     if (machine) {
       machines[id] = machine;
     }
+    // Coworker providers only (claude is the house default — no label).
+    if (agent.providerId && agent.providerId !== 'claude') {
+      providers[id] = agent.providerId;
+    }
   }
   const seats = adapter?.loadSeats() ?? {};
   send({
@@ -226,6 +231,7 @@ function handleWebviewReady(send: WsSend, ctx: ClientMessageContext): void {
     folderNames,
     externalAgents,
     machines,
+    providers,
   });
 
   // 7. Replay live poll states (M4) so a page refresh keeps NEEDS INPUT badges

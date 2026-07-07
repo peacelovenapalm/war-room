@@ -8,6 +8,10 @@ export interface PendingExternalSession {
   cwd: string;
   /** Machine identity label for remote sessions (from the authenticated hook path). */
   machine?: string;
+  /** Provider that sent the events ('claude', 'codex', 'gemini', …) — the
+   *  :providerId of the authed ingest URL. Non-claude agents render as
+   *  coworkers (distinct silhouette + TEXT label) in the office. */
+  providerId?: string;
 }
 
 /** An event waiting to be dispatched once its agent registers. */

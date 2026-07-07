@@ -94,7 +94,7 @@ export class AgentRuntime {
 
     // Wire hook lifecycle callbacks to shared agent operations
     this.hookEventHandler.setLifecycleCallbacks({
-      onExternalSessionDetected: (sessionId, transcriptPath, cwd, machine) => {
+      onExternalSessionDetected: (sessionId, transcriptPath, cwd, machine, providerId) => {
         const projectDir = transcriptPath ? path.dirname(transcriptPath) : cwd;
         // Remote sessions (machine label set) bypass the tracked-dir gate: their
         // cwd is a path on ANOTHER machine, never a local tracked project dir,
@@ -116,6 +116,7 @@ export class AgentRuntime {
           () => this.store.persist(),
           (agent) => this.registerAgent(agent.sessionId, agent.id),
           machine,
+          providerId,
         );
       },
       onSessionClear: (agentId, newSessionId, newTranscriptPath) => {

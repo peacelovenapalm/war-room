@@ -231,6 +231,8 @@ function registerWebSocketRoute(app: FastifyInstance, options: HttpServerOptions
         teamName: agent.teamName,
         hooksOnly: agent.hooksOnly || undefined,
         machine: agent.machine ?? options.machineLabel,
+        // Coworker providers only (claude is the house default — no label).
+        provider: agent.providerId && agent.providerId !== 'claude' ? agent.providerId : undefined,
       });
     };
 

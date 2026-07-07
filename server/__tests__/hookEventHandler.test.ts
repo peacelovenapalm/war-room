@@ -577,6 +577,7 @@ describe('HookEventHandler', () => {
       '/projects/test/ext-sess.jsonl',
       '/projects/test',
       undefined, // machine: local session, no machine label
+      'claude', // providerId from the ingest route
     );
     // Stop was re-processed after agent creation
     const agent = agents.get(2);
@@ -723,6 +724,7 @@ describe('HookEventHandler', () => {
       undefined,
       '/projects/test',
       undefined, // machine: local session, no machine label
+      'claude', // providerId from the ingest route
     );
   });
 

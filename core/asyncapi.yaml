@@ -179,6 +179,12 @@ components:
         machine:
           type: string
           description: TEXT label of the machine this agent runs on (e.g. "MACBOOK", "NEXUS").
+        provider:
+          type: string
+          description: >-
+            Coworker provider id ('codex', 'gemini', …) when the agent is NOT a
+            Claude Code session. Rendered as a distinct silhouette + TEXT label
+            (e.g. "[CODEX]") — never color-only. Absent for Claude sessions.
 
     AgentClosed:
       description: An agent has been removed from the office.
@@ -234,6 +240,13 @@ components:
         machines:
           type: object
           description: Map of agent ID (string) to machine TEXT label (e.g. "MACBOOK", "NEXUS").
+          additionalProperties:
+            type: string
+        providers:
+          type: object
+          description: >-
+            Map of agent ID (string) to coworker provider id ('codex',
+            'gemini', …). Claude sessions are omitted (house default).
           additionalProperties:
             type: string
 

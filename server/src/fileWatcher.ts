@@ -813,6 +813,7 @@ export function adoptExternalSessionFromHook(
   persistAgents: () => void,
   onAgentCreated?: (agent: AgentState) => void,
   machine?: string,
+  providerId?: string,
 ): void {
   if (transcriptPath) {
     // File-based provider (Claude, Codex): adopt with JSONL file watching
@@ -852,6 +853,7 @@ export function adoptExternalSessionFromHook(
       adoptedAgent.sessionId = sessionId;
       adoptedAgent.hookDelivered = true;
       if (machine) adoptedAgent.machine = machine;
+      if (providerId) adoptedAgent.providerId = providerId;
       onAgentCreated?.(adoptedAgent);
     }
   } else {
@@ -879,6 +881,7 @@ export function adoptExternalSessionFromHook(
       hookDelivered: true,
       hooksOnly: true,
       machine,
+      providerId,
       lastDataAt: Date.now(),
       linesProcessed: 0,
       seenUnknownRecordTypes: new Set(),
