@@ -10,10 +10,15 @@ first every iteration; check the kill criterion before building anything.
       `war-room`). `.planning/` seeded (GOAL.md + this file + runbooks/). Standalone
       CLI built and run locally; local Claude Code session verified rendering
       (evidence below). ✓ done 2026-07-06.
-- [ ] **M1 Decapitate.** Standalone server + static browser build with the
-      VS Code extension quarantined from the build (expect root package.json
-      surgery). Acceptance: `server` serves the SPA from a plain
-      `node`/`npx` start on macOS, no VS Code, no Electron, no Tauri.
+- [x] **M1 Decapitate.** Standalone server + static browser build with the
+      VS Code extension quarantined from the build. Root package.json surgery
+      done (`main` → `dist/cli.js`, engines vscode → node, extension manifest
+      fields removed); `npm run build` no longer produces `dist/extension.js`
+      (opt-in via `npm run build:extension`). Verified from a CLEAN
+      `npm install && npm run build` → `node dist/cli.js --port 3141`: curl,
+      WS probe, and headless screenshots pass; a live local Claude Code
+      session renders end-to-end (evidence below). Start command documented
+      in `README-standalone.md`. ✓ done 2026-07-06.
 - [ ] **M2 Second machine over Tailscale.** Server runs on NEXUS (Docker +
       Caddy route = GATED runbook). MacBook Claude Code ships events via
       native `type:"http"` hooks to it. Acceptance: sessions from two
@@ -75,6 +80,42 @@ Ran `node dist/cli.js --port 3141` with cwd `/Users/greg/Brain2/vault`
   ("do not fix upstream bugs yet"). Note for M4: `permission-mode` records may
   matter for needs-input.
 
+## M1 acceptance evidence (2026-07-06)
+
+Clean-room proof on branch `war-room/v0` (commits `6ca0361` build surgery,
+`32f3b50` README):
+
+- ✓ **Clean build:** `rm -rf node_modules */node_modules dist` →
+  `npm install` → `npm run build` (the one documented command). Produces
+  `dist/cli.js` + `dist/assets/` + `dist/hooks/` + `dist/webview/`;
+  asserted `dist/extension.js` does NOT exist. Opt-in path
+  `npm run build:extension` still bundles the extension (then removed).
+- ✓ **Plain node start, no VS Code/Electron/Tauri:**
+  `node dist/cli.js --port 3141` (cwd `/Users/greg/Brain2/vault`) →
+  `GET /` 200 (vite SPA index), `GET /api/health` `{"status":"ok"}`.
+- ✓ **WS event plane untouched:** probe sent `webviewReady` on
+  `ws://127.0.0.1:3141/ws`, received the full existing sequence
+  (providerCapabilities → sprites/tiles/furniture → layoutLoaded →
+  settingsLoaded → existingAgents) plus live `agentCreated`,
+  `agentStatus: active/waiting`, `agentToolStart` ("Running: echo …",
+  toolName Bash), `agentToolDone`, `agentTokenUsage` from real headless
+  `claude -p` probe sessions in the vault project dir.
+- ✓ **End-to-end render in a normal browser:** headless Chromium via
+  `npx playwright screenshot` shows the pixel office; with a live session
+  running mid-page-life, a character sprite renders at a desk with a TEXT
+  status label ("Idle") — shape + label, no color-only signal.
+- ✓ Server stopped clean after verification (kill by pid; port refused after).
+- ⚠ **Upstream bug found (NOT fixed — flag only):** in the standalone
+  server the WS init order is `layoutLoaded` BEFORE `existingAgents`, but
+  `webview-ui/src/hooks/useExtensionMessages.ts` only flushes the
+  `existingAgents` buffer inside its `layoutLoaded` handler → sessions
+  adopted BEFORE the page loads never spawn characters (page refresh loses
+  characters until the next `agentCreated`). State/events still flow.
+  Fix candidate for M3 (it must be fixed by then — a grayscale screenshot
+  of pre-existing sessions can't pass if they don't render at all):
+  flush `pendingAgents` in the `existingAgents` branch when
+  `layoutReadyRef.current` is already true.
+
 ## Config guard (important — do not undo)
 
 The CLI's default `hooksEnabled: true` would have auto-written Pixel Agents
@@ -93,8 +134,9 @@ Greg runs himself.
 
 ## Next step (one)
 
-**M1 Decapitate:** root `package.json` / build surgery so the standalone
-server + SPA build without the VS Code extension (`dist/extension.js`,
-`@types/vscode`, `engines.vscode`). Start from the working build chain
-recorded above; acceptance = plain `node dist/cli.js` still serves the SPA
-after the extension is quarantined from the build.
+**M2 Second machine over Tailscale:** server on NEXUS (Docker + Caddy on
+`nexus.tail722a2e.ts.net` = GATED → author runbooks in
+`.planning/runbooks/`, never run them); MacBook ships events via native
+`type:"http"` hooks (hook install itself is also a Greg-run runbook — the
+`hooksEnabled:false` config guard stays until then). Acceptance: sessions
+from two machines in one browser view, machine identity labeled in TEXT.
