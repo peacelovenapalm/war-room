@@ -342,7 +342,7 @@ export function ToolOverlay({
           acknowledged (click). SHAPE (✗ + rubble sprite) + TEXT, never a tint. */}
       {[...officeState.debris.values()].map((d) => {
         const screenX = (deviceOffsetX + d.x * zoom) / dpr;
-        const screenY = (deviceOffsetY + (d.y + 6) * zoom) / dpr;
+        const screenY = (deviceOffsetY + (d.y + 10) * zoom) / dpr;
         return (
           <div
             key={`debris-${d.key}`}
@@ -351,16 +351,17 @@ export function ToolOverlay({
             data-testid="debris-marker"
             data-debris-key={d.key}
           >
+            {/* Compact at the desk (identity + cause live on the board row). */}
             <button
               className="debris-tag"
               style={{ pointerEvents: 'auto' }}
-              title="Acknowledge — clear this debris"
+              title={`${d.label} — ${d.kind === 'failed' ? 'session failed' : 'session stopped'}. Click to acknowledge.`}
               onClick={(e) => {
                 e.stopPropagation();
                 officeState.acknowledgeDebris(d.key);
               }}
             >
-              ✗ DEBRIS · {d.label} · {d.kind === 'failed' ? 'FAILED' : 'STOPPED'} · CLEAR
+              ✗ DEBRIS · CLEAR
             </button>
           </div>
         );
