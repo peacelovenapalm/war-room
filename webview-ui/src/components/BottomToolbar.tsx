@@ -13,6 +13,8 @@ interface BottomToolbarProps {
   isSettingsOpen: boolean;
   onToggleSettings: () => void;
   workspaceFolders: WorkspaceFolder[];
+  isBriefingOpen: boolean;
+  onToggleBriefing: () => void;
 }
 
 export function BottomToolbar({
@@ -22,6 +24,8 @@ export function BottomToolbar({
   isSettingsOpen,
   onToggleSettings,
   workspaceFolders,
+  isBriefingOpen,
+  onToggleBriefing,
 }: BottomToolbarProps) {
   const [isFolderPickerOpen, setIsFolderPickerOpen] = useState(false);
   const [isBypassMenuOpen, setIsBypassMenuOpen] = useState(false);
@@ -126,6 +130,13 @@ export function BottomToolbar({
         title="Edit office layout"
       >
         Layout
+      </Button>
+      <Button
+        variant={isBriefingOpen ? 'active' : 'default'}
+        onClick={onToggleBriefing}
+        title="Today's briefing"
+      >
+        Briefing
       </Button>
       <Button
         variant={isSettingsOpen ? 'active' : 'default'}

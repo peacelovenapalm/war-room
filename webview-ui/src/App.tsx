@@ -2,6 +2,7 @@ import { useCallback, useEffect, useRef, useState } from 'react';
 
 import { toMajorMinor } from './changelogData.js';
 import { BottomToolbar } from './components/BottomToolbar.js';
+import { BriefingPanel } from './components/BriefingPanel.js';
 import { ChangelogModal } from './components/ChangelogModal.js';
 import { DebugView } from './components/DebugView.js';
 import { EditActionBar } from './components/EditActionBar.js';
@@ -93,6 +94,7 @@ function App() {
   const [hooksTooltipDismissed, setHooksTooltipDismissed] = useState(false);
   const [isDebugMode, setIsDebugMode] = useState(false);
   const [alwaysShowOverlay, setAlwaysShowOverlay] = useState(false);
+  const [isBriefingOpen, setIsBriefingOpen] = useState(false);
 
   const currentMajorMinor = toMajorMinor(extensionVersion);
 
@@ -340,7 +342,11 @@ function App() {
         isSettingsOpen={isSettingsOpen}
         onToggleSettings={() => setIsSettingsOpen((v) => !v)}
         workspaceFolders={workspaceFolders}
+        isBriefingOpen={isBriefingOpen}
+        onToggleBriefing={() => setIsBriefingOpen((v) => !v)}
       />
+
+      <BriefingPanel isOpen={isBriefingOpen} onClose={() => setIsBriefingOpen(false)} />
 
       <VersionIndicator
         currentVersion={extensionVersion}
