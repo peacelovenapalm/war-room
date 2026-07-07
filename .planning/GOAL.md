@@ -96,6 +96,8 @@ pid, startedAt`. Wrap it in a normalizer; expect churn.
 Four-view architecture, semantic zoom/LOD, steering/approval broker (if ever
 built: block = 2xx + `permissionDecision:"deny"` body, NOT 403), Ollama,
 OTEL/Grafana cost rail, Codex ingestion, per-machine JSONL forwarder.
+(Update 2026-07-07: Codex ingestion un-parked into v1 by Greg, expanded to
+Codex + Gemini coworkers — see `.planning/GAMIFICATION-BRIEF.md` mechanic #6.)
 
 ## Definition of done (v0 shipped)
 

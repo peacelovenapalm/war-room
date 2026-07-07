@@ -88,18 +88,26 @@ SESSION-HANDOFF-2026-07-07.md.
 
 State: v0 is LIVE tailnet-only at https://nexus.tail722a2e.ts.net:8484 (docker
 on nexus, tailscale serve). Branch war-room/v0, unpushed. Briefing panel ships
-real todo + half-baked-gate data. Mac hooks/poller may or may not be installed
-yet — check the dashboard for live agents and adapt (simulated agents via the
-authed ingest are fine for dev, the M2 pattern).
+real todo + half-baked-gate data. MACBOOK hooks are LIVE as of 2026-07-07 via
+the command-hook forwarder ~/.war-room/hook.sh (smoke test 200; NEVER install
+type:"http" hooks — Claude Code blocks them for private IPs and it breaks
+every session). MINI hooks + the per-machine pollers are NOT installed yet.
+Simulated agents via the authed ingest remain fine for dev (the M2 pattern).
 
-Task: build v1 mechanic #1 from the brief — the crisis & triage layer (blocked
-session = aging fire at the agent's desk, shape+label only; triage queue by
-age×severity; visible calm on resolution). Work on a new branch war-room/v1
-from war-room/v0. Colorblind grayscale test and the existing 236+48 tests stay
-green. Verify by exercising with simulated crises, screenshot evidence to
-.planning/evidence/, atomic commits (em-dash convention), no push, gated
-actions → runbooks only. Redeploy to NEXUS is Greg re-running
-.planning/runbooks/nexus-war-room-deploy.sh — never deploy yourself.
+Task: build the v1 visual pass from the brief, in this order: (1) mechanic #1,
+the crisis & triage layer (blocked session = aging fire at the agent's desk,
+shape+label only; triage queue by age×severity; visible calm on resolution);
+(2) the in-dashboard HELP SCREEN from the brief's Additions section (`?` key +
+visible HELP button; explains every signal and mechanic; a mechanic isn't done
+until its help section exists). Then, if capacity remains, start mechanic #6a
+(Codex/Gemini sessions rendered as coworkers with provider text labels) — read
+the brief's staged scope first; #6b dispatch needs a design pass before any
+code. Work on a new branch war-room/v1 from war-room/v0. Colorblind grayscale
+test and the existing 236+48 tests stay green. Verify by exercising with
+simulated crises, screenshot evidence to .planning/evidence/, atomic commits
+(em-dash convention), no push, gated actions → runbooks only. Redeploy to
+NEXUS is Greg re-running .planning/runbooks/nexus-war-room-deploy.sh — never
+deploy yourself.
 ```
 
 ## 8 · ADDENDUM 2026-07-07 (later) — hooks incident + rework
@@ -112,6 +120,12 @@ up same day (http entries stripped from `~/.claude/settings.json`; backup
 
 The runbook is REWORKED to `type:"command"` hooks running a
 `~/.war-room/hook.sh` forwarder (backgrounded curl, always exit 0, no
-`.zshenv` hack) and sandbox-verified. §6 step 1 is again safe to run —
-same command, new design. Details: STATE.md
+`.zshenv` hack) and sandbox-verified. Greg re-ran it on MACBOOK same day:
+smoke test 200 — MACBOOK hooks are LIVE. Still pending: `MINI` hooks +
+the poller runbook on both machines. Details: STATE.md
 "2026-07-07 (later) — INCIDENT" section.
+
+Scope additions for v1 (Greg, same day): an in-dashboard help screen, and
+Codex/Gemini as coworkers (mechanic #6, staged 6a render / 6b dispatch) —
+folded into `.planning/GAMIFICATION-BRIEF.md` "Additions" and the §7
+kickoff prompt above.

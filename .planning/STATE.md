@@ -395,11 +395,11 @@ build + start + curl + headless screenshot
 
 ## Needs Greg (max 3)
 
-1. **Run the three runbooks** (build work is done + reviewed; M5 soak can't
-   start without them): `bash .planning/runbooks/nexus-war-room-deploy.sh` →
-   `bash .planning/runbooks/macbook-hooks-install.sh MACBOOK` (then `MINI`) →
-   `bash .planning/runbooks/install-poller-launchd.sh MACBOOK` (then `MINI`).
-   The deploy runbook rsyncs + rebuilds, so it picks up the review fixes too.
+1. **Finish the runbooks** (deploy ✓ 2026-07-06, MACBOOK hooks ✓ 2026-07-07):
+   still pending are `bash .planning/runbooks/macbook-hooks-install.sh MINI`
+   (on the Mini) and `bash .planning/runbooks/install-poller-launchd.sh
+MACBOOK` (then `MINI`). Run in a real terminal, not via Claude's `!` —
+   the confirm prompt needs interactive stdin.
 2. **Push decision** — branch `war-room/v0` is local-only (never pushed, per
    contract). Optional before pushing: reword the 4 em-dash-less commit
    subjects (see review findings); otherwise push as-is.
@@ -457,9 +457,21 @@ build + start + curl + headless screenshot
   events outside the install set), unrelated hooks preserved; background
   path delivers authenticated events with `X-Machine`; dead server → exit 0
   in 0.15s; re-run → still exactly 14 entries (no dupes).
-- **State on the Macs:** MACBOOK has the token stored in `~/.war-room/env`
-  (kept by the new runbook) but NO war-room hooks installed — re-run
-  `bash .planning/runbooks/macbook-hooks-install.sh MACBOOK` to go live.
-  MINI never ran the broken version (nothing to clean).
+- ✓ **MACBOOK hooks LIVE (2026-07-07):** Greg ran the reworked runbook in a
+  real terminal; smoke test through the forwarder returned 200. Remaining
+  check: confirm a restarted Claude session appears on the dashboard (the
+  one path the sandbox couldn't exercise). MINI never ran the broken
+  version (nothing to clean) — its install is still pending, as are the
+  poller launchd installs on both machines.
 - Docs updated: GOAL.md known-traps + M2 wording, README-standalone.md M2
   ingest section, SESSION-HANDOFF-2026-07-07.md addendum.
+- **v1 SCOPE ADDITIONS (Greg, 2026-07-07):** (a) in-dashboard HELP SCREEN
+  explaining the game layer — ships WITH mechanic #1, `?` key + visible
+  HELP button, a mechanic isn't done until its help section exists;
+  (b) **Codex/Gemini as coworkers** — mechanic #6, staged: 6a render
+  (per-provider ingest adapter → coworker sprite + `[CODEX]`/`[GEMINI]`
+  text label), 6b dispatch ("call" a coworker from the dashboard — needs a
+  design pass first; gated surface, never open remote-exec). Codex
+  ingestion is thereby UN-PARKED from v0's parking lot. Full wording:
+  `.planning/GAMIFICATION-BRIEF.md` "Additions" section + the reworked
+  kickoff prompt in SESSION-HANDOFF-2026-07-07.md §7.

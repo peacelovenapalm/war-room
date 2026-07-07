@@ -63,6 +63,32 @@ decisions when it doesn't.
    exists), decor unlocks fed by streaks (M5 soak = a literal daily-use streak
    mechanic) and by shift-report grades.
 
+## Additions (Greg, 2026-07-07 — in scope for v1)
+
+- **Help screen (cross-cutting requirement, ships WITH mechanic #1).** The
+  overhaul needs an in-dashboard help screen that explains the game layer:
+  what each signal means (fire/smoke/alarm silhouettes, debris, triage
+  queue), where the data comes from (real sessions, real tokens, real
+  gates), and what each mechanic rewards. Reachable at all times (e.g. `?`
+  key + a visible HELP button — shape+label, not icon-only). Content grows
+  with each mechanic shipped; a mechanic isn't done until its help section
+  exists. Grayscale test applies to the help screen itself.
+- **Mechanic #6 — AI coworkers (Codex / Gemini).** The office must be able
+  to call Codex or Gemini as coworkers, not just show Claude. Un-parks
+  v0's "Codex ingestion" (Greg's explicit call, 2026-07-07). Staged scope:
+  - **6a Render:** Codex and Gemini CLI sessions appear as coworker agents
+    in the office — distinct sprite/silhouette + provider TEXT label
+    (`[CODEX]` / `[GEMINI]`, never color-only). Neither emits Claude Code
+    hooks, so ingest needs a per-provider adapter (wrapper or tailer
+    POSTing normalized events to the existing authed ingest — same
+    hooks-only rendering path remote Macs use).
+  - **6b Dispatch:** hand a task to a coworker from the dashboard (this is
+    the "call" half). Touches the parked steering-broker territory —
+    design it deliberately before building: dispatch = spawning a local
+    CLI run on a chosen machine, which is a GATED surface (runbook-managed
+    listener or explicit per-machine opt-in), never an open remote-exec
+    endpoint on the tailnet.
+
 ## Hard guardrails (carry over from v0 GOAL.md — non-negotiable)
 
 - **Colorblind:** every new signal SHAPE + TEXT LABEL first; grayscale test
@@ -73,8 +99,11 @@ decisions when it doesn't.
   completion, never volume.
 - **Tailnet-only, WS event plane, MIT headers, gated runbooks, atomic
   commits** — all v0 rules stand unchanged.
-- v0's parking lot (steering/approval broker, semantic zoom, OTEL rail,
-  Codex ingestion) stays parked unless a mechanic above genuinely needs it.
+- v0's parking lot (steering/approval broker, semantic zoom, OTEL rail)
+  stays parked unless a mechanic above genuinely needs it. Exception:
+  Codex ingestion is UN-PARKED into v1 as mechanic #6 (Greg, 2026-07-07);
+  the steering broker stays parked but mechanic #6b's dispatch design must
+  respect its rule (block = 2xx + `permissionDecision:"deny"`, not 403).
 
 ## Open questions for Greg (max 3, answer before building #3)
 
