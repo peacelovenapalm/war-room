@@ -48,6 +48,12 @@ MACBOOK`, then `MINI`) — until run, the office shows NO live agents (only
   the provider docstring.
 - ◷ **v0 parking lot** unchanged (steering broker, semantic zoom, OTEL rail,
   Codex) — reopen only via the brief's guardrails.
+- ✗ **NEXUS manifest stale (affects the ARCADE war-room tool, not this repo)**
+  — investigated 2026-07-07, root cause found: the every-2-min rebuild cron
+  self-aborts (log redirect into root-owned `/var/log`), AND nexus's manifest
+  clone is 103 commits behind (frozen 2026-05-06, double-wrapped shape).
+  Case file: `/Users/greg/code/completion-2026-07/nexus-manifest-investigation-2026-07-07.md`.
+  Gated fix (Greg runs): `bash /Users/greg/code/completion-2026-07/runbooks/fix-nexus-manifest.sh`.
 
 ## 5 · Decisions made
 
