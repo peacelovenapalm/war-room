@@ -1275,6 +1275,10 @@ export function startStaleExternalAgentCheck(
 
     for (const [id, agent] of agents) {
       if (!agent.isExternal) continue;
+      // Hooks-only agents (remote machines, transcript-less providers) have no
+      // local JSONL file by design — statSync('') would always throw and despawn
+      // them seconds after adoption. Their lifecycle is hook-driven (SessionEnd).
+      if (agent.hooksOnly) continue;
 
       // Only despawn if the JSONL file has been deleted from disk.
       // Inactive external agents stay alive so they can resume when
