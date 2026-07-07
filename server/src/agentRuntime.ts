@@ -33,6 +33,7 @@ import {
 import type { HookEvent } from './hookEventHandler.js';
 import { HookEventHandler } from './hookEventHandler.js';
 import { SessionRouter } from './sessionRouter.js';
+import { shiftStats } from './shiftStats.js';
 import { cancelPermissionTimer, cancelWaitingTimer } from './timerManager.js';
 import { setHookProvider } from './transcriptParser.js';
 import type { AgentState } from './types.js';
@@ -231,6 +232,10 @@ export class AgentRuntime {
     // Cancel timers
     cancelWaitingTimer(id, this.waitingTimers);
     cancelPermissionTimer(id, this.permissionTimers);
+
+    // Shift report: a blocked session whose agent goes away ends its episode
+    // (otherwise the open-crisis count leaks forever). No-op if not blocked.
+    shiftStats.endBlocked(`agent:${id}`);
 
     // Notify adapter before deleting from store
     this.lifecycleCallbacks.onAgentRemoved?.(id, agent);
