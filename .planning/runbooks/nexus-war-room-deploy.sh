@@ -1,18 +1,21 @@
 #!/bin/bash
 # =============================================================================
-# nexus-war-room-deploy.sh — GATED RUNBOOK (human-run only, never automated)
+# nexus-war-room-deploy.sh — GATED RUNBOOK (Greg-approved 2026-07-06)
 #
 # Deploys the War Room server to NEXUS:
-#   1. rsync the repo to nexus:~/apps/war-room-src
-#   2. docker build + run, bound to 127.0.0.1:3141 ON NEXUS (host loopback only)
-#   3. add a Caddy site on the TAILNET listener (nexus.tail722a2e.ts.net:8484,
-#      bound to the Tailscale IP) — NEVER the public funnel
+#   1. refresh the half-baked tracker copy on nexus (/data/repos/completion-2026-07)
+#   2. rsync the repo to nexus:~/apps/war-room-src
+#   3. docker build + run, bound to 127.0.0.1:3141 ON NEXUS (host loopback only),
+#      with read-only briefing mounts (todo dir from the vault-notifier clone +
+#      the completion tracker)
+#   4. tailscale serve --bg --https=8484 (TAILNET ONLY — same pattern as the
+#      projects-board :10001 and amc :10000 serves; no sudo, NEVER the funnel)
 #
-# Run from the MacBook:   bash .planning/runbooks/nexus-war-room-deploy.sh
+# Run from the MacBook:   bash .planning/runbooks/nexus-war-room-deploy.sh [-y]
 #
 # UNDO (inline, also printed at the end):
 #   ssh nexus 'docker rm -f war-room'
-#   ssh nexus 'sudo cp /etc/caddy/Caddyfile.bak.war-room.<TS> /etc/caddy/Caddyfile && sudo systemctl reload caddy'
+#   ssh nexus 'tailscale serve --https=8484 off'
 #   (the token file ~/apps/war-room/war-room.env on nexus is left in place on
 #    purpose — remove by hand only if you also reinstall the machine hooks)
 # =============================================================================
@@ -20,12 +23,19 @@ set -euo pipefail
 
 NEXUS_HOST="${NEXUS_HOST:-nexus}"                 # ssh alias
 TAILNET_FQDN="nexus.tail722a2e.ts.net"
-CADDY_PORT=8484
+SERVE_PORT=8484
 APP_PORT=3141
 REPO_DIR="$(cd "$(dirname "$0")/../.." && pwd)"
 REMOTE_SRC="~/apps/war-room-src"
 REMOTE_ENV_DIR="~/apps/war-room"
 TS="$(date +%Y%m%d-%H%M%S)"
+# Briefing data sources ON NEXUS (read-only binds into the container):
+#  - todo dir: inside the vault-notifier Brain2 clone (hard-resets to origin/main
+#    every 15 min via the notifier cron, so it stays fresh without new sync jobs)
+#  - tracker: the same dir the projects-board container binds read-only
+TODO_DIR_NEXUS="/data/repos/vault-notifier/vault/vault/_inbox/routines/todo"
+TRACKER_DIR_NEXUS="/data/repos/completion-2026-07"
+TRACKER_STATE_LOCAL="/Users/greg/code/completion-2026-07/STATE.md"
 
 ok()   { printf '[OK]   %s\n' "$1"; }
 warn() { printf '[WARN] %s\n' "$1"; }
@@ -35,26 +45,32 @@ echo "=============================================================="
 echo " War Room -> NEXUS deploy (tailnet-only)"
 echo "   source : ${REPO_DIR}"
 echo "   target : ${NEXUS_HOST} -> docker 'war-room' on 127.0.0.1:${APP_PORT}"
-echo "   ingress: https://${TAILNET_FQDN}:${CADDY_PORT} (Tailscale IP bind)"
+echo "   ingress: https://${TAILNET_FQDN}:${SERVE_PORT} (tailscale serve, no funnel)"
 echo "=============================================================="
-read -r -p "Type 'deploy' to proceed: " CONFIRM
-[ "${CONFIRM}" = "deploy" ] || fail "aborted (no changes made)"
+if [ "${1:-}" = "-y" ]; then
+  ok "non-interactive (-y) — proceeding"
+else
+  read -r -p "Type 'deploy' to proceed: " CONFIRM
+  [ "${CONFIRM}" = "deploy" ] || fail "aborted (no changes made)"
+fi
 
 # ── Preflight ────────────────────────────────────────────────────────────────
 ssh -o ConnectTimeout=8 "${NEXUS_HOST}" true 2>/dev/null \
   && ok "ssh ${NEXUS_HOST} reachable" || fail "cannot ssh to ${NEXUS_HOST}"
 ssh "${NEXUS_HOST}" 'command -v docker >/dev/null' \
   && ok "docker present on nexus" || fail "docker missing on nexus"
-if ssh "${NEXUS_HOST}" 'test -f /etc/caddy/Caddyfile'; then
-  ok "found /etc/caddy/Caddyfile"
+ssh "${NEXUS_HOST}" "test -d ${TODO_DIR_NEXUS}" \
+  && ok "todo source present: ${TODO_DIR_NEXUS}" || warn "todo dir missing on nexus — briefing panel will show 'no todo source'"
+ssh "${NEXUS_HOST}" "test -d ${TRACKER_DIR_NEXUS}" \
+  && ok "tracker dir present: ${TRACKER_DIR_NEXUS}" || warn "tracker dir missing on nexus — briefing panel will show no gates"
+
+# ── Refresh the tracker copy (laptop is canonical; also feeds projects-board) ─
+if [ -f "${TRACKER_STATE_LOCAL}" ]; then
+  rsync -a "${TRACKER_STATE_LOCAL}" "${NEXUS_HOST}:${TRACKER_DIR_NEXUS}/STATE.md" \
+    && ok "tracker STATE.md refreshed on nexus (projects-board reads the same file)" \
+    || warn "tracker refresh failed — nexus copy may be stale"
 else
-  fail "/etc/caddy/Caddyfile not found — locate the Caddy config first (is Caddy dockerized?)"
-fi
-if ssh "${NEXUS_HOST}" "grep -q ':${CADDY_PORT}' /etc/caddy/Caddyfile"; then
-  warn "port ${CADDY_PORT} already referenced in Caddyfile — will NOT add a duplicate block"
-  SKIP_CADDY=1
-else
-  SKIP_CADDY=0
+  warn "no local tracker at ${TRACKER_STATE_LOCAL} — skipping refresh"
 fi
 
 # ── Token env file (created once, kept stable across redeploys) ─────────────
@@ -77,54 +93,46 @@ rsync -a --delete \
 ssh "${NEXUS_HOST}" "docker build -t war-room:latest ${REMOTE_SRC}" \
   && ok "image war-room:latest built" || fail "docker build failed"
 
-# ── Run container (host-loopback publish ONLY) ───────────────────────────────
+# ── Run container (host-loopback publish ONLY + read-only briefing mounts) ───
 ssh "${NEXUS_HOST}" "docker rm -f war-room >/dev/null 2>&1 || true"
 ssh "${NEXUS_HOST}" "docker run -d --name war-room --restart unless-stopped \
   --env-file ${REMOTE_ENV_DIR}/war-room.env \
+  -e WAR_ROOM_TODO_DIR=/briefing/todo \
+  -e WAR_ROOM_TRACKER_STATE=/briefing/tracker/STATE.md \
+  -v ${TODO_DIR_NEXUS}:/briefing/todo:ro \
+  -v ${TRACKER_DIR_NEXUS}:/briefing/tracker:ro \
   -p 127.0.0.1:${APP_PORT}:3141 war-room:latest" >/dev/null \
-  && ok "container war-room running (127.0.0.1:${APP_PORT} on nexus)" || fail "docker run failed"
+  && ok "container war-room running (127.0.0.1:${APP_PORT} on nexus, briefing mounts ro)" || fail "docker run failed"
 
 sleep 4
 ssh "${NEXUS_HOST}" "curl -sf http://127.0.0.1:${APP_PORT}/api/health" >/dev/null \
   && ok "health check passed on nexus loopback" || fail "health check failed — docker logs war-room"
+ssh "${NEXUS_HOST}" "curl -sf http://127.0.0.1:${APP_PORT}/api/briefing" | head -c 200 >/dev/null \
+  && ok "briefing endpoint responding" || warn "briefing endpoint not responding — check mounts/envs (docker logs war-room)"
 
-# ── Caddy site on the tailnet listener (NEVER the funnel) ────────────────────
-if [ "${SKIP_CADDY}" = "1" ]; then
-  warn "skipped Caddyfile edit (port ${CADDY_PORT} already present) — verify routing manually"
+# ── tailscale serve on the tailnet listener (no sudo, NEVER the funnel) ──────
+if ssh "${NEXUS_HOST}" "tailscale serve status 2>/dev/null | grep -q ':${SERVE_PORT}'"; then
+  warn "tailscale serve already has :${SERVE_PORT} — leaving it as-is"
 else
-  TS_IP="$(ssh "${NEXUS_HOST}" 'tailscale ip -4' | head -1)"
-  [ -n "${TS_IP}" ] && ok "tailscale IP on nexus: ${TS_IP}" || fail "could not read tailscale ip on nexus"
-  ssh "${NEXUS_HOST}" "sudo cp /etc/caddy/Caddyfile /etc/caddy/Caddyfile.bak.war-room.${TS}" \
-    && ok "Caddyfile backed up -> /etc/caddy/Caddyfile.bak.war-room.${TS}" || fail "backup failed"
-  ssh "${NEXUS_HOST}" "sudo tee -a /etc/caddy/Caddyfile >/dev/null" <<EOF
-
-# war-room dashboard (added ${TS}) — TAILNET ONLY via bind, never the funnel
-${TAILNET_FQDN}:${CADDY_PORT} {
-	bind ${TS_IP}
-	reverse_proxy 127.0.0.1:${APP_PORT}
-}
-EOF
-  ok "Caddy site block appended (${TAILNET_FQDN}:${CADDY_PORT}, bind ${TS_IP})"
-  if ssh "${NEXUS_HOST}" 'sudo caddy validate --config /etc/caddy/Caddyfile' >/dev/null 2>&1; then
-    ok "caddy validate passed"
-  else
-    ssh "${NEXUS_HOST}" "sudo cp /etc/caddy/Caddyfile.bak.war-room.${TS} /etc/caddy/Caddyfile"
-    fail "caddy validate FAILED — Caddyfile restored from backup, no reload done"
-  fi
-  ssh "${NEXUS_HOST}" 'sudo systemctl reload caddy' \
-    && ok "caddy reloaded" || fail "caddy reload failed — restore backup and reload manually"
+  ssh "${NEXUS_HOST}" "tailscale serve --bg --https=${SERVE_PORT} http://127.0.0.1:${APP_PORT}" >/dev/null \
+    && ok "tailscale serve :${SERVE_PORT} -> 127.0.0.1:${APP_PORT} (tailnet only)" \
+    || fail "tailscale serve failed — check 'tailscale serve status' on nexus"
 fi
+ssh "${NEXUS_HOST}" "tailscale funnel status 2>/dev/null | grep -q ':${SERVE_PORT}'" \
+  && fail "SAFETY: :${SERVE_PORT} appears in FUNNEL status — run 'tailscale funnel --https=${SERVE_PORT} off' NOW" \
+  || ok "funnel check clean — :${SERVE_PORT} is tailnet-only"
 
 echo
 echo "=============================================================="
 ok "DEPLOY COMPLETE"
-echo "  Dashboard : https://${TAILNET_FQDN}:${CADDY_PORT}  (tailnet devices only)"
-echo "  Ingest    : POST https://${TAILNET_FQDN}:${CADDY_PORT}/api/hooks/claude"
+echo "  Dashboard : https://${TAILNET_FQDN}:${SERVE_PORT}  (tailnet devices only)"
+echo "  Briefing  : https://${TAILNET_FQDN}:${SERVE_PORT}/api/briefing"
+echo "  Ingest    : POST https://${TAILNET_FQDN}:${SERVE_PORT}/api/hooks/claude"
 echo "              Authorization: Bearer <WAR_ROOM_TOKEN from nexus war-room.env>"
 echo "              X-Machine: MACBOOK | MINI"
 echo "  Next      : run macbook-hooks-install.sh on each Mac (also gated)"
 echo
 echo "  UNDO:"
 echo "    ssh ${NEXUS_HOST} 'docker rm -f war-room'"
-echo "    ssh ${NEXUS_HOST} 'sudo cp /etc/caddy/Caddyfile.bak.war-room.${TS} /etc/caddy/Caddyfile && sudo systemctl reload caddy'"
+echo "    ssh ${NEXUS_HOST} 'tailscale serve --https=${SERVE_PORT} off'"
 echo "=============================================================="
