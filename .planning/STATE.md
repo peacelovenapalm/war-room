@@ -19,10 +19,13 @@ first every iteration; check the kill criterion before building anything.
       WS probe, and headless screenshots pass; a live local Claude Code
       session renders end-to-end (evidence below). Start command documented
       in `README-standalone.md`. ✓ done 2026-07-06.
-- [ ] **M2 Second machine over Tailscale.** Server runs on NEXUS (Docker +
-      Caddy route = GATED runbook). MacBook Claude Code ships events via
-      native `type:"http"` hooks to it. Acceptance: sessions from two
-      machines visible in one browser view, machine identity labeled in text.
+- [x] **M2 Second machine over Tailscale.** CODE DONE + locally verified
+      2026-07-06; NEXUS deploy + Mac hook installs are GATED runbooks, NOT
+      RUN (blocked on Greg). Authenticated ingest (`Bearer` from
+      `WAR_ROOM_TOKEN` env + `X-Machine` label) rides the existing WS event
+      plane; remote sessions render hooks-only (label + state, no JSONL).
+      Local acceptance: two machines (MACBOOK local + MINI-SIM simulated)
+      visible in one browser view, machine identity in TEXT (evidence below).
 - [ ] **M3 Colorblind pass.** Shape + text label for every state; per-agent
       name tags; needs-input as a distinct SHAPE (e.g. ⚠ badge + "NEEDS
       INPUT" text), not a tint. Acceptance: grayscale screenshot of the
@@ -116,6 +119,52 @@ Clean-room proof on branch `war-room/v0` (commits `6ca0361` build surgery,
   flush `pendingAgents` in the `existingAgents` branch when
   `layoutReadyRef.current` is already true.
 
+## M2 acceptance evidence (2026-07-06)
+
+Everything below ran LOCALLY (NEXUS deploy is gated). Built from clean
+`npm run build`; server `node dist/cli.js --port 3141` with
+`WAR_ROOM_TOKEN=<test> WAR_ROOM_MACHINE=MACBOOK`, cwd vault.
+
+- ✓ **Bearer auth on the ingest path:** `POST /api/hooks/claude` → 401 with
+  no token, 401 with wrong token, 200 with `Authorization: Bearer <token>`.
+  Token from `WAR_ROOM_TOKEN` env (stable across restarts, logged masked as
+  "from WAR_ROOM_TOKEN env"); falls back to random-per-start without it.
+- ✓ **Remote machine identity end-to-end:** POSTed realistic Claude Code hook
+  payloads with `X-Machine: MINI-SIM` for two fake sessions:
+  (a) `SessionStart` → `PreToolUse` confirmation path, and
+  (b) `PreToolUse` with NO prior SessionStart (already-running-session path —
+  new auto-adopt for authenticated remote events). Both created hooks-only
+  agents: log `detected hooks-only external session (turffinder) [machine=MINI-SIM]`.
+- ✓ **Two machines in one view:** WS probe `existingAgents` →
+  `machines: {1:"MINI-SIM", 2:"MINI-SIM", 3:"MACBOOK"}` (agent 3 = real local
+  `claude -p` probe session adopted via JSONL). Browser screenshots:
+  `.planning/evidence/m2-two-machines.png` (labels `[MACBOOK]`,
+  `[MINI-SIM] turffinder`, `[MINI-SIM] arcade` — machine identity as TEXT)
+  and `m2-remote-live-states.png` (remote agent live states: "Running: npm
+  run build" and "Needs approval" — hooks-only agents render label + state,
+  no crash, no blank sprite).
+- ✓ **Docker image exercised locally:** `docker build` (multi-stage,
+  `--build-arg BASE_IMAGE=public.ecr.aws/...` used locally because this Mac's
+  Docker Hub login is stale) → `docker run -e WAR_ROOM_MACHINE=NEXUS
+-p 127.0.0.1:3199:3141` → health 200, 401 unauthenticated, authenticated
+  MACBOOK event adopted inside the container. Container removed after.
+- ✓ **Upstream bugs fixed (both REQUIRED for M2 acceptance):**
+  1. Stale-check despawned hooks-only agents seconds after adoption
+     (`statSync('')` throws — remote agents have no local JSONL by design).
+     Fixed: skip `agent.hooksOnly` in `startStaleExternalAgentCheck`.
+  2. The M1-flagged existingAgents/layoutLoaded ordering bug (pre-existing
+     sessions never spawned characters on page load — remote agents were
+     invisible after refresh). Fixed: flush pending agents in the
+     `existingAgents` handler when layout is already ready. M3's "fix by
+     then" item is now done.
+- ✓ Tests: server 213/213, webview 41/41 (2 assertions updated for the new
+  optional `machine` callback arg); `check-types` + eslint clean; asyncapi
+  schema extended (`agentCreated.machine`, `existingAgents.machines`) and
+  `core/src/messages.ts` regenerated (pre-push drift gate green).
+- ✓ Guards intact after all runs: `~/.claude/settings.json` has 0
+  pixel-agents/war-room entries; `~/.pixel-agents/server.json` cleaned up;
+  port 3141 closed; test containers removed.
+
 ## Config guard (important — do not undo)
 
 The CLI's default `hooksEnabled: true` would have auto-written Pixel Agents
@@ -129,14 +178,28 @@ Greg runs himself.
 
 ## Gated / blocked items
 
-- ✗ None executed. Nothing gated was needed for M0. (M2 will need NEXUS
-  Docker + Caddy runbooks in `.planning/runbooks/` — directory seeded, empty.)
+- ✗ **BLOCKED — NEXUS deploy NOT RUN.** `.planning/runbooks/nexus-war-room-deploy.sh`
+  (chmod +x, confirm prompt, [OK]/[WARN] lines, inline undo): rsync source to
+  nexus, docker build/run bound to **127.0.0.1:3141 on NEXUS**, Caddy site on
+  the TAILNET listener `nexus.tail722a2e.ts.net:8484` with `bind <tailscale-ip>`
+  — never the public funnel. Token generated on nexus into
+  `~/apps/war-room/war-room.env` (0600, never printed). Greg runs:
+  `bash .planning/runbooks/nexus-war-room-deploy.sh`
+- ✗ **BLOCKED — Mac hook installs NOT RUN** (Greg's live `~/.claude` is gated).
+  `.planning/runbooks/macbook-hooks-install.sh` (chmod +x, backup-first,
+  inline undo, parameterized by machine name — same script for both Macs):
+  `bash .planning/runbooks/macbook-hooks-install.sh MACBOOK` (then `MINI` on
+  the Mini). Installs native `type:"http"` hooks with
+  `Authorization: Bearer $WAR_ROOM_TOKEN` + `X-Machine`, `allowedEnvVars:
+["WAR_ROOM_TOKEN"]`, and ends with an authenticated smoke POST.
+  ⚠ Verify on first run: `allowedEnvVars` is written per hook entry; if the
+  installed Claude Code version expects it at hooks-top-level, move it (the
+  runbook header documents this; failures are fire-and-forget, check the
+  server log for 401s).
 
 ## Next step (one)
 
-**M2 Second machine over Tailscale:** server on NEXUS (Docker + Caddy on
-`nexus.tail722a2e.ts.net` = GATED → author runbooks in
-`.planning/runbooks/`, never run them); MacBook ships events via native
-`type:"http"` hooks (hook install itself is also a Greg-run runbook — the
-`hooksEnabled:false` config guard stays until then). Acceptance: sessions
-from two machines in one browser view, machine identity labeled in TEXT.
+**Greg runs the two gated runbooks** (deploy on NEXUS, then hooks on the
+MacBook), and we verify a REAL MacBook session appears on the NEXUS
+dashboard. After that: **M3 colorblind pass** (shape + text for every state;
+the M1 render bug earmarked for M3 is already fixed in M2).
