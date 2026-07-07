@@ -475,3 +475,91 @@ MACBOOK` (then `MINI`). Run in a real terminal, not via Claude's `!` —
   ingestion is thereby UN-PARKED from v0's parking lot. Full wording:
   `.planning/GAMIFICATION-BRIEF.md` "Additions" section + the reworked
   kickoff prompt in SESSION-HANDOFF-2026-07-07.md §7.
+
+---
+
+## 2026-07-07 (v1) — VISUAL + FUNCTIONALITY PASS: crisis layer, help screen, coworkers
+
+Branch `war-room/v1` (cut from `war-room/v0`), design contract
+`.planning/DESIGN-V1.md` (frontend-design skill pass; colorblind rules
+override). All work local; NOT deployed (redeploy = Greg re-running
+`.planning/runbooks/nexus-war-room-deploy.sh`), NOT pushed.
+
+### Mechanic #1 — crisis & triage layer ✓ BUILT
+
+- **Fires age at blocked desks:** SMOKE (0–90 s, rising gray puffs) → FIRE
+  (90 s–4 m, flickering outlined flame) → ALARM (4 m+, flame + WHITE flashing
+  beacon with rays). Distinct SILHOUETTES per stage + a text tag under the
+  chip (`▲ FIRE 2:41`, tabular age). Procedural pixel frames
+  (`sprites/crisisSprites.ts`), deterministic animation (no RNG).
+- **TRIAGE incident board** (top-right, the signature element): auto-appears
+  with ≥1 crisis, rows = stage glyph+word, identity, one-line cause
+  (waitingFor), age; sorted by age × severity (blocked 3 > failed 2 >
+  stopped 1). Collapsible; debris rows carry a CLEAR button.
+- **Debris:** failed/stopped agents leave a rubble pile + `✗ DEBRIS · CLEAR`
+  label until acknowledged (desk click or board CLEAR); localStorage-persisted
+  so refresh doesn't tidy the room; auto-clears if the session recovers.
+- **Calm feedback:** resolution → white steam + floating `✓ RESOLVED`; last
+  crisis → `✓ ALL CLEAR` flash on the board.
+- **Aging is honest + a v0 DEFECT FIXED:** server keeps the poll-state
+  transition time (`since`), broadcasts skew-free `ageMs`, and REBROADCASTS
+  unchanged states every 20 s — v0 lost the NEEDS INPUT badge on sessions
+  blocked > 60 s (client TTL expiry with change-only broadcasts). Replay on
+  page refresh re-anchors fire ages.
+
+### Help screen ✓ BUILT (cross-cutting requirement)
+
+`?` key + a visible **Help** word-button (bottom toolbar) open the in-dashboard
+help modal: every state chip, fire stage, debris, triage board, resolution
+feedback, briefing, machine labels, coworker badges, and the real data
+sources. Registry-driven (`webview-ui/src/helpContent.ts`);
+`helpContent.test.ts` FAILS if a new state/stage/surface ships without a help
+entry — "a mechanic isn't done until its help section exists" is CI-enforced.
+
+### Mechanic #6a — Codex/Gemini coworkers ✓ BUILT (6b design-only)
+
+- Server threads the authed ingest's `:providerId` onto adopted agents and to
+  the webview (`agentCreated.provider`, `existingAgents.providers`).
+- Webview renders coworkers with a distinct badge SILHOUETTE above the head
+  (SQUARE = Codex, DIAMOND = Gemini) + `[CODEX]` / `[GEMINI]` TEXT in the
+  name tag and board rows.
+- `bin/coworker-adapter.mjs` tails REAL session files —
+  `~/.codex/sessions/**/rollout-*.jsonl` (tool-level: turns, shell commands
+  with real argv, approval prompts → NEEDS INPUT) and `~/.gemini/tmp/*/logs.json`
+  (heartbeat-level; the source only logs user messages). New activity only
+  (pre-existing files seed at EOF); no message content leaves the machine.
+  Record shapes verified against live captures (codex-cli 0.142.5,
+  gemini-cli 0.40.0 on this Mac).
+- **6b dispatch is DESIGN ONLY:** `.planning/DISPATCH-6B-DESIGN.md` (queue +
+  per-machine opt-in runner + local allowlist; deny = 2xx +
+  decision:"deny"; never an open remote-exec endpoint). Nothing built.
+
+### Gates (2026-07-07)
+
+- ✓ Tests: webview 66/66 (was 48; +14 crisis, +4 help), server 238/238
+  (was 236; +2 aging), bin/node:test 20/20 (was 10; +10 coworker mapper);
+  lint + tsc clean (note: root `check-types` does NOT cover webview-ui —
+  `tsc -b` in webview-ui is the real gate and was run).
+- ✓ Functionality acceptance (isolated HOME, authed-ingest sim — the M2
+  pattern): 4 concurrent crises (3 blocked staggered + 1 failed), queue
+  ordered by age × severity, resolve → reorder → steam → ALL CLEAR; fire
+  aging captured live through all three stages (~4.5 min real time).
+- ✓ Evidence (`.planning/evidence/`): v1-crisis-smoke.png, v1-crisis-stages.png
+  (+ -grayscale), v1-crisis-resolve.png, v1-all-clear.png, v1-help.png
+  (+ -grayscale), v1-coworkers.png.
+- ✓ Colorblind: every new signal is SHAPE + TEXT first (stage silhouettes,
+  glyph+word rows, white=loudest); grayscale screenshots in evidence.
+- ✓ Guards intact: `~/.claude/settings.json` untouched (0 pixel/war-room
+  entries), test server ran in an isolated HOME, port 3141 closed after,
+  no adapter/poller processes left.
+
+### Open / next (v1 continuation queue)
+
+1. **Mechanic #2 — shift report (in-dashboard only).** Buildable now; the
+   open delivery question (push to morning page/Bark?) gates only the push
+   half. Efficiency scoring must reward LOW token spend.
+2. **Mechanic #4 — emergence pass** (crowd gathers at a long-blocked desk,
+   night mode when no sessions; ≤20-line rules).
+3. **Gated on Greg:** brief's 3 open questions (progression storage, shift
+   delivery, sound); MINI hooks + poller runbooks; NEXUS redeploy to take v1
+   live; push decision for both branches.
