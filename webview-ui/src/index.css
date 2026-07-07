@@ -115,6 +115,69 @@
   .pixel-pulse {
     animation: pixel-pulse 1.5s ease-in-out infinite;
   }
+
+  /* ── Colorblind-safe state chips (War Room hard rule) ──────────
+     Shape (glyph) + TEXT LABEL are the primary signals; the border/background
+     colors below are reinforcement only. Grayscale must stay readable:
+     the alert (needs-input) chip is INVERTED (white bg, black text) — the
+     brightest element on the dark canvas — plus bold + larger type. */
+  .state-chip {
+    @apply inline-flex items-center gap-4 rounded-none leading-none whitespace-nowrap font-pixel;
+    border: 2px solid var(--color-border);
+    background: var(--color-bg);
+    color: var(--color-text);
+    padding: 2px 6px 3px;
+    font-size: 16px; /* text-2xs */
+    letter-spacing: 0.5px;
+  }
+  .state-chip__glyph {
+    @apply leading-none;
+    font-size: 18px;
+  }
+  /* needs-input: LOUDEST signal on screen. Inverted, bold, larger, double
+     outline so it pops off both dark canvas and light furniture. */
+  .state-chip--alert {
+    background: #ffffff;
+    color: #000000;
+    border-color: #000000;
+    box-shadow:
+      0 0 0 2px #ffffff,
+      3px 3px 0 #0a0a14;
+    font-weight: bold;
+    font-size: 20px; /* text-sm */
+    padding: 3px 8px 4px;
+  }
+  .state-chip--alert .state-chip__glyph {
+    font-size: 22px;
+  }
+  /* failed: also loud (inverted) but distinguished by ✗ glyph + FAILED text. */
+  .state-chip--failed {
+    background: #ffffff;
+    color: #000000;
+    border-color: #000000;
+    box-shadow: 3px 3px 0 #0a0a14;
+    font-weight: bold;
+  }
+  .state-chip--working {
+    border-color: var(--color-status-active);
+  }
+  .state-chip--done {
+    border-color: var(--color-status-success);
+  }
+  .state-chip--stopped {
+    opacity: 0.85;
+  }
+  .state-chip--idle {
+    color: var(--color-text-muted);
+    opacity: 0.8;
+  }
+
+  /* Always-visible per-agent identity tag (text, never color-coded) */
+  .name-tag {
+    @apply bg-bg border-2 border-border rounded-none shadow-pixel leading-none whitespace-nowrap;
+    padding: 2px 5px 3px;
+    font-size: 16px; /* text-2xs */
+  }
 }
 
 @keyframes pixel-pulse {

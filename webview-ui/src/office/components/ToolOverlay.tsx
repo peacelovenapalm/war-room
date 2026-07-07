@@ -11,6 +11,7 @@ import {
   FUEL_GAUGE_HEIGHT_PX,
   FUEL_GAUGE_WIDTH_PX,
   MAX_CONTEXT_TOKENS,
+  PIXEL_TEXT_SHADOW,
   TEAM_LEAD_COLOR,
   TEAM_ROLE_COLOR,
   TOKEN_CRITICAL_THRESHOLD,
@@ -19,14 +20,14 @@ import {
   TOOL_OVERLAY_VERTICAL_OFFSET,
 } from '../../constants.js';
 import type { SubagentCharacter } from '../../hooks/useExtensionMessages.js';
+import { deriveVisualState, STATE_CHIPS } from '../agentState.js';
 import type { OfficeState } from '../engine/officeState.js';
 import type { ToolActivity } from '../types.js';
 import { CharacterState, TILE_SIZE } from '../types.js';
 
-// Both turn-end states show the green checkmark bubble. A finished turn (Stop)
-// shows ONLY the checkmark (the label falls through to its normal idle text);
-// going idle waiting on the user (Notification(idle_prompt)) additionally
-// surfaces this label. Driven by Character.waitingAwaitingInput.
+// Both turn-end states show the ✓ DONE chip. Going idle waiting on the user
+// (Notification(idle_prompt)) instead maps to the loud ⚠ NEEDS INPUT chip with
+// this detail line. Driven by Character.waitingAwaitingInput.
 const WAITING_INPUT_ACTIVITY_TEXT = 'Waiting for input';
 
 interface ToolOverlayProps {
@@ -50,9 +51,9 @@ function getActivityText(
   waitingAwaitingInput: boolean,
 ): string {
   if (bubbleType === 'permission') return 'Needs approval';
-  // Only the idle case ("Waiting for input") gets a dedicated label. A finished
-  // turn (Stop, waitingAwaitingInput=false) falls through so the checkmark alone
-  // signals "done", same as the original behavior.
+  // Only the idle case ("Waiting for input") gets a dedicated label; a finished
+  // turn (Stop, waitingAwaitingInput=false) falls through (the ✓ DONE chip
+  // already signals it).
   if (bubbleType === 'waiting' && waitingAwaitingInput) return WAITING_INPUT_ACTIVITY_TEXT;
 
   const tools = agentTools[agentId];
@@ -129,9 +130,20 @@ export function ToolOverlay({
         const isSelected = selectedId === id;
         const isHovered = hoveredId === id;
         const isSub = ch.isSubagent;
+        const tools = agentTools[id];
 
-        // Only show for hovered or selected agents (unless always-show is on)
-        if (!alwaysShowOverlay && !isSelected && !isHovered) return null;
+        // Colorblind hard rule: state = SHAPE (glyph) + TEXT chip, never a tint.
+        const vState = deriveVisualState(ch, tools);
+        const chip = STATE_CHIPS[vState];
+
+        // Per-agent identity as TEXT — always visible (never color-coded):
+        // main agents: "#id [MACHINE] folder"; sub-agents: their task label.
+        const sub = isSub ? subagentCharacters.find((s) => s.id === id) : undefined;
+        const nameTag = isSub
+          ? (sub?.label ?? 'Subtask')
+          : [`#${id}`, ch.machine ? `[${ch.machine}]` : null, ch.folderName ?? null]
+              .filter(Boolean)
+              .join(' ');
 
         // Position above character
         const sittingOffset = ch.state === CharacterState.TYPE ? CHARACTER_SITTING_OFFSET_PX : 0;
@@ -139,22 +151,33 @@ export function ToolOverlay({
         const screenY =
           (deviceOffsetY + (ch.y + sittingOffset - TOOL_OVERLAY_VERTICAL_OFFSET) * zoom) / dpr;
 
-        // A "Done" agent (finished turn: waiting bubble without awaitingInput)
-        // shows ONLY its floating green checkmark bubble, never the label panel
-        // (the panel would cover the bubble). Render an empty positioned marker
-        // so overlay counts stay stable and hover/select can still bring the
-        // panel back. When always-show is off, the early return above already
-        // keeps the panel hidden for idle agents.
-        const isDone = ch.bubbleType === 'waiting' && !ch.waitingAwaitingInput;
-        if (isDone && !isSelected && !isHovered) {
+        // Loud states (⚠ NEEDS INPUT, ✗ FAILED) always show the full stack —
+        // needs-input must be the loudest thing on screen even with labels off.
+        const showFull = alwaysShowOverlay || isSelected || isHovered || chip.loud;
+
+        if (!showFull) {
+          // Compact mode: glyph + name tag stay visible (identity + state are
+          // never hidden), the detail panel appears on hover/select.
           return (
             <div
               key={id}
-              className="absolute"
-              style={{ left: screenX, top: screenY, pointerEvents: 'none' }}
+              className="absolute flex flex-col items-center -translate-x-1/2"
+              style={{
+                left: screenX,
+                top: screenY - 4,
+                pointerEvents: 'none',
+                opacity: isSub ? 0.6 : 0.85,
+                zIndex: 40,
+              }}
               data-testid="agent-overlay"
               data-agent-id={id}
-            />
+              data-state={vState}
+            >
+              <span className="name-tag">
+                {/* SHAPE + STATE WORD + identity — readable without hover */}
+                {chip.glyph} {chip.label} · {nameTag}
+              </span>
+            </div>
           );
         }
 
@@ -163,14 +186,11 @@ export function ToolOverlay({
         const subHasPermission = isSub && ch.bubbleType === 'permission';
         let activityText: string;
         if (hasWaitingBubble && ch.waitingAwaitingInput) {
-          // Idle, waiting on the user -> dedicated label. A finished turn (Stop)
-          // shows only the checkmark and falls through to the normal idle text.
           activityText = WAITING_INPUT_ACTIVITY_TEXT;
         } else if (isSub) {
           if (subHasPermission) {
             activityText = 'Needs approval';
           } else {
-            const sub = subagentCharacters.find((s) => s.id === id);
             activityText = sub ? sub.label : 'Subtask';
           }
         } else {
@@ -183,26 +203,13 @@ export function ToolOverlay({
           );
         }
 
-        // Determine dot color
-        const tools = agentTools[id];
-        const hasPermission = subHasPermission || tools?.some((t) => t.permissionWait && !t.done);
-        const hasActiveTools = tools?.some((t) => !t.done);
-        const isActive = ch.isActive;
-        const hasWaiting = ch.bubbleType === 'waiting';
-
-        let dotColor: string | null = null;
-        if (hasPermission || hasWaiting) {
-          dotColor = 'var(--color-status-permission)';
-        } else if (isActive && hasActiveTools) {
-          dotColor = 'var(--color-status-active)';
-        }
-
         // Team info
-        const isTeamAgent = !!ch.teamName;
         const teamRoleLabel = ch.isTeamLead ? 'LEAD' : ch.agentName || null;
+        const isTeamAgent = !!ch.teamName;
         const totalTokens = ch.inputTokens + ch.outputTokens;
         const tokenRatio = totalTokens / MAX_CONTEXT_TOKENS;
-        const hasExtraLines = !!(ch.folderName || teamRoleLabel || ch.machine);
+        const tokenPct = Math.round(tokenRatio * 100);
+        const hasExtraLines = !!(teamRoleLabel || !isSub);
 
         return (
           <div
@@ -210,53 +217,53 @@ export function ToolOverlay({
             className="absolute flex flex-col items-center -translate-x-1/2"
             style={{
               left: screenX,
-              top: screenY - (hasExtraLines ? 34 : 28),
+              top: screenY - (hasExtraLines ? 52 : 46),
               pointerEvents: isSelected ? 'auto' : 'none',
-              opacity: alwaysShowOverlay && !isSelected && !isHovered ? (isSub ? 0.5 : 0.75) : 1,
-              zIndex: isSelected ? 42 : 41,
+              opacity:
+                chip.loud || isSelected || isHovered
+                  ? 1
+                  : alwaysShowOverlay
+                    ? isSub
+                      ? 0.5
+                      : 0.75
+                    : 1,
+              zIndex: chip.loud ? 43 : isSelected ? 42 : 41,
             }}
             data-testid="agent-overlay"
             data-agent-id={id}
+            data-state={vState}
           >
-            <div className="flex items-center border-border px-8 pt-2 pb-4 gap-5 pixel-panel whitespace-nowrap max-w-2xs">
-              {dotColor && (
-                <span
-                  className={`w-6 h-6 rounded-full shrink-0 ${isActive && !hasPermission && !hasWaiting ? 'pixel-pulse' : ''}`}
-                  style={{ background: dotColor }}
-                />
-              )}
-              <div className="flex flex-col gap-0 overflow-hidden">
+            {/* State chip: SHAPE + TEXT (primary signal, colorblind-safe) */}
+            <span className={`state-chip ${chip.chipClass}`} data-testid="agent-state-chip">
+              <span className="state-chip__glyph">{chip.glyph}</span>
+              {chip.label}
+            </span>
+            <div className="flex items-center border-border px-6 pt-2 pb-3 gap-5 pixel-panel whitespace-nowrap max-w-2xs mt-2">
+              <div className="flex flex-col gap-1 overflow-hidden">
                 {teamRoleLabel && (
                   <span
-                    className="overflow-hidden text-ellipsis block leading-none"
+                    className="text-xs overflow-hidden text-ellipsis block leading-none"
                     style={{
-                      fontSize: '18px',
                       color: ch.isTeamLead ? TEAM_LEAD_COLOR : TEAM_ROLE_COLOR,
                       fontWeight: ch.isTeamLead ? 'bold' : undefined,
                     }}
                   >
+                    {/* Role is TEXT ("LEAD" / name); color is reinforcement only */}
                     {teamRoleLabel}
                   </span>
                 )}
                 <span
-                  className="overflow-hidden text-ellipsis block leading-none"
-                  style={{
-                    fontSize: isSub ? '20px' : '22px',
-                    fontStyle: isSub ? 'italic' : undefined,
-                  }}
+                  className={`overflow-hidden text-ellipsis block leading-none ${isSub ? 'text-sm italic' : 'text-sm'}`}
                 >
                   {activityText}
                 </span>
-                {(ch.machine || ch.folderName) && (
+                {!isSub && (
                   <span
                     className="text-2xs leading-none overflow-hidden text-ellipsis block"
                     data-testid="agent-machine-label"
                   >
-                    {/* Machine identity as TEXT (colorblind rule: never color-only).
-                        Bracketed label distinguishes machine from folder name. */}
-                    {ch.machine ? `[${ch.machine}]` : ''}
-                    {ch.machine && ch.folderName ? ' ' : ''}
-                    {ch.folderName ?? ''}
+                    {/* Identity as TEXT (colorblind rule: never color-only). */}
+                    {nameTag}
                   </span>
                 )}
               </div>
@@ -277,21 +284,30 @@ export function ToolOverlay({
             </div>
             {isTeamAgent && totalTokens > 0 && (
               <div
-                style={{
-                  width: FUEL_GAUGE_WIDTH_PX,
-                  height: FUEL_GAUGE_HEIGHT_PX,
-                  background: FUEL_GAUGE_BG,
-                  marginTop: 2,
-                }}
-                title={`${Math.round(tokenRatio * 100)}% context used (${(totalTokens / 1000).toFixed(0)}k tokens)`}
+                className="flex items-center gap-3"
+                style={{ marginTop: 2 }}
+                title={`${tokenPct}% context used (${(totalTokens / 1000).toFixed(0)}k tokens)`}
               >
                 <div
                   style={{
-                    width: `${Math.min(tokenRatio * 100, 100)}%`,
-                    height: '100%',
-                    background: getFuelColor(tokenRatio),
+                    width: FUEL_GAUGE_WIDTH_PX,
+                    height: FUEL_GAUGE_HEIGHT_PX,
+                    background: FUEL_GAUGE_BG,
                   }}
-                />
+                >
+                  <div
+                    style={{
+                      width: `${Math.min(tokenRatio * 100, 100)}%`,
+                      height: '100%',
+                      background: getFuelColor(tokenRatio),
+                    }}
+                  />
+                </div>
+                {/* Percent as TEXT so the gauge reads in grayscale (bar color
+                    thresholds are reinforcement only) */}
+                <span className="text-2xs leading-none" style={{ textShadow: PIXEL_TEXT_SHADOW }}>
+                  {tokenPct}%
+                </span>
               </div>
             )}
           </div>

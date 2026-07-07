@@ -74,6 +74,14 @@ export const CANVAS_FALLBACK_TILE_COLOR = '#444';
 export const CANVAS_ERROR_TILE_COLOR = '#FF00FF';
 export const WALL_COLOR = '#3A3A5C';
 
+// ── Colorblind-safe overlay glyphs (shape + text carry state; see agentState.ts) ──
+/** Dark outline behind white overlay glyphs (seat ●/✓/✗, ghost ✗) for grayscale contrast */
+export const OVERLAY_GLYPH_OUTLINE_COLOR = '#0a0a14';
+/** Fill for overlay glyphs drawn on the canvas */
+export const OVERLAY_GLYPH_COLOR = '#ffffff';
+/** 1px pixel-art drop shadow for HUD text drawn over the canvas (not a state signal) */
+export const PIXEL_TEXT_SHADOW = '1px 1px 0 #0a0a14';
+
 // ── Camera ───────────────────────────────────────────────────
 export const CAMERA_FOLLOW_LERP = 0.1;
 export const CAMERA_FOLLOW_SNAP_THRESHOLD = 0.5;
