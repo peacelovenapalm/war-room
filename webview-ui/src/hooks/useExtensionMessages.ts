@@ -122,6 +122,7 @@ export function useExtensionMessages(
       seatId?: string;
       folderName?: string;
       machine?: string;
+      provider?: string;
     }> = [];
 
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
@@ -173,7 +174,16 @@ export function useExtensionMessages(
         }
         // Add buffered agents now that layout (and seats) are correct
         for (const p of pendingAgents) {
-          os.addAgent(p.id, p.palette, p.hueShift, p.seatId, true, p.folderName, p.machine);
+          os.addAgent(
+            p.id,
+            p.palette,
+            p.hueShift,
+            p.seatId,
+            true,
+            p.folderName,
+            p.machine,
+            p.provider,
+          );
         }
         pendingAgents = [];
         layoutReadyRef.current = true;
@@ -188,6 +198,7 @@ export function useExtensionMessages(
         const id = msg.id as number;
         const folderName = msg.folderName as string | undefined;
         const machine = msg.machine as string | undefined;
+        const provider = msg.provider as string | undefined;
         const isTeammate = msg.isTeammate as boolean | undefined;
         const teammateName = msg.teammateName as string | undefined;
         const teammateParentId = msg.parentAgentId as number | undefined;
@@ -220,7 +231,16 @@ export function useExtensionMessages(
             ch.agentName = teammateName;
           }
         } else {
-          os.addAgent(id, undefined, undefined, undefined, undefined, folderName, machine);
+          os.addAgent(
+            id,
+            undefined,
+            undefined,
+            undefined,
+            undefined,
+            folderName,
+            machine,
+            provider,
+          );
         }
         saveAgentSeats(os);
       } else if (msg.type === 'agentClosed') {
@@ -257,6 +277,7 @@ export function useExtensionMessages(
         >;
         const folderNames = (msg.folderNames || {}) as Record<number, string>;
         const machines = (msg.machines || {}) as Record<number, string>;
+        const providers = (msg.providers || {}) as Record<number, string>;
         // Buffer agents — they'll be added in layoutLoaded after seats are built
         for (const id of incoming) {
           const m = meta[id];
@@ -267,6 +288,7 @@ export function useExtensionMessages(
             seatId: m?.seatId,
             folderName: folderNames[id],
             machine: machines[id],
+            provider: providers[id],
           });
         }
         // Standalone server sends layoutLoaded BEFORE existingAgents, so the
@@ -275,7 +297,16 @@ export function useExtensionMessages(
         // characters (upstream ordering bug flagged in M1).
         if (layoutReadyRef.current) {
           for (const p of pendingAgents) {
-            os.addAgent(p.id, p.palette, p.hueShift, p.seatId, true, p.folderName, p.machine);
+            os.addAgent(
+              p.id,
+              p.palette,
+              p.hueShift,
+              p.seatId,
+              true,
+              p.folderName,
+              p.machine,
+              p.provider,
+            );
           }
           pendingAgents = [];
           if (os.characters.size > 0) {

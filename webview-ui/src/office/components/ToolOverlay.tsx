@@ -150,7 +150,13 @@ export function ToolOverlay({
         const sub = isSub ? subagentCharacters.find((s) => s.id === id) : undefined;
         const nameTag = isSub
           ? (sub?.label ?? 'Subtask')
-          : [`#${id}`, ch.machine ? `[${ch.machine}]` : null, ch.folderName ?? null]
+          : [
+              `#${id}`,
+              // Coworker provider as TEXT ([CODEX] / [GEMINI]) — never color-only.
+              ch.provider ? `[${ch.provider.toUpperCase()}]` : null,
+              ch.machine ? `[${ch.machine}]` : null,
+              ch.folderName ?? null,
+            ]
               .filter(Boolean)
               .join(' ');
 

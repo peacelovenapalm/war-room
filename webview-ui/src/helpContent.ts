@@ -132,6 +132,23 @@ export const HELP_SECTIONS: HelpSection[] = [
     ],
   },
   {
+    id: 'coworkers',
+    title: 'AI COWORKERS (CODEX / GEMINI)',
+    intro: undefined,
+    entries: [
+      {
+        glyph: '▣',
+        word: 'CODEX',
+        text: 'Codex CLI sessions appear as coworkers with a SQUARE badge above their head and a [CODEX] text label. Their activity streams in via a per-provider adapter tailing the real Codex session files.',
+      },
+      {
+        glyph: '◆',
+        word: 'GEMINI',
+        text: 'Gemini CLI sessions wear a DIAMOND badge and a [GEMINI] text label. Gemini logs are sparse, so its presence is heartbeat-level: working when it is actively used, idle after it goes quiet.',
+      },
+    ],
+  },
+  {
     id: 'data-sources',
     title: 'WHERE THE DATA COMES FROM',
     intro: 'Nothing here is a game score — everything reflects real state:',

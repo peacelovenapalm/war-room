@@ -37,6 +37,7 @@ import {
 } from '../../constants.js';
 import type { DebrisRecord, ExtinguishEffect } from '../crisis.js';
 import { getColorizedFloorSprite, hasFloorSprites, WALL_COLOR } from '../floorTiles.js';
+import { getCoworkerBadge } from '../sprites/coworkerSprites.js';
 import { getPetSprites } from '../sprites/petSpriteData.js';
 import { getCachedSprite, getOutlineSprite } from '../sprites/spriteCache.js';
 import {
@@ -205,10 +206,19 @@ export function renderScene(
       });
     }
 
+    // Coworker badge (v1 #6a): distinct silhouette floating above a
+    // non-Claude coworker's head (square = Codex, diamond = Gemini) —
+    // pairs with the [PROVIDER] TEXT label in the overlay.
+    const badge = ch.provider ? getCachedSprite(getCoworkerBadge(ch.provider), zoom) : null;
     drawables.push({
       zY: charZY,
       draw: (c) => {
         c.drawImage(cached, drawX, drawY);
+        if (badge) {
+          const bx = Math.round(offsetX + ch.x * zoom - badge.width / 2);
+          const by = drawY - badge.height - Math.round(zoom);
+          c.drawImage(badge, bx, by);
+        }
       },
     });
   }

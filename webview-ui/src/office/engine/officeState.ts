@@ -368,6 +368,7 @@ export class OfficeState {
     skipSpawnEffect?: boolean,
     folderName?: string,
     machine?: string,
+    provider?: string,
   ): void {
     if (this.characters.has(id)) return;
 
@@ -417,6 +418,9 @@ export class OfficeState {
     }
     if (machine) {
       ch.machine = machine;
+    }
+    if (provider) {
+      ch.provider = provider;
     }
     if (!skipSpawnEffect) {
       ch.matrixEffect = 'spawn';
@@ -771,11 +775,16 @@ export class OfficeState {
 
   // ── Crisis & triage layer (v1 mechanic #1) ──────────────────────
 
-  /** Identity TEXT for a character: "#id [MACHINE] folder" (never color-coded). */
+  /** Identity TEXT for a character: "#id [PROVIDER] [MACHINE] folder" (never color-coded). */
   agentIdentity(id: number): string {
     const ch = this.characters.get(id);
     if (!ch) return `#${id}`;
-    return [`#${id}`, ch.machine ? `[${ch.machine}]` : null, ch.folderName ?? null]
+    return [
+      `#${id}`,
+      ch.provider ? `[${ch.provider.toUpperCase()}]` : null,
+      ch.machine ? `[${ch.machine}]` : null,
+      ch.folderName ?? null,
+    ]
       .filter(Boolean)
       .join(' ');
   }

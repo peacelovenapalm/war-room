@@ -212,6 +212,10 @@ export interface Character {
   /** Machine identity TEXT label (e.g. "MACBOOK", "NEXUS"). Rendered in the overlay
    *  so cross-machine sessions are distinguishable by text, never color alone. */
   machine?: string;
+  /** Coworker provider id ('codex', 'gemini', …) when this agent is NOT a
+   *  Claude Code session. Renders a distinct badge silhouette + TEXT label
+   *  (e.g. "[CODEX]"); absent for Claude sessions. */
+  provider?: string;
   /** Latest state from the per-machine needs-input poller (`claude agents --json`,
    *  arriving via the server's agentPollState broadcast). `at` = client receipt
    *  time (ms) so the value expires visually if the poller/server goes silent.
