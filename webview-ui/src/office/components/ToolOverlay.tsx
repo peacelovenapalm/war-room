@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 
 import { Button } from '../../components/ui/Button.js';
 import {
@@ -21,6 +21,7 @@ import {
 } from '../../constants.js';
 import type { SubagentCharacter } from '../../hooks/useExtensionMessages.js';
 import { deriveVisualState, getFreshPollState, STATE_CHIPS } from '../agentState.js';
+import { CRISIS_STAGE_SPECS, EXTINGUISH_DURATION_MS, formatAge, stageForAge } from '../crisis.js';
 import type { OfficeState } from '../engine/officeState.js';
 import type { ToolActivity } from '../types.js';
 import { CharacterState, TILE_SIZE } from '../types.js';
@@ -92,16 +93,24 @@ export function ToolOverlay({
   onCloseAgent,
   alwaysShowOverlay,
 }: ToolOverlayProps) {
-  const [, setTick] = useState(0);
+  const [now, setNow] = useState(0);
+  const agentToolsRef = useRef(agentTools);
+  useEffect(() => {
+    agentToolsRef.current = agentTools;
+  }, [agentTools]);
   useEffect(() => {
     let rafId = 0;
     const tick = () => {
-      setTick((n) => n + 1);
+      // Crisis layer tick: ignite/age/resolve fires, spawn/clear debris.
+      // Runs on the animation tick (not in render — it mutates the office
+      // store) because it needs agentTools, which the canvas loop can't see.
+      officeState.updateCrises(agentToolsRef.current);
+      setNow(Date.now());
       rafId = requestAnimationFrame(tick);
     };
     rafId = requestAnimationFrame(tick);
     return () => cancelAnimationFrame(rafId);
-  }, []);
+  }, [officeState]);
 
   const el = containerRef.current;
   if (!el) return null;
@@ -258,6 +267,23 @@ export function ToolOverlay({
               <span className="state-chip__glyph">{chip.glyph}</span>
               {chip.label}
             </span>
+            {/* Crisis tag (v1): stage SHAPE + WORD + age — how long this desk
+                has been burning. Ages smoke → fire → alarm. */}
+            {ch.crisis &&
+              (() => {
+                const ageMs = Math.max(0, now - ch.crisis.since);
+                const stage = stageForAge(ageMs);
+                const spec = CRISIS_STAGE_SPECS[stage];
+                return (
+                  <span
+                    className={`crisis-tag crisis-tag--${stage}`}
+                    data-testid="agent-crisis-tag"
+                    data-stage={stage}
+                  >
+                    {spec.glyph} {spec.label} {formatAge(ageMs)}
+                  </span>
+                );
+              })()}
             <div className="flex items-center border-border px-6 pt-2 pb-3 gap-5 pixel-panel whitespace-nowrap max-w-2xs mt-2">
               <div className="flex flex-col gap-1 overflow-hidden">
                 {teamRoleLabel && (
@@ -303,36 +329,104 @@ export function ToolOverlay({
               )}
             </div>
             {isTeamAgent && totalTokens > 0 && (
-              <div
-                className="flex items-center gap-3"
-                style={{ marginTop: 2 }}
-                title={`${tokenPct}% context used (${(totalTokens / 1000).toFixed(0)}k tokens)`}
-              >
-                <div
-                  style={{
-                    width: FUEL_GAUGE_WIDTH_PX,
-                    height: FUEL_GAUGE_HEIGHT_PX,
-                    background: FUEL_GAUGE_BG,
-                  }}
-                >
-                  <div
-                    style={{
-                      width: `${Math.min(tokenRatio * 100, 100)}%`,
-                      height: '100%',
-                      background: getFuelColor(tokenRatio),
-                    }}
-                  />
-                </div>
-                {/* Percent as TEXT so the gauge reads in grayscale (bar color
-                    thresholds are reinforcement only) */}
-                <span className="text-2xs leading-none" style={{ textShadow: PIXEL_TEXT_SHADOW }}>
-                  {tokenPct}%
-                </span>
-              </div>
+              <TeamTokenGauge
+                tokenRatio={tokenRatio}
+                tokenPct={tokenPct}
+                totalTokens={totalTokens}
+              />
             )}
           </div>
         );
       })}
+      {/* Debris: labeled wreckage left by failed/stopped agents — stays until
+          acknowledged (click). SHAPE (✗ + rubble sprite) + TEXT, never a tint. */}
+      {[...officeState.debris.values()].map((d) => {
+        const screenX = (deviceOffsetX + d.x * zoom) / dpr;
+        const screenY = (deviceOffsetY + (d.y + 6) * zoom) / dpr;
+        return (
+          <div
+            key={`debris-${d.key}`}
+            className="absolute flex flex-col items-center -translate-x-1/2"
+            style={{ left: screenX, top: screenY, pointerEvents: 'none', zIndex: 42 }}
+            data-testid="debris-marker"
+            data-debris-key={d.key}
+          >
+            <button
+              className="debris-tag"
+              style={{ pointerEvents: 'auto' }}
+              title="Acknowledge — clear this debris"
+              onClick={(e) => {
+                e.stopPropagation();
+                officeState.acknowledgeDebris(d.key);
+              }}
+            >
+              ✗ DEBRIS · {d.label} · {d.kind === 'failed' ? 'FAILED' : 'STOPPED'} · CLEAR
+            </button>
+          </div>
+        );
+      })}
+      {/* Resolution feedback: floating "✓ RESOLVED" while the steam puffs. */}
+      {officeState.crisisEffects.map((e, i) => {
+        const t = (now - e.startedAt) / EXTINGUISH_DURATION_MS;
+        if (t < 0 || t >= 1) return null;
+        const screenX = (deviceOffsetX + e.x * zoom) / dpr;
+        const screenY = (deviceOffsetY + (e.y - 30 - t * 14) * zoom) / dpr;
+        return (
+          <div
+            key={`resolved-${e.startedAt}-${i}`}
+            className="absolute -translate-x-1/2 resolved-float"
+            style={{
+              left: screenX,
+              top: screenY,
+              pointerEvents: 'none',
+              zIndex: 44,
+              opacity: 1 - t,
+            }}
+            data-testid="resolved-float"
+          >
+            ✓ RESOLVED
+          </div>
+        );
+      })}
     </>
+  );
+}
+
+function TeamTokenGauge({
+  tokenRatio,
+  tokenPct,
+  totalTokens,
+}: {
+  tokenRatio: number;
+  tokenPct: number;
+  totalTokens: number;
+}) {
+  return (
+    <div
+      className="flex items-center gap-3"
+      style={{ marginTop: 2 }}
+      title={`${tokenPct}% context used (${(totalTokens / 1000).toFixed(0)}k tokens)`}
+    >
+      <div
+        style={{
+          width: FUEL_GAUGE_WIDTH_PX,
+          height: FUEL_GAUGE_HEIGHT_PX,
+          background: FUEL_GAUGE_BG,
+        }}
+      >
+        <div
+          style={{
+            width: `${Math.min(tokenRatio * 100, 100)}%`,
+            height: '100%',
+            background: getFuelColor(tokenRatio),
+          }}
+        />
+      </div>
+      {/* Percent as TEXT so the gauge reads in grayscale (bar color
+                    thresholds are reinforcement only) */}
+      <span className="text-2xs leading-none" style={{ textShadow: PIXEL_TEXT_SHADOW }}>
+        {tokenPct}%
+      </span>
+    </div>
   );
 }

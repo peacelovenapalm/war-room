@@ -9,6 +9,7 @@ import { EditActionBar } from './components/EditActionBar.js';
 import { MigrationNotice } from './components/MigrationNotice.js';
 import { SettingsModal } from './components/SettingsModal.js';
 import { Tooltip } from './components/Tooltip.js';
+import { TriagePanel } from './components/TriagePanel.js';
 import { Modal } from './components/ui/Modal.js';
 import { VersionIndicator } from './components/VersionIndicator.js';
 import { ZoomControls } from './components/ZoomControls.js';
@@ -264,6 +265,9 @@ function App() {
             onCloseAgent={handleCloseAgent}
             alwaysShowOverlay={alwaysShowOverlay}
           />
+
+          {/* TRIAGE incident board (v1): auto-appears when a crisis exists */}
+          <TriagePanel officeState={officeState} />
         </>
       ) : (
         <DebugView

@@ -178,6 +178,142 @@
     padding: 2px 5px 3px;
     font-size: 16px; /* text-2xs */
   }
+
+  /* ── Crisis & triage layer (v1 mechanic #1) ─────────────────────
+     Stage identity is SHAPE (glyph + canvas silhouette) + TEXT + age; the
+     colors below are reinforcement only. ALARM inverts (white) — the house
+     "loudest" pattern — and must stay the brightest element in grayscale. */
+  .crisis-tag {
+    @apply inline-flex items-center gap-3 rounded-none leading-none whitespace-nowrap font-pixel tabular-nums;
+    border: 2px solid var(--color-border);
+    background: var(--color-bg);
+    color: var(--color-text);
+    padding: 2px 6px 3px;
+    font-size: 16px; /* text-2xs */
+    letter-spacing: 0.5px;
+    margin-top: 2px;
+  }
+  .crisis-tag--fire {
+    border-color: var(--color-warning);
+    font-weight: bold;
+  }
+  .crisis-tag--alarm {
+    background: #ffffff;
+    color: #000000;
+    border-color: #000000;
+    box-shadow:
+      0 0 0 2px #ffffff,
+      3px 3px 0 #0a0a14;
+    font-weight: bold;
+    font-size: 18px; /* text-xs */
+  }
+
+  /* Debris label: wreckage left by failed/stopped agents. Clickable (ACK). */
+  .debris-tag {
+    @apply rounded-none leading-none whitespace-nowrap font-pixel cursor-pointer;
+    border: 2px solid var(--color-border);
+    background: var(--color-bg);
+    color: var(--color-text);
+    padding: 2px 6px 3px;
+    font-size: 16px; /* text-2xs */
+    box-shadow: var(--shadow-pixel);
+  }
+  .debris-tag:hover {
+    background: var(--color-btn-hover);
+  }
+
+  /* Floating "✓ RESOLVED" feedback (opacity/position driven inline). */
+  .resolved-float {
+    @apply font-pixel leading-none whitespace-nowrap;
+    background: #ffffff;
+    color: #000000;
+    border: 2px solid #000000;
+    padding: 2px 6px 3px;
+    font-size: 18px;
+    font-weight: bold;
+  }
+
+  /* TRIAGE incident board (docked top-right, departure-board rows). */
+  .triage-panel {
+    @apply bg-bg border-2 border-border rounded-none shadow-pixel;
+    max-width: 560px;
+    max-height: 60vh;
+  }
+  .triage-panel__header {
+    @apply font-pixel leading-none whitespace-nowrap cursor-pointer;
+    background: var(--color-bg-dark);
+    color: var(--color-text);
+    border: 0;
+    border-bottom: 2px solid var(--color-border);
+    padding: 6px 10px 7px;
+    font-size: 20px; /* text-sm */
+    font-weight: bold;
+    letter-spacing: 0.5px;
+    width: 100%;
+  }
+  .triage-panel__allclear {
+    @apply font-pixel leading-none whitespace-nowrap;
+    background: #ffffff;
+    color: #000000;
+    padding: 8px 14px 9px;
+    font-size: 22px;
+    font-weight: bold;
+  }
+  .triage-panel__rows {
+    @apply flex flex-col overflow-y-auto;
+    max-height: calc(60vh - 34px);
+  }
+  .triage-row {
+    @apply flex items-center gap-8 leading-none;
+    padding: 5px 10px 6px;
+    border-bottom: 1px solid var(--color-border);
+    font-size: 18px; /* text-xs */
+  }
+  .triage-row:last-child {
+    border-bottom: 0;
+  }
+  .triage-row--loud {
+    background: #ffffff;
+    color: #000000;
+    font-weight: bold;
+  }
+  .triage-row__stage {
+    @apply shrink-0 whitespace-nowrap;
+    min-width: 92px;
+    font-weight: bold;
+  }
+  .triage-row__identity {
+    @apply shrink-0 whitespace-nowrap;
+    max-width: 170px;
+    overflow: hidden;
+    text-overflow: ellipsis;
+  }
+  .triage-row__cause {
+    @apply min-w-0 flex-1;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+    color: var(--color-text-muted);
+  }
+  .triage-row--loud .triage-row__cause {
+    color: #333333;
+  }
+  .triage-row__age {
+    @apply shrink-0;
+    min-width: 44px;
+    text-align: right;
+  }
+  .triage-row__clear {
+    @apply shrink-0 font-pixel leading-none cursor-pointer rounded-none;
+    border: 2px solid var(--color-border);
+    background: var(--color-btn-bg);
+    color: var(--color-text);
+    padding: 2px 6px 3px;
+    font-size: 16px;
+  }
+  .triage-row__clear:hover {
+    background: var(--color-btn-hover);
+  }
 }
 
 @keyframes pixel-pulse {
