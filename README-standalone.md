@@ -87,6 +87,27 @@ WAR_ROOM_TOKEN=<token> node bin/needs-input-poller.mjs \
   `.planning/runbooks/install-poller-launchd.sh <MACHINE>` (human-run
   only; reuses the token stored by the hooks runbook).
 
+## Briefing panel (post-v0)
+
+The HUD's BRIEFING toggle overlays today's todo top-3 and the half-baked
+project tracker's gate tallies. Data comes from two optional, env-wired
+files on the deploy host — never hardcoded paths:
+
+- **`WAR_ROOM_TODO_DIR`** — a directory of daily todo-compiler files named
+  `YYYY-MM-DD.md`. The lexicographically-latest filename is used. The
+  file's `## Start now` section's numbered items become the top-3; every
+  other `##`/`###` heading contributes a `{title, count}` summary from its
+  `- [ ]` items.
+- **`WAR_ROOM_TRACKER_STATE`** — path to a single `STATE.md` whose YAML
+  frontmatter carries `milestone_name:` and a `gates:` list (id, label,
+  status, tasks). Parsed with a tolerant line-based parser (no YAML
+  dependency).
+
+Either or both may be unset — the corresponding half of the panel renders
+"no source configured" instead of failing. `GET /api/briefing` is
+unauthenticated, same as `/api/health` (the server itself is tailnet-only),
+and the response is cached for 60s.
+
 ## Config guard (do not undo)
 
 `hooksEnabled` now **defaults to `false`** in this fork (upstream default

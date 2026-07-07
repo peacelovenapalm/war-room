@@ -350,6 +350,23 @@ alwaysShowLabels: true }` BEFORE first run. Verified after the run:
 Hook installation stays OFF until M2, where hook wiring ships as a runbook
 Greg runs himself.
 
+## Post-v0: briefing feature (2026-07-06)
+
+Outside the M0-M4 goal contract — a dashboard add-on requested directly, not
+a GOAL.md milestone. GET `/api/briefing` (unauthenticated, same as
+`/api/health` — tailnet-only server) serves a 60s-cached JSON payload built
+from two files wired via env vars (`WAR_ROOM_TODO_DIR`, `WAR_ROOM_TRACKER_STATE`
+— documented in `README-standalone.md`), never hardcoded paths. A BRIEFING
+toggle in the bottom toolbar overlays today's todo top-3 + tracker gate
+tallies, colorblind-safe (glyph + word on every status). Both parsers are
+tolerant line-based parsers (no YAML dependency); a missing env var, missing
+file, or parse failure yields a null half + one `⚠` log line, never a crash.
+Server: 236/236 tests green (was 223, +13). Webview: 48/48 green (unchanged
+— no jsdom/testing-library in this repo, so no component render test was
+added; noted as a deviation from the ask). Verified end-to-end with a real
+build + start + curl + headless screenshot
+(`.planning/evidence/briefing-panel.png`).
+
 ## Gated / blocked items
 
 - ✗ **BLOCKED — NEXUS deploy NOT RUN.** `.planning/runbooks/nexus-war-room-deploy.sh`
