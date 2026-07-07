@@ -123,11 +123,22 @@ test('gemini: first scan indexes without reporting activity (no history replay)'
 
 test('gemini: a new messageId marks the session active exactly once', () => {
   const first = diffGeminiLog({}, gLog('s1', [0]));
-  const second = diffGeminiLog(first.nextLastSeen, gLog('s1', [0, 1]));
+  const second = diffGeminiLog(first.nextLastSeen, gLog('s1', [0, 1]), true);
   assert.deepEqual(second.active, ['s1']);
   // unchanged log → no activity
-  const third = diffGeminiLog(second.nextLastSeen, gLog('s1', [0, 1]));
+  const third = diffGeminiLog(second.nextLastSeen, gLog('s1', [0, 1]), true);
   assert.deepEqual(third.active, []);
+});
+
+test('gemini: a brand-new session AFTER the seed scan is live activity (one-prompt sessions)', () => {
+  const seedScan = diffGeminiLog({}, gLog('s1', [0]));
+  // s2 appears later with its first-ever message — that IS activity
+  const later = diffGeminiLog(
+    seedScan.nextLastSeen,
+    [...gLog('s1', [0]), ...gLog('s2', [0])],
+    true,
+  );
+  assert.deepEqual(later.active, ['s2']);
 });
 
 test('gemini: malformed logs are tolerated', () => {

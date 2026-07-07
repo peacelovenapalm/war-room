@@ -50,6 +50,10 @@ const MIN_INTERVAL_MS = 1_000;
 const GEMINI_IDLE_MS = 45_000;
 /** Only tail rollout files touched within this window (bound the scan). */
 const CODEX_FRESH_MS = 24 * 60 * 60 * 1000;
+/** A rollout file with no growth for this long ends its office session. */
+const CODEX_IDLE_END_MS = 30 * 60 * 1000;
+/** A Gemini session quiet for this long leaves the office. */
+const GEMINI_END_MS = 60 * 60 * 1000;
 
 // ── Config ──────────────────────────────────────────────────────
 
@@ -181,6 +185,13 @@ async function tickCodex(cfg) {
       if (cfg.replay) entry.state = {}; // replay re-reads session_meta in-stream
       continue; // stream only growth after first sight (unless replaying)
     }
+    if (size < entry.offset) {
+      // File truncated/rewritten (rotation) — restart from the top.
+      entry.offset = 0;
+      entry.buf = '';
+      entry.state = {};
+      seedCodexIdentity(file, entry.state);
+    }
     if (size <= entry.offset) continue;
     let chunk;
     try {
@@ -207,6 +218,32 @@ async function tickCodex(cfg) {
     }
   }
   if (events.length > 0) await postEvents(cfg, 'codex', events);
+
+  // Idle end + prune: a rollout with no growth for CODEX_IDLE_END_MS is over —
+  // tell the office so the coworker leaves, and stop tracking the file
+  // (bounds the map; a fresh append re-adopts it cleanly).
+  const now = Date.now();
+  for (const [file, entry] of codexFiles) {
+    let mtime = 0;
+    try {
+      mtime = fs.statSync(file).mtimeMs;
+    } catch {
+      mtime = 0; // file gone — treat as idle-ended
+    }
+    if (now - mtime >= CODEX_IDLE_END_MS) {
+      if (entry.state.sessionId) {
+        await postEvents(cfg, 'codex', [
+          {
+            session_id: entry.state.sessionId,
+            cwd: entry.state.cwd,
+            hook_event_name: 'SessionEnd',
+            reason: 'exit',
+          },
+        ]);
+      }
+      codexFiles.delete(file);
+    }
+  }
   return events.length;
 }
 
@@ -249,7 +286,7 @@ async function tickGemini(cfg) {
     } catch {
       continue; // no logs.json or malformed — skip project
     }
-    const { active, nextLastSeen } = diffGeminiLog(geminiLastSeen, entries);
+    const { active, nextLastSeen } = diffGeminiLog(geminiLastSeen, entries, geminiSeeded);
     geminiLastSeen = nextLastSeen;
     if (!geminiSeeded) continue; // first scan only indexes (no replay)
     for (const sid of active) {
@@ -261,12 +298,18 @@ async function tickGemini(cfg) {
   }
   geminiSeeded = true;
 
-  // Idle sweep: quiet sessions go DONE/idle.
+  // Idle sweep: quiet sessions go DONE/idle, long-quiet sessions leave.
   for (const [sid, s] of geminiSessions) {
     if (!s.idleSent && now - s.lastActiveAt >= GEMINI_IDLE_MS) {
       s.idleSent = true;
       await postEvents(cfg, 'gemini', geminiIdleEvents(sid, s.cwd));
       sent++;
+    }
+    if (now - s.lastActiveAt >= GEMINI_END_MS) {
+      await postEvents(cfg, 'gemini', [
+        { session_id: sid, cwd: s.cwd, hook_event_name: 'SessionEnd', reason: 'exit' },
+      ]);
+      geminiSessions.delete(sid);
     }
   }
   return sent;
@@ -283,16 +326,25 @@ console.log(
   `[coworker-adapter] providers=${cfg.providers.join(',')} machine=${cfg.machine} → ${cfg.url} (token: set)`,
 );
 
+let tickRunning = false;
 async function tick() {
+  // A slow/unreachable server must not let ticks overlap (double-reads of the
+  // same file region → duplicate/out-of-order events).
+  if (tickRunning) return;
+  tickRunning = true;
   try {
-    if (cfg.providers.includes('codex')) await tickCodex(cfg);
-  } catch (err) {
-    console.log(`⚠ codex tick failed: ${err?.message ?? err}`);
-  }
-  try {
-    if (cfg.providers.includes('gemini')) await tickGemini(cfg);
-  } catch (err) {
-    console.log(`⚠ gemini tick failed: ${err?.message ?? err}`);
+    try {
+      if (cfg.providers.includes('codex')) await tickCodex(cfg);
+    } catch (err) {
+      console.log(`⚠ codex tick failed: ${err?.message ?? err}`);
+    }
+    try {
+      if (cfg.providers.includes('gemini')) await tickGemini(cfg);
+    } catch (err) {
+      console.log(`⚠ gemini tick failed: ${err?.message ?? err}`);
+    }
+  } finally {
+    tickRunning = false;
   }
 }
 

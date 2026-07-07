@@ -126,9 +126,12 @@ export function mapCodexLine(rec, state) {
  *
  * @param {Record<string, number>} lastSeen sessionId → highest messageId seen
  * @param {unknown} entries parsed logs.json content
+ * @param {boolean} seeded true once the first index-only scan has run —
+ *   after that, a session we've NEVER seen is live activity (its first
+ *   message just happened), not history.
  * @returns {{ active: string[], nextLastSeen: Record<string, number> }}
  */
-export function diffGeminiLog(lastSeen, entries) {
+export function diffGeminiLog(lastSeen, entries, seeded = false) {
   const nextLastSeen = { ...lastSeen };
   const active = new Set();
   if (!Array.isArray(entries)) return { active: [], nextLastSeen };
@@ -143,7 +146,9 @@ export function diffGeminiLog(lastSeen, entries) {
     const knownBefore = lastSeen[sid] !== undefined;
     if (nextLastSeen[sid] === undefined || mid > nextLastSeen[sid]) {
       nextLastSeen[sid] = mid;
-      if (knownBefore && mid > lastSeen[sid]) active.add(sid);
+      // Activity = a message newer than the session's index, OR a session
+      // that appeared entirely after the seed scan (one-prompt sessions).
+      if ((knownBefore && mid > lastSeen[sid]) || (!knownBefore && seeded)) active.add(sid);
     }
   }
   return { active: [...active], nextLastSeen };
