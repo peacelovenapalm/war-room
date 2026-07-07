@@ -141,6 +141,7 @@ export interface AgentPollState {
   id: number;
   state?: AgentPollStateValue;
   waitingFor?: string;
+  ageMs?: number;
 }
 
 export type AgentPollStateValue = 'working' | 'blocked' | 'done' | 'failed' | 'stopped';

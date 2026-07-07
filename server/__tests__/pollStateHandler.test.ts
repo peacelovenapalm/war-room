@@ -103,7 +103,7 @@ describe('applyPollStates', () => {
     expect(result).toEqual({ matched: 1, cleared: 0 });
     expect(store.get(1)!.pollState?.state).toBe('blocked');
     expect(broadcasts).toEqual([
-      { type: 'agentPollState', id: 1, state: 'blocked', waitingFor: 'Permission: Edit' },
+      { type: 'agentPollState', id: 1, state: 'blocked', waitingFor: 'Permission: Edit', ageMs: 0 },
     ]);
   });
 
@@ -171,7 +171,7 @@ describe('applyPollStates', () => {
     applyPollStates(store, 'MACBOOK', 'MACBOOK', [{ id: 'stable-sess', state: 'blocked' }], 1000);
     expect(broadcasts.length).toBe(1);
     applyPollStates(store, 'MACBOOK', 'MACBOOK', [{ id: 'stable-sess', state: 'blocked' }], 2000);
-    expect(broadcasts.length).toBe(1); // unchanged → no re-broadcast
+    expect(broadcasts.length).toBe(1); // unchanged, not yet due → no re-broadcast
     expect(store.get(9)!.pollState?.at).toBe(2000); // but freshness updated
     applyPollStates(
       store,
@@ -181,6 +181,51 @@ describe('applyPollStates', () => {
       3000,
     );
     expect(broadcasts.length).toBe(2); // waitingFor change → broadcast
+  });
+
+  it('preserves `since` across refreshes and waitingFor changes; resets it on state change', () => {
+    store.set(10, createTestAgent({ id: 10, sessionId: 'aging-sess' }));
+    applyPollStates(store, 'MACBOOK', 'MACBOOK', [{ id: 'aging-sess', state: 'blocked' }], 1000);
+    expect(store.get(10)!.pollState?.since).toBe(1000);
+    // refresh tick — same state, since anchored to the transition
+    applyPollStates(store, 'MACBOOK', 'MACBOOK', [{ id: 'aging-sess', state: 'blocked' }], 9000);
+    expect(store.get(10)!.pollState?.since).toBe(1000);
+    // waitingFor-only change — still the same blocked episode
+    applyPollStates(
+      store,
+      'MACBOOK',
+      'MACBOOK',
+      [{ id: 'aging-sess', state: 'blocked', waitingFor: 'Permission: Bash' }],
+      12_000,
+    );
+    expect(store.get(10)!.pollState?.since).toBe(1000);
+    expect(broadcasts.at(-1)).toMatchObject({ id: 10, ageMs: 11_000 });
+    // state change — new episode, since resets
+    applyPollStates(store, 'MACBOOK', 'MACBOOK', [{ id: 'aging-sess', state: 'working' }], 15_000);
+    expect(store.get(10)!.pollState?.since).toBe(15_000);
+    expect(broadcasts.at(-1)).toMatchObject({ id: 10, state: 'working', ageMs: 0 });
+  });
+
+  it('rebroadcasts an UNCHANGED state once the rebroadcast interval elapses (keeps client TTL alive)', () => {
+    store.set(11, createTestAgent({ id: 11, sessionId: 'long-block' }));
+    applyPollStates(store, 'MACBOOK', 'MACBOOK', [{ id: 'long-block', state: 'blocked' }], 1000);
+    expect(broadcasts.length).toBe(1);
+    // 15s later: unchanged, under the interval → silent refresh
+    applyPollStates(store, 'MACBOOK', 'MACBOOK', [{ id: 'long-block', state: 'blocked' }], 16_000);
+    expect(broadcasts.length).toBe(1);
+    // 21s after the first broadcast: due → rebroadcast with the true age
+    applyPollStates(store, 'MACBOOK', 'MACBOOK', [{ id: 'long-block', state: 'blocked' }], 22_000);
+    expect(broadcasts.length).toBe(2);
+    expect(broadcasts.at(-1)).toEqual({
+      type: 'agentPollState',
+      id: 11,
+      state: 'blocked',
+      waitingFor: undefined,
+      ageMs: 21_000,
+    });
+    // the throttle re-arms from the rebroadcast, not the first broadcast
+    applyPollStates(store, 'MACBOOK', 'MACBOOK', [{ id: 'long-block', state: 'blocked' }], 30_000);
+    expect(broadcasts.length).toBe(2);
   });
 });
 
@@ -197,7 +242,12 @@ describe('startPollStateSweep', () => {
     const broadcasts: Array<Record<string, unknown>> = [];
     store.on('broadcast', (msg: Record<string, unknown>) => broadcasts.push(msg));
     store.set(1, createTestAgent({ id: 1, sessionId: 's1' }));
-    store.get(1)!.pollState = { state: 'blocked', at: Date.now() };
+    store.get(1)!.pollState = {
+      state: 'blocked',
+      at: Date.now(),
+      since: Date.now(),
+      lastBroadcastAt: Date.now(),
+    };
 
     const timer = startPollStateSweep(store);
     try {

@@ -42,9 +42,19 @@ export interface AgentState {
   /** Provider that created this agent (defaults to 'claude') */
   providerId?: string;
   /** Latest state from the per-machine needs-input poller (`claude agents --json`).
-   *  `at` = receipt time (ms epoch) for staleness sweeps. Cleared when the poller
-   *  stops reporting the session or goes silent past the TTL. */
-  pollState?: { state: PollStateValue; waitingFor?: string; at: number };
+   *  `at` = receipt time (ms epoch) for staleness sweeps. `since` = when the
+   *  CURRENT state value was first reported (preserved across refresh ticks) —
+   *  broadcast as `ageMs` so the webview can age crises (smoke → fire → alarm)
+   *  without trusting client clocks. `lastBroadcastAt` throttles the periodic
+   *  keep-fresh rebroadcast. Cleared when the poller stops reporting the
+   *  session or goes silent past the TTL. */
+  pollState?: {
+    state: PollStateValue;
+    waitingFor?: string;
+    at: number;
+    since: number;
+    lastBroadcastAt: number;
+  };
   /** Set when SessionEnd(reason=clear) fires; cleared when SessionStart(source=clear) reassigns */
   pendingClear?: boolean;
   /** Hook-generated tool ID for PreToolUse/PostToolUse correlation */

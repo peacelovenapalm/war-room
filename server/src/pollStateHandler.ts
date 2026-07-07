@@ -29,6 +29,12 @@ import { POLL_STATE_VALUES } from './types.js';
 export const POLL_STATE_TTL_MS = 60_000;
 /** Sweep cadence. */
 export const POLL_STATE_SWEEP_INTERVAL_MS = 30_000;
+/** Rebroadcast an UNCHANGED poll state this often so the webview's own TTL
+ *  (60s) never expires a still-live state. Without this, a session blocked
+ *  longer than the client TTL silently lost its NEEDS INPUT badge (change-only
+ *  broadcasts meant no refresh ever reached the page). Also re-delivers
+ *  `ageMs` so crisis aging stays anchored to the server clock. */
+export const POLL_STATE_REBROADCAST_MS = 20_000;
 /** Defensive caps on the ingest payload. */
 const MAX_POLL_ENTRIES = 200;
 const MAX_WAITING_FOR_CHARS = 200;
@@ -129,15 +135,28 @@ export function applyPollStates(
     seenAgentIds.add(agentId);
     matched++;
 
-    const changed =
-      agent.pollState?.state !== entry.state || agent.pollState?.waitingFor !== entry.waitingFor;
-    agent.pollState = { state: entry.state, waitingFor: entry.waitingFor, at: now };
-    if (changed) {
+    const prev = agent.pollState;
+    const changed = prev?.state !== entry.state || prev?.waitingFor !== entry.waitingFor;
+    // `since` survives refresh ticks while the STATE VALUE is unchanged — it is
+    // the transition time that anchors crisis aging (smoke → fire → alarm).
+    // A waitingFor-only change keeps the original transition time.
+    const since = prev && prev.state === entry.state ? prev.since : now;
+    const due = !prev || now - prev.lastBroadcastAt >= POLL_STATE_REBROADCAST_MS;
+    const lastBroadcastAt = changed || due ? now : prev.lastBroadcastAt;
+    agent.pollState = {
+      state: entry.state,
+      waitingFor: entry.waitingFor,
+      at: now,
+      since,
+      lastBroadcastAt,
+    };
+    if (changed || due) {
       store.broadcast({
         type: 'agentPollState',
         id: agentId,
         state: entry.state,
         waitingFor: entry.waitingFor,
+        ageMs: now - since,
       });
     }
   }

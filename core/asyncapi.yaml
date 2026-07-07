@@ -352,6 +352,13 @@ components:
           description: >-
             What the blocked agent is waiting on (verbatim from the CLI).
             Rendered as TEXT detail under the NEEDS INPUT badge.
+        ageMs:
+          type: integer
+          description: >-
+            Milliseconds since the state TRANSITION, computed on the server's
+            clock so client clock skew cancels out (client derives
+            `since = Date.now() - ageMs`). Drives the v1 crisis layer's
+            smoke → fire → alarm aging. Absent on clear messages.
 
     AgentPollStateValue:
       description: Agent session state from `claude agents --json`.

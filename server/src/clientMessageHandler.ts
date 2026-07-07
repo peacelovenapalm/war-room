@@ -230,6 +230,7 @@ function handleWebviewReady(send: WsSend, ctx: ClientMessageContext): void {
 
   // 7. Replay live poll states (M4) so a page refresh keeps NEEDS INPUT badges
   // instead of waiting up to a full poller tick for the next broadcast.
+  // `ageMs` re-anchors crisis aging so a refresh doesn't reset fires to smoke.
   for (const [id, agent] of store) {
     if (agent.pollState) {
       send({
@@ -237,6 +238,7 @@ function handleWebviewReady(send: WsSend, ctx: ClientMessageContext): void {
         id,
         state: agent.pollState.state,
         waitingFor: agent.pollState.waitingFor,
+        ageMs: Date.now() - agent.pollState.since,
       });
     }
   }
