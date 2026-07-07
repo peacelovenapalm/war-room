@@ -41,7 +41,7 @@
     "format:check": "prettier --check \"adapters/vscode/**/*.ts\" \"server/**/*.ts\" \"core/src/**/*.ts\" \"webview-ui/src/**/*.{ts,tsx,css}\" \"*.{js,mjs}\" \"webview-ui/*.{js,ts}\"",
     "test:webview": "cd webview-ui && npm test",
     "test:server": "cd server && npm test",
-    "test:poller": "node --test bin/test/normalize-agents.test.mjs",
+    "test:poller": "node --test 'bin/test/*.test.mjs'",
     "test": "npm run test:webview && npm run test:server && npm run test:poller",
     "e2e": "node scripts/run-e2e.mjs",
     "e2e:debug": "node scripts/run-e2e.mjs --debug",
