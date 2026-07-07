@@ -12,6 +12,7 @@ import type { AssetCache, SetHooksEnabledSideEffect } from './clientMessageHandl
 import { handleClientMessage } from './clientMessageHandler.js';
 import { HOOK_API_PREFIX, MAX_HOOK_BODY_SIZE } from './constants.js';
 import { applyPollStates, parsePollBody, startPollStateSweep } from './pollStateHandler.js';
+import { shiftStats } from './shiftStats.js';
 import type { AgentState } from './types.js';
 
 /** Options for creating the HTTP + WebSocket server. */
@@ -108,6 +109,8 @@ function registerHealthRoute(app: FastifyInstance): void {
 /** GET /api/briefing -- unauthenticated, like /api/health; the server is tailnet-only. */
 function registerBriefingRoute(app: FastifyInstance): void {
   app.get('/api/briefing', async () => getBriefing());
+  // Shift report (v1 mechanic #2): today's scorecard — same trust level.
+  app.get('/api/shift', async () => shiftStats.getReport());
 }
 
 // ── Hook Events ────────────────────────────────────────────────
@@ -165,7 +168,7 @@ function registerHookRoute(app: FastifyInstance, options: HttpServerOptions): vo
 function registerPollRoute(app: FastifyInstance, options: HttpServerOptions): void {
   // Staleness sweep lives with the route: a dead poller must not leave a
   // permanent NEEDS INPUT badge on screen.
-  const sweepTimer = startPollStateSweep(options.store);
+  const sweepTimer = startPollStateSweep(options.store, undefined, undefined, shiftStats);
   app.addHook('onClose', () => clearInterval(sweepTimer));
 
   app.post<{ Body: Record<string, unknown> }>(
@@ -179,7 +182,14 @@ function registerPollRoute(app: FastifyInstance, options: HttpServerOptions): vo
         reply.code(400).send({ error: 'expected body { agents: [...] }' });
         return;
       }
-      const result = applyPollStates(options.store, machine, options.machineLabel, entries);
+      const result = applyPollStates(
+        options.store,
+        machine,
+        options.machineLabel,
+        entries,
+        Date.now(),
+        shiftStats,
+      );
       if (!options.embedded && (result.matched > 0 || result.cleared > 0)) {
         console.log(
           `[Pixel Agents] Poll: machine=${machine} entries=${entries.length} matched=${result.matched} cleared=${result.cleared}`,

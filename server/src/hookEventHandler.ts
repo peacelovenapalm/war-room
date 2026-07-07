@@ -4,6 +4,7 @@ import type { AgentEvent, HookProvider } from '../../core/src/provider.js';
 import type { AgentStateStore } from './agentStateStore.js';
 import { SESSION_END_GRACE_MS } from './constants.js';
 import type { SessionRouter } from './sessionRouter.js';
+import { shiftStats } from './shiftStats.js';
 import { getInlineTeammates, hasInlineTeammates } from './teamUtils.js';
 import { cancelPermissionTimer, cancelWaitingTimer } from './timerManager.js';
 import type { AgentState } from './types.js';
@@ -668,6 +669,9 @@ export class HookEventHandler {
 
   /** Handle Stop: Claude finished responding, mark agent as waiting. */
   private handleStop(agent: AgentState, agentId: number, awaitingInput = false): void {
+    // Shift report (v1 mechanic #2): a finished turn (Stop) counts as a
+    // completion; going idle waiting on the user does not.
+    if (!awaitingInput) shiftStats.recordTurnEnd();
     this.markAgentWaiting(agent, agentId, awaitingInput);
   }
 

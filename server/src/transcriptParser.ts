@@ -3,6 +3,7 @@ const debug = process.env.PIXEL_AGENTS_DEBUG !== '0';
 import type { HookProvider } from '../../core/src/provider.js';
 import type { AgentStateStore } from './agentStateStore.js';
 import { TEXT_IDLE_DELAY_MS, TOOL_DONE_DELAY_MS } from './constants.js';
+import { shiftStats } from './shiftStats.js';
 import { hasInlineTeammates } from './teamUtils.js';
 import {
   cancelPermissionTimer,
@@ -94,6 +95,8 @@ export function processTranscriptLine(
       if (typeof usage.output_tokens === 'number') {
         agent.outputTokens += usage.output_tokens;
       }
+      // Shift report (v1 mechanic #2): accumulate today's real token spend.
+      shiftStats.recordTokens(usage.input_tokens ?? 0, usage.output_tokens ?? 0);
       agents.broadcast({
         type: 'agentTokenUsage',
         id: agentId,

@@ -22,8 +22,13 @@ import * as path from 'path';
 
 import { normalizeProjectPath } from '../../core/src/normalizeProjectPath.js';
 import type { AgentStateStore } from './agentStateStore.js';
+import type { ShiftStats } from './shiftStats.js';
 import type { AgentState, PollStateValue } from './types.js';
 import { POLL_STATE_VALUES } from './types.js';
+
+/** The slice of ShiftStats the poll layer feeds (blocked episodes). Callers
+ *  that don't track stats (unit tests) pass nothing. */
+export type BlockedEpisodeSink = Pick<ShiftStats, 'startBlocked' | 'endBlocked'>;
 
 /** Poll states older than this are swept (poller assumed dead). */
 export const POLL_STATE_TTL_MS = 60_000;
@@ -118,6 +123,7 @@ export function applyPollStates(
   localMachineLabel: string | undefined,
   entries: PollEntry[],
   now: number = Date.now(),
+  stats?: BlockedEpisodeSink,
 ): { matched: number; cleared: number } {
   const machineAgents: Array<[number, AgentState]> = [];
   for (const [id, agent] of store) {
@@ -137,6 +143,12 @@ export function applyPollStates(
 
     const prev = agent.pollState;
     const changed = prev?.state !== entry.state || prev?.waitingFor !== entry.waitingFor;
+    // Shift report: blocked episodes start/end on state transitions.
+    if (entry.state === 'blocked' && prev?.state !== 'blocked') {
+      stats?.startBlocked(`agent:${agentId}`, now, now);
+    } else if (prev?.state === 'blocked' && entry.state !== 'blocked') {
+      stats?.endBlocked(`agent:${agentId}`, now);
+    }
     // `since` survives refresh ticks while the STATE VALUE is unchanged — it is
     // the transition time that anchors crisis aging (smoke → fire → alarm).
     // A waitingFor-only change keeps the original transition time.
@@ -165,6 +177,7 @@ export function applyPollStates(
   let cleared = 0;
   for (const [agentId, agent] of machineAgents) {
     if (agent.pollState && !seenAgentIds.has(agentId)) {
+      if (agent.pollState.state === 'blocked') stats?.endBlocked(`agent:${agentId}`, now);
       agent.pollState = undefined;
       cleared++;
       store.broadcast({ type: 'agentPollState', id: agentId });
@@ -183,11 +196,13 @@ export function startPollStateSweep(
   store: AgentStateStore,
   ttlMs: number = POLL_STATE_TTL_MS,
   intervalMs: number = POLL_STATE_SWEEP_INTERVAL_MS,
+  stats?: BlockedEpisodeSink,
 ): ReturnType<typeof setInterval> {
   const timer = setInterval(() => {
     const now = Date.now();
     for (const [agentId, agent] of store) {
       if (agent.pollState && now - agent.pollState.at > ttlMs) {
+        if (agent.pollState.state === 'blocked') stats?.endBlocked(`agent:${agentId}`, now);
         agent.pollState = undefined;
         store.broadcast({ type: 'agentPollState', id: agentId });
       }
