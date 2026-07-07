@@ -116,6 +116,54 @@ Either or both may be unset — the corresponding half of the panel renders
 unauthenticated, same as `/api/health` (the server itself is tailnet-only),
 and the response is cached for 60s.
 
+## Crisis & triage layer (v1)
+
+A blocked session is a FIRE at that agent's desk that AGES — smoke (fresh),
+flame (90 s+), flame + white flashing beacon (4 min+). Each stage is a
+distinct SILHOUETTE + a text tag under the state chip (`▲ FIRE 2:41`).
+Concurrent crises fill the TRIAGE board (top-right), sorted by
+age × severity (blocked > failed > stopped) with the one-line cause
+(`waitingFor`) per row. Failed/stopped sessions leave labeled DEBRIS at the
+desk until acknowledged (click the desk label or the board's CLEAR button;
+persists across refreshes via localStorage). Resolving a crisis steams the
+desk with a floating `✓ RESOLVED`; the last one flashes `✓ ALL CLEAR`.
+
+Aging is server-anchored: the poll ingest keeps the state's transition time
+and broadcasts `ageMs` (rebroadcasting unchanged states every 20 s so the
+webview's 60 s TTL never expires a still-blocked session — this also fixed a
+v0 defect where >60 s blocks lost their badge).
+
+## Help screen (v1)
+
+`?` (or the **Help** toolbar button) opens the in-dashboard help screen:
+every chip, fire stage, debris, the triage board, briefing panel, machine
+labels, coworker badges, and where the data comes from.
+`webview-ui/test/helpContent.test.ts` fails if a new state or stage ships
+without a help entry.
+
+## Coworker adapter — Codex / Gemini (v1 mechanic #6a)
+
+Codex and Gemini CLI sessions render as coworkers: a distinct badge
+silhouette above the head (square = Codex, diamond = Gemini) plus a
+`[CODEX]` / `[GEMINI]` text label in the name tag. Per machine:
+
+```
+WAR_ROOM_TOKEN=<token> node bin/coworker-adapter.mjs \
+  --url https://nexus.tail722a2e.ts.net:8484 --machine MACBOOK
+```
+
+It tails `~/.codex/sessions/**/rollout-*.jsonl` (tool-level: turns, shell
+commands, approval prompts → NEEDS INPUT) and `~/.gemini/tmp/*/logs.json`
+(heartbeat-level — the source is sparse), POSTing normalized hook events to
+the authed `/api/hooks/codex` / `/api/hooks/gemini`. Only NEW activity
+streams (pre-existing files seed at EOF) and no message content leaves the
+machine. Env: `WAR_ROOM_URL`, `WAR_ROOM_TOKEN`, `WAR_ROOM_MACHINE`,
+`WAR_ROOM_COWORKER_MS`, `WAR_ROOM_CODEX_DIR`, `WAR_ROOM_GEMINI_DIR`;
+flags `--providers codex,gemini --interval <ms> --once --replay`.
+
+Dispatch ("call a coworker from the dashboard") is design-only:
+`.planning/DISPATCH-6B-DESIGN.md`.
+
 ## Config guard (do not undo)
 
 `hooksEnabled` now **defaults to `false`** in this fork (upstream default
