@@ -1,0 +1,16 @@
+{
+  "comment": "Per-entry malformed cases: each entry is one agent record that the normalizer must SKIP (not crash on). Fed to normalizeAgents as a single array; expected surviving count is 1 (the valid sentinel).",
+  "entries": [
+    null,
+    42,
+    "a string, not an object",
+    ["nested", "array"],
+    { "state": "blocked", "cwd": "/no/id/here" },
+    { "id": "no-state-at-all", "cwd": "/x" },
+    { "id": "bad-state", "state": "sleeping" },
+    { "id": "state-wrong-type", "state": 7 },
+    { "id": "", "state": "blocked" },
+    { "id": "interactive-like", "kind": "interactive", "status": "busy", "pid": 111 },
+    { "id": "valid-sentinel", "state": "working" }
+  ]
+}

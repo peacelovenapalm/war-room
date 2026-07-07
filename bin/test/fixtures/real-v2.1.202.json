@@ -1,0 +1,49 @@
+[
+  {
+    "id": "824af38a",
+    "cwd": "/Users/greg/code/Diablito",
+    "kind": "background",
+    "startedAt": 1780387265304,
+    "sessionId": "824af38a-f0ed-43ee-afb4-568e9b97c5ee",
+    "name": "diablito v1.0",
+    "state": "blocked"
+  },
+  {
+    "id": "d2e92995",
+    "cwd": "/Users/greg/Brain2/vault",
+    "kind": "background",
+    "startedAt": 1780955011555,
+    "sessionId": "d2e92995-fa67-486f-9f6f-d77534c2ee98",
+    "name": "routine-results-delivery",
+    "state": "blocked"
+  },
+  {
+    "pid": 18145,
+    "id": "5a31f179",
+    "cwd": "/Users/greg/Brain2/vault",
+    "kind": "background",
+    "startedAt": 1780952136959,
+    "sessionId": "5a31f179-213f-4390-be48-fc31dfe64bd5",
+    "name": "twe v4.0 planner",
+    "status": "idle",
+    "state": "working"
+  },
+  {
+    "pid": 57561,
+    "cwd": "/Users/greg/code/two-wheel-events/.claude/worktrees/ambassador-referral",
+    "kind": "interactive",
+    "startedAt": 1783058433334,
+    "sessionId": "bbc07ed6-5d94-4db3-9378-11d77f2617e1",
+    "name": "outreach-batch-launch-prep",
+    "status": "idle"
+  },
+  {
+    "pid": 84450,
+    "cwd": "/Users/greg/Brain2/vault",
+    "kind": "interactive",
+    "startedAt": 1783387456046,
+    "sessionId": "cc94b797-9aaa-471c-9f6a-8898c4269a1e",
+    "name": "vault-c6",
+    "status": "busy"
+  }
+]

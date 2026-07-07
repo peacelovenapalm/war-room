@@ -1,0 +1,20 @@
+[
+  {
+    "id": "aaaa1111",
+    "state": "blocked",
+    "waitingFor": "Permission: Bash(rm -rf node_modules)",
+    "cwd": "/Users/dev/projects/alpha",
+    "pid": 4242,
+    "startedAt": 1780900000000
+  },
+  {
+    "id": "bbbb2222",
+    "state": "working",
+    "cwd": "/Users/dev/projects/beta",
+    "pid": 4243,
+    "startedAt": "2026-07-06T12:00:00Z"
+  },
+  { "id": "cccc3333", "state": "done", "cwd": "/Users/dev/projects/gamma" },
+  { "id": "dddd4444", "state": "failed", "cwd": "/Users/dev/projects/delta" },
+  { "id": "eeee5555", "state": "stopped", "cwd": "/Users/dev/projects/epsilon" }
+]
