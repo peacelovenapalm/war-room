@@ -1,0 +1,12 @@
+node_modules
+*/node_modules
+dist
+.git
+.planning
+.husky
+e2e
+allure-report
+allure-results
+docs
+*.log
+.DS_Store
