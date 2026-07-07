@@ -267,6 +267,62 @@ idle|busy`), `waitingFor` is absent in this build, ids are short UUID
   `standalone.hooksEnabled: false`.
 - ⚠ e2e specs still not run (need live `claude` + harness — unchanged M3 note).
 
+## Review findings (2026-07-06 adversarial pass)
+
+Independent re-verification of every hard constraint, trying to refute the
+build's claims. Method: full diff `928ccd4..HEAD`, live greps, live host
+checks, and re-running the documented flows.
+
+- ✓ **Zero color-only signals — HELD.** Code audit: `agentState.ts` chips are
+  glyph + uppercase word (distinct shape per state); DebugView tool dots and
+  JSONL status are glyph + word; `colorize.ts` is decorative only (floor/wall
+  tiles, furniture) — not a state channel; team-lead role is TEXT ("LEAD")
+  with color as reinforcement. Grayscale evidence re-inspected pixel-level:
+  every agent's state + identity reads in `m3-dashboard-grayscale.png`; the
+  ⚠ NEEDS INPUT chip is the brightest element in `m4-needs-input-poller.png`.
+- ✓ **Nothing bound publicly / runbooks NOT executed — HELD.** Live checks:
+  0 war-room/pixel docker containers, 0 launchd jobs, 0 LaunchAgents plists,
+  `~/.claude/settings.json` has 0 pixel-agents/war-room entries. Server
+  default bind is `127.0.0.1` (`cli.ts`); Dockerfile/runbook publish
+  `-p 127.0.0.1:3141` on the host; Caddy site uses `bind <tailscale-ip>` on
+  `nexus.tail722a2e.ts.net:8484` — never the funnel.
+  ⚠ Minor leftover: local docker IMAGE `war-room:m2-test` (no container)
+  still on this Mac — harmless, delete at leisure (`docker rmi war-room:m2-test`).
+- ✓ **WS event plane preserved — HELD.** No EventSource/SSE anywhere in the
+  branch diff; live WS probe on a fresh clean-shell start received the full
+  upstream init sequence + live JSONL tool events.
+- ✓ **MIT intact — HELD.** `LICENSE` untouched by any branch commit;
+  `package.json` license MIT; upstream ships no per-file headers, none stripped.
+- ⚠ **Git convention — PARTIAL.** All 22 commits are atomic with explicit-path
+  staging, but 4 subjects lack the em-dash (`2f8645b`, `3533596`, `2cfbf79`,
+  `0b64b46`). Fixing requires a history rewrite that would invalidate the
+  commit hashes recorded in this ledger — left as Greg's pre-push call
+  (reword via rebase, or accept as-is; branch is unpushed).
+- ✓ **README-standalone start — RUN, works.** From a clean shell
+  (`env -i … zsh -f`): `npm install && npm run build` → no `dist/extension.js`
+  → `node dist/cli.js --port 3141` → `GET /` 200, `/api/health` ok, full WS
+  init + live session adoption; port closed after kill; `~/.claude` untouched.
+
+**Defects found and FIXED during review** (commits `8d8269b`, `622585b`):
+
+1. ✗→✓ **Gated-action leak (real):** standalone default was
+   `hooksEnabled: true` (`configPersistence.ts`), so a bare
+   `node dist/cli.js` on any machine WITHOUT the pre-seeded
+   `~/.pixel-agents/config.json` auto-wrote hook entries into that
+   machine's live `~/.claude/settings.json`. Proven live in an isolated
+   HOME (pre-fix build logged "Hooks installed in ~/.claude/settings.json"
+   and created the file). Fixed: fork defaults `hooksEnabled: false`;
+   hook wiring is runbook-only. Re-proven post-fix: fresh HOME → no write.
+   (Docker was already safe — entrypoint seeds the guard.)
+2. ✗→✓ **Dead hook-script path:** the CLI passed `dist/` to
+   `copyHookScript`, which appends `dist/hooks/…` → `dist/dist/hooks`
+   (script never copied when hooks are enabled). Fixed to package root;
+   verified in isolated HOME (opt-in run now copies
+   `~/.pixel-agents/hooks/claude-hook.js`).
+
+Gates after fixes: check-types + eslint clean; server 223/223,
+webview 48/48, poller 10/10; real `~/.claude/settings.json` still 0 entries.
+
 ## Definition of done (v0) — honest state 2026-07-06
 
 - ✗ Dashboard reachable tailnet-only on NEXUS — **BLOCKED on Greg:**
@@ -321,11 +377,15 @@ Greg runs himself.
   Installs `bin/needs-input-poller.mjs` as a KeepAlive launchd user agent
   POSTing to the NEXUS ingest; logs to `~/Library/Logs/war-room-poller.log`.
 
-## Next step (one)
+## Needs Greg (max 3)
 
-**Greg runs the three runbooks** (build work is done through M4; M5 soak
-can't start without them): `nexus-war-room-deploy.sh` on the Mac →
-`macbook-hooks-install.sh MACBOOK` / `MINI` → `install-poller-launchd.sh
-MACBOOK` / `MINI`. The Docker image bakes `dist/` at build time, so the
-rsync+rebuild in the deploy runbook picks up M3+M4 automatically. After
-that: M5 = use it daily for a month (not a build task).
+1. **Run the three runbooks** (build work is done + reviewed; M5 soak can't
+   start without them): `bash .planning/runbooks/nexus-war-room-deploy.sh` →
+   `bash .planning/runbooks/macbook-hooks-install.sh MACBOOK` (then `MINI`) →
+   `bash .planning/runbooks/install-poller-launchd.sh MACBOOK` (then `MINI`).
+   The deploy runbook rsyncs + rebuilds, so it picks up the review fixes too.
+2. **Push decision** — branch `war-room/v0` is local-only (never pushed, per
+   contract). Optional before pushing: reword the 4 em-dash-less commit
+   subjects (see review findings); otherwise push as-is.
+3. **M5 soak** — after the runbooks: use it daily for a month; watch
+   laptop-sleep/reconnect behavior (the one untested DoD line).
