@@ -56,6 +56,37 @@ Remote machines ship native Claude Code `type:"http"` hook events to
   installation on the Macs are **gated runbooks** in `.planning/runbooks/`
   — human-run only.
 
+## Needs-input poller (M4)
+
+Per-machine sidecar that makes `state:"blocked"` sessions loud even when
+hooks/JSONL can't see the block (e.g. background `claude` agents):
+
+```
+WAR_ROOM_TOKEN=<token> node bin/needs-input-poller.mjs \
+  --url http://127.0.0.1:3141 --machine MACBOOK
+```
+
+- Every ~15s it runs `claude agents --json` (research-preview surface,
+  v2.1.139+), normalizes it through `bin/lib/normalize-agents.mjs`
+  (tolerant: unknown fields ignored, malformed output = tick skipped
+  with a `⚠` log line, never a crash) and POSTs to
+  `POST /api/agents/poll` (same Bearer token, same `X-Machine` header).
+- The server matches entries to adopted agents (sessionId → short-id
+  prefix → unique cwd; never guesses on ambiguity) and broadcasts
+  `agentPollState` on the existing WS event plane. `blocked` renders the
+  ⚠ NEEDS INPUT chip (loudest element, SHAPE + TEXT), with `waitingFor`
+  as the detail line; `failed`/`stopped` render their own chips.
+- Staleness is fail-safe twice: the server clears state the poller stops
+  reporting (per tick) and sweeps states older than 60s (dead poller);
+  the webview additionally expires poll state client-side after 60s.
+- Testing: `npm run test:poller` (node:test, fixtures include a real
+  2.1.202 capture where `kind:"interactive"` entries have NO `state` —
+  those are skipped by design). Fixture override for live drills:
+  `--cmd "cat fixture.json"`.
+- Install as a launchd agent = **gated runbook**
+  `.planning/runbooks/install-poller-launchd.sh <MACHINE>` (human-run
+  only; reuses the token stored by the hooks runbook).
+
 ## Config guard (do not undo)
 
 `~/.pixel-agents/config.json` must keep `standalone.hooksEnabled: false`
