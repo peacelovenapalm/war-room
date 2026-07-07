@@ -23,6 +23,8 @@ import {
   GRID_LINE_COLOR,
   HOVERED_OUTLINE_ALPHA,
   OUTLINE_Z_SORT_OFFSET,
+  OVERLAY_GLYPH_COLOR,
+  OVERLAY_GLYPH_OUTLINE_COLOR,
   ROTATE_BUTTON_BG,
   SEAT_AVAILABLE_COLOR,
   SEAT_BUSY_COLOR,
@@ -264,17 +266,33 @@ function renderSeatIndicators(
     const x = offsetX + seat.seatCol * s;
     const y = offsetY + seat.seatRow * s;
 
+    let seatGlyph: string;
     if (selectedChar.seatId === uid) {
-      // Selected agent's own seat — blue
+      // Selected agent's own seat — blue tint (reinforcement) + ● glyph
       ctx.fillStyle = SEAT_OWN_COLOR;
+      seatGlyph = '●';
     } else if (!seat.assigned) {
-      // Available seat — green
+      // Available seat — green tint (reinforcement) + ✓ glyph
       ctx.fillStyle = SEAT_AVAILABLE_COLOR;
+      seatGlyph = '✓';
     } else {
-      // Busy (assigned to another agent) — red
+      // Busy (assigned to another agent) — red tint (reinforcement) + ✗ glyph
       ctx.fillStyle = SEAT_BUSY_COLOR;
+      seatGlyph = '✗';
     }
     ctx.fillRect(x, y, s, s);
+    // Colorblind rule: the SYMBOL is the signal, the tint above is
+    // reinforcement only (own ● / available ✓ / busy ✗ read in grayscale).
+    ctx.save();
+    ctx.font = `bold ${Math.max(10, Math.round(s * 0.6))}px sans-serif`;
+    ctx.textAlign = 'center';
+    ctx.textBaseline = 'middle';
+    ctx.lineWidth = Math.max(2, zoom * 0.6);
+    ctx.strokeStyle = OVERLAY_GLYPH_OUTLINE_COLOR;
+    ctx.strokeText(seatGlyph, x + s / 2, y + s / 2);
+    ctx.fillStyle = OVERLAY_GLYPH_COLOR;
+    ctx.fillText(seatGlyph, x + s / 2, y + s / 2);
+    ctx.restore();
     break;
   }
 }
@@ -401,6 +419,26 @@ export function renderGhostPreview(
   ctx.fillStyle = valid ? GHOST_VALID_TINT : GHOST_INVALID_TINT;
   ctx.fillRect(x, y, cached.width, cached.height);
   ctx.restore();
+  // Colorblind rule: invalid placement gets a bold ✗ drawn across the ghost —
+  // SHAPE carries the signal, the green/red tint above is reinforcement only.
+  if (!valid) {
+    ctx.save();
+    ctx.globalAlpha = 0.9;
+    ctx.lineWidth = Math.max(2, zoom * 0.8);
+    ctx.lineCap = 'round';
+    ctx.strokeStyle = OVERLAY_GLYPH_OUTLINE_COLOR;
+    const inset = Math.max(2, zoom * 1.5);
+    ctx.beginPath();
+    ctx.moveTo(x + inset, y + inset);
+    ctx.lineTo(x + cached.width - inset, y + cached.height - inset);
+    ctx.moveTo(x + cached.width - inset, y + inset);
+    ctx.lineTo(x + inset, y + cached.height - inset);
+    ctx.stroke();
+    ctx.strokeStyle = OVERLAY_GLYPH_COLOR;
+    ctx.lineWidth = Math.max(1, zoom * 0.4);
+    ctx.stroke();
+    ctx.restore();
+  }
 }
 
 /** @internal */

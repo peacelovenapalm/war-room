@@ -27,16 +27,20 @@ interface DebugViewProps {
   onSelectAgent: (id: number) => void;
 }
 
-function ToolDot({ tool }: { tool: ToolActivity }) {
+/** Colorblind rule: tool state = GLYPH (shape) + text; color is reinforcement only. */
+function ToolGlyph({ tool }: { tool: ToolActivity }) {
+  const glyph = tool.done ? '✓' : tool.permissionWait ? '⚠' : '▶';
   const color = tool.done
-    ? 'bg-status-success'
+    ? 'text-status-success'
     : tool.permissionWait
-      ? 'bg-status-permission'
-      : 'bg-status-active';
+      ? 'text-status-permission'
+      : 'text-status-active';
   return (
     <span
-      className={`w-6 h-6 rounded-full inline-block shrink-0 ${color} ${tool.done ? '' : 'pixel-pulse'}`}
-    />
+      className={`inline-block shrink-0 leading-none ${color} ${tool.done ? '' : 'pixel-pulse'}`}
+    >
+      {glyph}
+    </span>
   );
 }
 
@@ -45,7 +49,7 @@ function ToolLine({ tool }: { tool: ToolActivity }) {
     <span
       className={`text-base flex items-center gap-5 ${tool.done ? 'opacity-50' : 'opacity-80'}`}
     >
-      <ToolDot tool={tool} />
+      <ToolGlyph tool={tool} />
       {tool.permissionWait && !tool.done ? 'Needs approval' : tool.status}
     </span>
   );
@@ -146,7 +150,9 @@ export function DebugView({
               !hasActiveTools &&
               officeState.characters.get(id)?.waitingAwaitingInput && (
                 <span className="text-base opacity-85 flex items-center gap-5">
-                  <span className="w-6 h-6 rounded-full inline-block shrink-0 bg-status-permission" />
+                  <span className="inline-block shrink-0 leading-none text-status-permission">
+                    ⚠
+                  </span>
                   Waiting for input
                 </span>
               )}
@@ -157,7 +163,8 @@ export function DebugView({
           <div className="mt-6 py-4 px-6 text-xs opacity-70 flex flex-col gap-2 border-t border-white/8">
             <span>
               <span className={diag.jsonlExists ? 'text-status-success' : 'text-status-error'}>
-                {diag.jsonlExists ? 'JSONL connected' : 'JSONL not found'}
+                {/* ✓/✗ symbols + words (colorblind rule) */}
+                {diag.jsonlExists ? '✓ JSONL connected' : '✗ JSONL not found'}
               </span>
               {' | '}
               Lines: {diag.linesProcessed}
