@@ -35,6 +35,7 @@ import {
   VOID_TILE_DASH_PATTERN,
   VOID_TILE_OUTLINE_COLOR,
 } from '../../constants.js';
+import type { DebrisRecord, ExtinguishEffect } from '../crisis.js';
 import { getColorizedFloorSprite, hasFloorSprites, WALL_COLOR } from '../floorTiles.js';
 import { getPetSprites } from '../sprites/petSpriteData.js';
 import { getCachedSprite, getOutlineSprite } from '../sprites/spriteCache.js';
@@ -55,6 +56,7 @@ import type {
 import { CharacterState, TILE_SIZE, TileType } from '../types.js';
 import { getWallInstances, hasWallSprites, wallColorToHex } from '../wallTiles.js';
 import { getCharacterSprite } from './characters.js';
+import { renderCrisisEffects } from './crisisEffects.js';
 import { renderMatrixEffect } from './matrixEffect.js';
 import { getPetSpriteData } from './petEntity.js';
 
@@ -685,6 +687,7 @@ export function renderFrame(
   layoutCols?: number,
   layoutRows?: number,
   pets?: Pet[],
+  crisis?: { debris: Iterable<DebrisRecord>; effects: Iterable<ExtinguishEffect>; now: number },
 ): { offsetX: number; offsetY: number } {
   // Clear
   ctx.clearRect(0, 0, canvasWidth, canvasHeight);
@@ -740,6 +743,21 @@ export function renderFrame(
   // Pet heart bubbles (same overlay pass)
   if (pets && pets.length > 0) {
     renderPetBubbles(ctx, pets, offsetX, offsetY, zoom);
+  }
+
+  // Crisis layer (v1 mechanic #1): fires at blocked desks (aging smoke →
+  // fire → alarm silhouettes), debris piles, extinguish steam.
+  if (crisis) {
+    renderCrisisEffects(
+      ctx,
+      characters,
+      crisis.debris,
+      crisis.effects,
+      offsetX,
+      offsetY,
+      zoom,
+      crisis.now,
+    );
   }
 
   // Editor overlays

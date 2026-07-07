@@ -269,6 +269,11 @@ export function OfficeCanvas({
           officeState.getLayout().cols,
           officeState.getLayout().rows,
           officeState.pets,
+          {
+            debris: officeState.debris.values(),
+            effects: officeState.crisisEffects,
+            now: Date.now(),
+          },
         );
         offsetRef.current = { x: offsetX, y: offsetY };
 
