@@ -33,6 +33,7 @@ import type {
   Pet,
   PlacedFurniture,
   PlacedPet,
+  PollStateValue,
   Seat,
   TileType as TileTypeVal,
 } from '../types.js';
@@ -706,6 +707,13 @@ export class OfficeState {
     if (ch) {
       ch.currentTool = tool;
     }
+  }
+
+  /** Set/clear poll-derived state (M4 needs-input poller). No state = clear. */
+  setAgentPollState(id: number, state?: PollStateValue, waitingFor?: string): void {
+    const ch = this.characters.get(id);
+    if (!ch) return;
+    ch.pollState = state ? { state, waitingFor, at: Date.now() } : undefined;
   }
 
   showPermissionBubble(id: number): void {

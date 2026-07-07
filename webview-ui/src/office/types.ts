@@ -130,6 +130,23 @@ export interface OfficeLayout {
   pets?: PlacedPet[];
 }
 
+/** Agent session states surfaced by `claude agents --json` (M4 poller). */
+export const PollStateValue = {
+  WORKING: 'working',
+  BLOCKED: 'blocked',
+  DONE: 'done',
+  FAILED: 'failed',
+  STOPPED: 'stopped',
+} as const;
+export type PollStateValue = (typeof PollStateValue)[keyof typeof PollStateValue];
+
+/** Poll-derived state attached to a character, with client receipt time. */
+export interface PollStateInfo {
+  state: PollStateValue;
+  waitingFor?: string;
+  at: number;
+}
+
 export interface Character {
   id: number;
   state: CharacterState;
@@ -191,6 +208,11 @@ export interface Character {
   /** Machine identity TEXT label (e.g. "MACBOOK", "NEXUS"). Rendered in the overlay
    *  so cross-machine sessions are distinguishable by text, never color alone. */
   machine?: string;
+  /** Latest state from the per-machine needs-input poller (`claude agents --json`,
+   *  arriving via the server's agentPollState broadcast). `at` = client receipt
+   *  time (ms) so the value expires visually if the poller/server goes silent.
+   *  blocked → loudest ⚠ NEEDS INPUT chip; failed/stopped → their chips. */
+  pollState?: PollStateInfo;
 
   // -- Agent Teams --
   /** Team name this agent belongs to */

@@ -12,7 +12,7 @@ import {
   isSubagentToolName,
   setProviderCapabilities,
 } from '../office/toolUtils.js';
-import type { OfficeLayout, ToolActivity } from '../office/types.js';
+import type { OfficeLayout, PollStateValue, ToolActivity } from '../office/types.js';
 import { setWallSprites } from '../office/wallTiles.js';
 import { isE2E } from '../runtime.js';
 import { transport } from '../transport/index.js';
@@ -403,6 +403,17 @@ export function useExtensionMessages(
         });
         os.showPermissionBubble(id);
         playPermissionSound();
+      } else if (msg.type === 'agentPollState') {
+        // M4 needs-input poller: per-machine `claude agents --json` state.
+        // No `state` field = cleared (fall back to local JSONL/hook signals).
+        // blocked → loudest ⚠ NEEDS INPUT chip (colorblind rule: SHAPE + TEXT).
+        const id = msg.id as number;
+        const state = msg.state as PollStateValue | undefined;
+        const wasBlocked = os.characters.get(id)?.pollState?.state === 'blocked';
+        os.setAgentPollState(id, state, msg.waitingFor as string | undefined);
+        if (state === 'blocked' && !wasBlocked) {
+          playPermissionSound();
+        }
       } else if (msg.type === 'subagentToolPermission') {
         const id = msg.id as number;
         const parentToolId = msg.parentToolId as string;

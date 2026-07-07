@@ -20,7 +20,7 @@ import {
   TOOL_OVERLAY_VERTICAL_OFFSET,
 } from '../../constants.js';
 import type { SubagentCharacter } from '../../hooks/useExtensionMessages.js';
-import { deriveVisualState, STATE_CHIPS } from '../agentState.js';
+import { deriveVisualState, getFreshPollState, STATE_CHIPS } from '../agentState.js';
 import type { OfficeState } from '../engine/officeState.js';
 import type { ToolActivity } from '../types.js';
 import { CharacterState, TILE_SIZE } from '../types.js';
@@ -201,6 +201,26 @@ export function ToolOverlay({
             ch.bubbleType,
             ch.waitingAwaitingInput ?? false,
           );
+        }
+
+        // M4 poller detail: when the poll state drives the chip, surface WHY
+        // as TEXT. `waitingFor` (what the blocked agent waits on) beats the
+        // generic local fallbacks; failed/stopped have no local detail at all.
+        const poll = getFreshPollState(ch);
+        if (vState === 'needs-input' && poll?.state === 'blocked') {
+          if (poll.waitingFor) {
+            activityText = poll.waitingFor;
+          } else if (activityText === 'Idle') {
+            activityText = 'Blocked — needs input';
+          }
+        } else if (vState === 'failed' && poll?.state === 'failed') {
+          activityText = 'Session failed';
+        } else if (vState === 'stopped' && poll?.state === 'stopped') {
+          activityText = 'Session stopped';
+        } else if (vState === 'working' && poll?.state === 'working' && activityText === 'Idle') {
+          // Poll lifted an otherwise-idle agent (hooks-only remote / background
+          // session) — don't contradict the ▶ WORKING chip with an "Idle" line.
+          activityText = 'Working';
         }
 
         // Team info
