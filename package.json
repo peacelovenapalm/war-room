@@ -12,74 +12,23 @@
   "icon": "icon.png",
   "license": "MIT",
   "engines": {
-    "vscode": "^1.105.0"
+    "node": ">=18"
   },
-  "extensionKind": ["workspace"],
-  "categories": [
-    "Other"
-  ],
-  "activationEvents": [
-    "onStartupFinished"
-  ],
-  "main": "./dist/extension.js",
+  "main": "./dist/cli.js",
   "bin": {
     "pixel-agents": "./dist/cli.js"
   },
-  "contributes": {
-    "commands": [
-      {
-        "command": "pixel-agents.showPanel",
-        "title": "Pixel Agents: Show Panel"
-      },
-      {
-        "command": "pixel-agents.exportDefaultLayout",
-        "title": "Pixel Agents: Export Layout as Default"
-      }
-    ],
-    "viewsContainers": {
-      "panel": [
-        {
-          "id": "pixel-agents-panel",
-          "title": "Pixel Agents",
-          "icon": "$(window)"
-        }
-      ]
-    },
-    "views": {
-      "pixel-agents-panel": [
-        {
-          "type": "webview",
-          "id": "pixel-agents.panelView",
-          "name": "Pixel Agents"
-        }
-      ]
-    },
-    "configuration": {
-      "title": "Pixel Agents",
-      "properties": {
-        "pixel-agents.autoShowPanel": {
-          "type": "boolean",
-          "default": false,
-          "description": "Automatically open and focus the Pixel Agents panel when VS Code starts."
-        },
-        "pixel-agents.autoSpawnAgent": {
-          "type": "boolean",
-          "default": false,
-          "description": "Automatically spawn a Claude Code agent when VS Code starts, if no agents are currently running."
-        }
-      }
-    }
-  },
   "scripts": {
-    "vscode:prepublish": "npm run package",
-    "build:extension": "node esbuild.js --production",
+    "build:extension": "node esbuild.js --extension --production",
     "build:webview": "cd webview-ui && npm run build",
     "compile": "npm run asyncapi:generate && npm run check-types && npm run lint && node esbuild.js && npm run build:webview",
-    "build": "npm run compile",
+    "build": "npm run asyncapi:generate && node esbuild.js && npm run build:webview",
+    "start": "node dist/cli.js",
     "watch": "npm-run-all -p watch:*",
     "watch:esbuild": "node esbuild.js --watch",
     "watch:tsc": "tsc --noEmit --watch --project tsconfig.json",
     "package": "npm run asyncapi:generate && npm run check-types && npm run lint && node esbuild.js --production && npm run build:webview",
+    "build:production": "npm run asyncapi:generate && node esbuild.js --production && npm run build:webview",
     "asyncapi:generate": "tsx scripts/generate-messages.ts",
     "asyncapi:validate": "asyncapi validate core/asyncapi.yaml",
     "asyncapi:docs": "asyncapi start studio --file core/asyncapi.yaml",

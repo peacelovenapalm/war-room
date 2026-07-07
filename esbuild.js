@@ -4,6 +4,9 @@ const path = require('path');
 
 const production = process.argv.includes('--production');
 const watch = process.argv.includes('--watch');
+// War Room decapitation (M1): the VS Code extension is QUARANTINED from the
+// default build. Pass --extension explicitly to bundle dist/extension.js.
+const withExtension = process.argv.includes('--extension');
 
 /** Extension version read from package.json at build time, inlined via esbuild `define`. */
 const pkgVersion = JSON.parse(
@@ -82,8 +85,9 @@ const esbuildProblemMatcherPlugin = {
   },
 };
 
-async function main() {
-  const ctx = await esbuild.context({
+/** Bundle the VS Code extension. Opt-in only (`--extension`); not part of the standalone build. */
+async function buildExtension() {
+  await esbuild.build({
     entryPoints: ['adapters/vscode/extension.ts'],
     bundle: true,
     format: 'cjs',
@@ -93,6 +97,23 @@ async function main() {
     platform: 'node',
     outfile: 'dist/extension.js',
     external: ['vscode'],
+    define: versionDefine,
+    logLevel: 'silent',
+  });
+  console.log('✓ Built extension → dist/extension.js (opt-in, --extension)');
+}
+
+async function main() {
+  // Standalone-first: the default target is the CLI server bundle.
+  const ctx = await esbuild.context({
+    entryPoints: ['server/src/cli.ts'],
+    bundle: true,
+    format: 'cjs',
+    minify: production,
+    sourcemap: !production,
+    platform: 'node',
+    outfile: 'dist/cli.js',
+    external: ['fastify', '@fastify/websocket', '@fastify/static', '@fastify/cors'],
     define: versionDefine,
     logLevel: 'silent',
     plugins: [
@@ -108,26 +129,10 @@ async function main() {
     // Copy assets and hooks after build
     copyAssets();
     buildHooks();
-    await buildCli();
-  }
-}
-
-/** Bundle the standalone CLI entry point. */
-async function buildCli() {
-  await esbuild.build({
-    entryPoints: ['server/src/cli.ts'],
-    bundle: true,
-    format: 'cjs',
-    minify: production,
-    sourcemap: !production,
-    platform: 'node',
-    outfile: 'dist/cli.js',
-    external: ['fastify', '@fastify/websocket', '@fastify/static', '@fastify/cors'],
-    define: versionDefine,
-    logLevel: 'silent',
-  });
-  if (!production) {
-    console.log('[build] CLI bundled: dist/cli.mjs');
+    console.log('✓ Bundled CLI → dist/cli.js');
+    if (withExtension) {
+      await buildExtension();
+    }
   }
 }
 
