@@ -32,11 +32,18 @@ first every iteration; check the kill criterion before building anything.
       is the loudest signal (inverted white chip + warning-triangle bubble
       sprite, never a tint). Acceptance met: grayscale screenshot fully
       readable (evidence below). ✓ done 2026-07-06.
-- [ ] **M4 needs-input poller.** Small script per machine: poll
-      `claude agents --json` every ~15s, POST normalized state to the server;
-      render `state:"blocked"` + `waitingFor` as the loudest badge on screen.
-      Acceptance: block a session behind a permission prompt on the MacBook,
-      badge appears on the NEXUS dashboard within 30s.
+- [x] **M4 needs-input poller.** CODE DONE + locally verified end-to-end
+      2026-07-06 (evidence below). `bin/needs-input-poller.mjs` polls
+      `claude agents --json` every ~15s through a tolerant normalizer
+      (`bin/lib/normalize-agents.mjs`, node:test 10/10) and POSTs to the new
+      authed `POST /api/agents/poll`; `state:"blocked"` + `waitingFor` render
+      via the M3 ⚠ NEEDS INPUT chip (loudest element). Verified against the
+      REAL 2.1.202 surface (it exists on this Mac — used live, matched real
+      blocked sessions). Local acceptance: badge in 2.8s after a live
+      working→blocked transition (page open; ≤ ~16s worst-case at the 15s
+      default interval — inside the 30s budget). The literal cross-machine
+      acceptance (MacBook block → NEXUS dashboard) is GATED on the NEXUS
+      deploy + poller-launchd runbooks (Greg-run).
 - [ ] **M5 Soak (not a build task).** Use it daily for a month. Only after
       that does anything in the parking lot get discussed.
 
@@ -214,6 +221,68 @@ token); 3 MINI-SIM sessions simulated over the authenticated hook ingest +
   (2) a permission/awaiting-input agent shows its full stack even with
   labels off (loud rule).
 
+## M4 acceptance evidence (2026-07-06)
+
+Commits `8fa902c` (poller + normalizer), `cfe570b` (server ingest),
+`70df9c8` (webview chips), `0d65b9c` (gated launchd runbook), `8f01da7`
+(docs). Built from `npm run build`; server `node dist/cli.js --port 3141`
+(WAR_ROOM_TOKEN=test, WAR_ROOM_MACHINE=MACBOOK, cwd vault).
+
+- ✓ **Real surface verified live:** `claude agents --json` EXISTS on this Mac
+  (Claude Code 2.1.202) and already diverges from the documented surface —
+  `kind:"interactive"` entries carry NO `state` field (only `status:
+idle|busy`), `waitingFor` is absent in this build, ids are short UUID
+  prefixes with full `sessionId` alongside. The normalizer absorbs all of it
+  (real capture is a checked-in fixture); stateless interactive entries are
+  skipped by design (local JSONL/hooks already cover them).
+- ✓ **Normalizer unit tests:** `npm run test:poller` — node:test 10/10 against
+  fixtures: real 2.1.202 capture, documented surface (all 5 states), per-entry
+  garbage (missing id/state, bad state, wrong types), whole-payload malformed
+  (not JSON, wrong shape → ok:false = tick skipped), wrapper shape, caps.
+- ✓ **Ingest hardening exercised:** /api/agents/poll → 401 no/wrong token,
+  400 bad body shape, 200 `{matched, cleared}`. Machine-scoped: MACBOOK's
+  tick cannot clear MINI's states (vitest-covered).
+- ✓ **E2E fixture drive (the sanctioned local stand-in for the gated
+  cross-machine test):** MINI-SIM session adopted via authed hooks; poller
+  ran with `--cmd "cat fixture.json"`: page open → fixture flipped
+  working→blocked → **⚠ NEEDS INPUT badge in 2.8s** with waitingFor detail
+  "Permission: Bash(supabase db push)" + identity "#3 [MINI-SIM] turffinder"
+  (`.planning/evidence/m4-needs-input-poller.png` — badge is the brightest
+  element on screen); fixture emptied → badge cleared in 4.3s; poller killed
+  → sweep cleared all poll badges within the 60s TTL (verified in browser).
+- ✓ **Real-output live run:** poller `--once` with the real CLI matched 2
+  adopted local agents — real blocked session "diablito v1.0" rendered
+  ⚠ NEEDS INPUT "Blocked — needs input" (no waitingFor in 2.1.202 → generic
+  TEXT fallback), real working session rendered ▶ WORKING
+  (`.planning/evidence/m4-real-agents-poll.png`).
+- ✓ **Page-refresh survival:** webviewReady replays live poll states —
+  WS probe received `agentPollState` (blocked + waitingFor) right after
+  `existingAgents`; badge visible 0.2s after a fresh page load.
+- ✓ **Gates:** check-types + eslint clean; webview 48/48 (+7 precedence/TTL),
+  server 223/223 (+10 pollStateHandler), poller 10/10; asyncapi schema
+  extended (AgentPollState) + messages.ts regenerated (drift gate clean).
+- ✓ **Guards intact after runs:** `~/.claude/settings.json` 0 pixel-agents/
+  war-room entries; `~/.pixel-agents/server.json` absent; port 3141 closed;
+  no poller process left; `~/.pixel-agents/config.json` still
+  `standalone.hooksEnabled: false`.
+- ⚠ e2e specs still not run (need live `claude` + harness — unchanged M3 note).
+
+## Definition of done (v0) — honest state 2026-07-06
+
+- ✗ Dashboard reachable tailnet-only on NEXUS — **BLOCKED on Greg:**
+  `nexus-war-room-deploy.sh` not run (image now bakes M3+M4 via rsync+rebuild).
+- ✗ Live sessions from ≥2 machines — code + local sim verified (M2);
+  **BLOCKED on Greg:** `macbook-hooks-install.sh MACBOOK` / `MINI`.
+- ✗ Needs-input badge via shape+text within 30s — code verified locally
+  (2.8s fixture, real CLI live); **BLOCKED on Greg:** NEXUS deploy +
+  `install-poller-launchd.sh` per Mac for the literal cross-machine proof.
+- ✗ Survives laptop sleep/reconnect — untested (needs the deployed NEXUS
+  setup + a real sleep cycle; M5 soak territory).
+- ✓ Zero color-only signals — grayscale test passed (M3); M4 badge reuses it.
+- ✓ Every gated NEXUS/live-config change has a runbook (deploy, hooks ×2 Macs,
+  poller launchd ×2 Macs).
+- ✓ `.planning/STATE.md` current.
+
 ## Config guard (important — do not undo)
 
 The CLI's default `hooksEnabled: true` would have auto-written Pixel Agents
@@ -245,15 +314,18 @@ Greg runs himself.
   installed Claude Code version expects it at hooks-top-level, move it (the
   runbook header documents this; failures are fire-and-forget, check the
   server log for 401s).
+- ✗ **BLOCKED — poller launchd install NOT RUN** (M4; per machine, after the
+  hooks runbook stored the token). `.planning/runbooks/install-poller-launchd.sh`
+  (chmod +x, confirm prompt, plist backup, inline undo):
+  `bash .planning/runbooks/install-poller-launchd.sh MACBOOK` (then `MINI`).
+  Installs `bin/needs-input-poller.mjs` as a KeepAlive launchd user agent
+  POSTing to the NEXUS ingest; logs to `~/Library/Logs/war-room-poller.log`.
 
 ## Next step (one)
 
-**M4 needs-input poller**: per-machine script polling `claude agents --json`
-every ~15s, POSTing normalized state to the server; render `state:"blocked"`
-
-- `waitingFor` through the existing ⚠ NEEDS INPUT chip (already built —
-  `STATE_CHIPS` in `webview-ui/src/office/agentState.ts` covers blocked/
-  failed/stopped). Still pending from M2 (gated on Greg, unchanged): run the
-  NEXUS deploy + Mac hooks runbooks. Note for the NEXUS deploy: the Docker
-  image bakes `dist/` at build time, so the rsync+rebuild in the runbook picks
-  up M3 automatically.
+**Greg runs the three runbooks** (build work is done through M4; M5 soak
+can't start without them): `nexus-war-room-deploy.sh` on the Mac →
+`macbook-hooks-install.sh MACBOOK` / `MINI` → `install-poller-launchd.sh
+MACBOOK` / `MINI`. The Docker image bakes `dist/` at build time, so the
+rsync+rebuild in the deploy runbook picks up M3+M4 automatically. After
+that: M5 = use it daily for a month (not a build task).
