@@ -100,7 +100,16 @@ export class AgentRuntime {
         // Remote sessions (machine label set) bypass the tracked-dir gate: their
         // cwd is a path on ANOTHER machine, never a local tracked project dir,
         // and they already authenticated via the bearer-token hook path.
-        if (!machine && !isTrackedProjectDir(projectDir) && !this.watchAllSessions.current) {
+        // Coworker providers (codex/gemini) bypass it too — the adapter may run
+        // on THIS machine (X-Machine == server label), and their sessions never
+        // live under a tracked Claude project dir.
+        const isCoworker = providerId !== undefined && providerId !== 'claude';
+        if (
+          !machine &&
+          !isCoworker &&
+          !isTrackedProjectDir(projectDir) &&
+          !this.watchAllSessions.current
+        ) {
           return;
         }
         adoptExternalSessionFromHook(

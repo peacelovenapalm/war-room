@@ -103,10 +103,14 @@ function matchEntry(entry: PollEntry, machineAgents: Array<[number, AgentState]>
     found = machineAgents.find(([, a]) => a.sessionId.startsWith(entry.id));
     if (found) return found;
   }
-  // 3. unique cwd match
+  // 3. unique cwd match — Claude sessions only (`claude agents --json` never
+  //    reports Codex/Gemini coworkers; matching one by shared cwd would set
+  //    the wrong desk on fire).
   if (entry.cwd) {
     const cwd = entry.cwd;
-    const byCwd = machineAgents.filter(([, a]) => agentMatchesCwd(a, cwd));
+    const byCwd = machineAgents.filter(
+      ([, a]) => (!a.providerId || a.providerId === 'claude') && agentMatchesCwd(a, cwd),
+    );
     if (byCwd.length === 1) return byCwd[0];
   }
   return undefined;
@@ -204,7 +208,9 @@ export function startPollStateSweep(
       if (agent.pollState && now - agent.pollState.at > ttlMs) {
         if (agent.pollState.state === 'blocked') stats?.endBlocked(`agent:${agentId}`, now);
         agent.pollState = undefined;
-        store.broadcast({ type: 'agentPollState', id: agentId });
+        // stale: the POLLER went silent — the session may well still be
+        // blocked. The webview clears the badge but must NOT celebrate.
+        store.broadcast({ type: 'agentPollState', id: agentId, stale: true });
       }
     }
   }, intervalMs);

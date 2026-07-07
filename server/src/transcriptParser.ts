@@ -17,6 +17,10 @@ import type { AgentState } from './types.js';
 /** Empty set used as safe fallback when no HookProvider is registered. */
 const EMPTY_EXEMPT_TOOLS: ReadonlySet<string> = new Set();
 
+/** Usage records older than this are treated as transcript REPLAY (resume /
+ *  adopt-from-start) and excluded from the shift report's token spend. */
+const SHIFT_TOKEN_REPLAY_CUTOFF_MS = 5 * 60_000;
+
 /** Hook provider: supplies formatToolStatus + team.extractTeamMetadataFromRecord.
  *  Registered once at startup via setHookProvider(). Functions below assume it's set. */
 let hookProvider: HookProvider | null = null;
@@ -96,7 +100,14 @@ export function processTranscriptLine(
         agent.outputTokens += usage.output_tokens;
       }
       // Shift report (v1 mechanic #2): accumulate today's real token spend.
-      shiftStats.recordTokens(usage.input_tokens ?? 0, usage.output_tokens ?? 0);
+      // Replay guard (review finding): /resume and adopt-from-start REWIND the
+      // file offset and re-stream historical usage records — counting those
+      // would double the day's "money spent". Only count records stamped
+      // within the last few minutes (live records arrive within seconds).
+      const recordTs = Date.parse((record as { timestamp?: string }).timestamp ?? '');
+      if (Number.isFinite(recordTs) && Date.now() - recordTs < SHIFT_TOKEN_REPLAY_CUTOFF_MS) {
+        shiftStats.recordTokens(usage.input_tokens ?? 0, usage.output_tokens ?? 0);
+      }
       agents.broadcast({
         type: 'agentTokenUsage',
         id: agentId,

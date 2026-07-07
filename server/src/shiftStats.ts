@@ -134,9 +134,21 @@ export class ShiftStats {
       this.day = emptyDay(date);
       // Open episodes carry across midnight — a fire burning at 23:59 is
       // still burning at 00:01; its resolution counts for the new day.
+      this.captureBaseline(now);
       this.persist(now, true);
     }
     return this.day;
+  }
+
+  /** Snapshot briefing counts as the day's delta baseline. Runs once per day
+   *  (day creation or first report) — getBriefing is 60s-cached anyway. */
+  private captureBaseline(now: number): void {
+    if (!this.day || this.day.baseline) return;
+    try {
+      this.day.baseline = { ...briefingCounts(getBriefing(now)), capturedAt: now };
+    } catch {
+      /* briefing failure must never break stats recording */
+    }
   }
 
   recordTurnEnd(now: number = Date.now()): void {
@@ -180,7 +192,7 @@ export class ShiftStats {
     const briefing = getBriefing(now);
     const counts = briefingCounts(briefing);
     if (!day.baseline) {
-      day.baseline = { ...counts, capturedAt: now };
+      this.captureBaseline(now);
       this.persist(now, true);
     }
     const hasBriefingSources = briefing.todo !== null || briefing.tracker !== null;
@@ -197,12 +209,14 @@ export class ShiftStats {
       meanTimeToUnblockMs:
         day.crisesResolved > 0 ? Math.round(day.blockedMsTotal / day.crisesResolved) : null,
       longestBlockedMs: day.longestBlockedMs,
-      todosClosed: hasBriefingSources
-        ? Math.max(0, day.baseline.openTodos - counts.openTodos)
-        : null,
-      gatesAdvanced: hasBriefingSources
-        ? Math.max(0, counts.gatesDone - day.baseline.gatesDone)
-        : null,
+      todosClosed:
+        hasBriefingSources && day.baseline
+          ? Math.max(0, day.baseline.openTodos - counts.openTodos)
+          : null,
+      gatesAdvanced:
+        hasBriefingSources && day.baseline
+          ? Math.max(0, counts.gatesDone - day.baseline.gatesDone)
+          : null,
       outputTokensPerTurn: perTurn,
       efficiency:
         perTurn === null
@@ -220,8 +234,20 @@ export class ShiftStats {
 
   private load(): ShiftDay | null {
     try {
-      const raw = JSON.parse(fs.readFileSync(this.persistPath(), 'utf8')) as ShiftDay;
+      const raw = JSON.parse(fs.readFileSync(this.persistPath(), 'utf8')) as ShiftDay & {
+        openBlocked?: Array<[string, number]>;
+      };
       if (raw && typeof raw.date === 'string' && typeof raw.turnsCompleted === 'number') {
+        // Open episodes survive restarts — otherwise a still-burning session
+        // re-ignites on the next poll tick and inflates crisesIgnited.
+        if (Array.isArray(raw.openBlocked)) {
+          for (const [key, since] of raw.openBlocked) {
+            if (typeof key === 'string' && typeof since === 'number') {
+              this.openBlocked.set(key, since);
+            }
+          }
+        }
+        delete raw.openBlocked;
         return raw;
       }
     } catch {
@@ -240,7 +266,11 @@ export class ShiftStats {
     this.lastPersistAt = now;
     try {
       fs.mkdirSync(path.dirname(target), { recursive: true });
-      fs.writeFileSync(target, JSON.stringify(this.day), 'utf8');
+      fs.writeFileSync(
+        target,
+        JSON.stringify({ ...this.day, openBlocked: [...this.openBlocked.entries()] }),
+        'utf8',
+      );
     } catch {
       /* stats loss on write failure is acceptable — never crash the server */
     }

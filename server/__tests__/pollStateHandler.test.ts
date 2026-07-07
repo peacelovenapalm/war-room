@@ -237,6 +237,24 @@ describe('startPollStateSweep', () => {
     vi.useRealTimers();
   });
 
+  it('never matches a coworker agent by cwd (claude agents --json only reports Claude)', () => {
+    const store = new AgentStateStore();
+    store.set(
+      12,
+      createTestAgent({
+        id: 12,
+        sessionId: 'cw-1',
+        projectDir: '/shared/proj',
+        providerId: 'codex',
+      }),
+    );
+    const result = applyPollStates(store, 'MACBOOK', 'MACBOOK', [
+      { id: 'zzzz9999', state: 'blocked', cwd: '/shared/proj' },
+    ]);
+    expect(result.matched).toBe(0);
+    expect(store.get(12)!.pollState).toBeUndefined();
+  });
+
   it('clears poll states older than the TTL and broadcasts the clear', () => {
     const store = new AgentStateStore();
     const broadcasts: Array<Record<string, unknown>> = [];
@@ -255,7 +273,9 @@ describe('startPollStateSweep', () => {
       expect(store.get(1)!.pollState).toBeDefined(); // still fresh
       vi.advanceTimersByTime(POLL_STATE_TTL_MS + 60_000);
       expect(store.get(1)!.pollState).toBeUndefined();
-      expect(broadcasts).toContainEqual({ type: 'agentPollState', id: 1 });
+      // stale: poller silence, not an observed change — the webview drops the
+      // badge without celebrating a resolution.
+      expect(broadcasts).toContainEqual({ type: 'agentPollState', id: 1, stale: true });
     } finally {
       clearInterval(timer);
     }

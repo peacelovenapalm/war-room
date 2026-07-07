@@ -372,6 +372,12 @@ components:
             clock so client clock skew cancels out (client derives
             `since = Date.now() - ageMs`). Drives the v1 crisis layer's
             smoke → fire → alarm aging. Absent on clear messages.
+        stale:
+          type: boolean
+          description: >-
+            Set on CLEAR messages caused by poller silence (TTL sweep) rather
+            than an observed state change — the session may still be blocked.
+            The webview drops the badge without the "resolved" celebration.
 
     AgentPollStateValue:
       description: Agent session state from `claude agents --json`.

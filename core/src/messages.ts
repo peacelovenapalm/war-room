@@ -144,6 +144,7 @@ export interface AgentPollState {
   state?: AgentPollStateValue;
   waitingFor?: string;
   ageMs?: number;
+  stale?: boolean;
 }
 
 export type AgentPollStateValue = 'working' | 'blocked' | 'done' | 'failed' | 'stopped';

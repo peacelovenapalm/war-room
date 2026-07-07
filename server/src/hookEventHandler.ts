@@ -670,8 +670,12 @@ export class HookEventHandler {
   /** Handle Stop: Claude finished responding, mark agent as waiting. */
   private handleStop(agent: AgentState, agentId: number, awaitingInput = false): void {
     // Shift report (v1 mechanic #2): a finished turn (Stop) counts as a
-    // completion; going idle waiting on the user does not.
-    if (!awaitingInput) shiftStats.recordTurnEnd();
+    // completion; going idle waiting on the user does not. Coworker
+    // heartbeats (Codex/Gemini synthesize Stop but contribute no JSONL
+    // tokens) are excluded so they can't deflate the efficiency score.
+    if (!awaitingInput && (!agent.providerId || agent.providerId === 'claude')) {
+      shiftStats.recordTurnEnd();
+    }
     this.markAgentWaiting(agent, agentId, awaitingInput);
   }
 
