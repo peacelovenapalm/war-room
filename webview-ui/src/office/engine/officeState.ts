@@ -15,6 +15,10 @@ import {
   PET_HIT_HEIGHT,
   WAITING_BUBBLE_DURATION_SEC,
 } from '../../constants.js';
+import type { AgentVisualState } from '../agentState.js';
+import { deriveVisualState } from '../agentState.js';
+import type { DebrisRecord, ExtinguishEffect } from '../crisis.js';
+import { computeCrisisUpdate, debrisKey, EXTINGUISH_DURATION_MS } from '../crisis.js';
 import { getAnimationFrames, getCatalogEntry, getOnStateType } from '../layout/furnitureCatalog.js';
 import {
   createDefaultLayout,
@@ -37,6 +41,7 @@ import type {
   Seat,
   TileType as TileTypeVal,
 } from '../types.js';
+import type { ToolActivity } from '../types.js';
 import {
   CharacterState,
   Direction,
@@ -47,6 +52,37 @@ import {
 import { createCharacter, updateCharacter } from './characters.js';
 import { matrixEffectSeeds } from './matrixEffect.js';
 import { createPet, updatePet } from './petEntity.js';
+
+/** localStorage key for debris persistence (a refresh must not tidy the room). */
+const DEBRIS_STORAGE_KEY = 'war-room.debris.v1';
+
+function loadPersistedDebris(): Map<string, DebrisRecord> {
+  const map = new Map<string, DebrisRecord>();
+  try {
+    if (typeof localStorage === 'undefined') return map;
+    const raw = localStorage.getItem(DEBRIS_STORAGE_KEY);
+    if (!raw) return map;
+    const parsed: unknown = JSON.parse(raw);
+    if (!Array.isArray(parsed)) return map;
+    for (const d of parsed as DebrisRecord[]) {
+      if (
+        d &&
+        typeof d.key === 'string' &&
+        typeof d.agentId === 'number' &&
+        (d.kind === 'failed' || d.kind === 'stopped') &&
+        typeof d.label === 'string' &&
+        typeof d.x === 'number' &&
+        typeof d.y === 'number' &&
+        typeof d.since === 'number'
+      ) {
+        map.set(d.key, d);
+      }
+    }
+  } catch {
+    // Corrupt store → start clean rather than crash the office.
+  }
+  return map;
+}
 
 export class OfficeState {
   layout: OfficeLayout;
@@ -68,6 +104,13 @@ export class OfficeState {
   /** Reverse lookup: sub-agent character ID → parent info */
   subagentMeta: Map<number, { parentAgentId: number; parentToolId: string }> = new Map();
   private nextSubagentId = -1;
+
+  // ── Crisis & triage layer (v1 mechanic #1) ──────────────────────
+  /** Labeled wreckage left by failed/stopped agents, keyed `${agentId}:${kind}`.
+   *  Persists (localStorage) until acknowledged — a refresh must not tidy the room. */
+  debris: Map<string, DebrisRecord> = loadPersistedDebris();
+  /** Active extinguish (steam + "✓ RESOLVED") effects; pruned each crisis tick. */
+  crisisEffects: ExtinguishEffect[] = [];
 
   constructor(layout?: OfficeLayout) {
     this.layout = layout || createDefaultLayout();
@@ -399,6 +442,12 @@ export class OfficeState {
     ch.matrixEffectTimer = 0;
     ch.matrixEffectSeeds = matrixEffectSeeds();
     ch.bubbleType = null;
+    // A burning desk whose session closes counts as resolved — calm the room.
+    // (failed/stopped debris was already spawned at the state transition.)
+    if (ch.crisis) {
+      this.spawnExtinguish(ch.x, ch.y, Date.now());
+      ch.crisis = undefined;
+    }
   }
 
   /** Find seat uid at a given tile position, or null */
@@ -709,11 +758,100 @@ export class OfficeState {
     }
   }
 
-  /** Set/clear poll-derived state (M4 needs-input poller). No state = clear. */
-  setAgentPollState(id: number, state?: PollStateValue, waitingFor?: string): void {
+  /** Set/clear poll-derived state (M4 needs-input poller). No state = clear.
+   *  `ageMs` (server-computed) anchors crisis aging: since = now - ageMs. */
+  setAgentPollState(id: number, state?: PollStateValue, waitingFor?: string, ageMs?: number): void {
     const ch = this.characters.get(id);
     if (!ch) return;
-    ch.pollState = state ? { state, waitingFor, at: Date.now() } : undefined;
+    const now = Date.now();
+    ch.pollState = state
+      ? { state, waitingFor, at: now, since: ageMs !== undefined ? now - ageMs : undefined }
+      : undefined;
+  }
+
+  // ── Crisis & triage layer (v1 mechanic #1) ──────────────────────
+
+  /** Identity TEXT for a character: "#id [MACHINE] folder" (never color-coded). */
+  agentIdentity(id: number): string {
+    const ch = this.characters.get(id);
+    if (!ch) return `#${id}`;
+    return [`#${id}`, ch.machine ? `[${ch.machine}]` : null, ch.folderName ?? null]
+      .filter(Boolean)
+      .join(' ');
+  }
+
+  /**
+   * One tick of the crisis layer: derive each character's visual state,
+   * ignite/age/resolve fires, spawn/clear debris, prune finished effects.
+   * Driven from the overlay's animation tick (same cadence the chips use).
+   */
+  updateCrises(agentTools: Record<number, ToolActivity[]>, now: number = Date.now()): void {
+    for (const [id, ch] of this.characters) {
+      if (ch.matrixEffect === 'despawn') continue; // handled by removeAgent
+      const vState = deriveVisualState(ch, agentTools[id], now);
+      const poll = ch.pollState;
+      const update = computeCrisisUpdate({
+        vState,
+        prevVState: ch.lastVisualState as AgentVisualState | undefined,
+        prevCrisis: ch.crisis,
+        pollSince: poll?.state === 'blocked' ? poll.since : undefined,
+        now,
+      });
+      if (update.resolved) this.spawnExtinguish(ch.x, ch.y, now);
+      ch.crisis = update.crisis;
+      if (update.spawnDebris) {
+        const key = debrisKey(id, update.spawnDebris);
+        if (!this.debris.has(key)) {
+          this.debris.set(key, {
+            key,
+            agentId: id,
+            kind: update.spawnDebris,
+            label: this.agentIdentity(id),
+            x: ch.x,
+            y: ch.y,
+            since: now,
+          });
+          this.persistDebris();
+        }
+      }
+      if (update.clearDebris) {
+        let removed = false;
+        for (const kind of ['failed', 'stopped'] as const) {
+          if (this.debris.delete(debrisKey(id, kind))) removed = true;
+        }
+        if (removed) {
+          this.spawnExtinguish(ch.x, ch.y, now);
+          this.persistDebris();
+        }
+      }
+      ch.lastVisualState = vState;
+    }
+    // Prune finished extinguish effects.
+    this.crisisEffects = this.crisisEffects.filter(
+      (e) => now - e.startedAt < EXTINGUISH_DURATION_MS,
+    );
+  }
+
+  /** Acknowledge (clear) one debris pile — the human tidied the room. */
+  acknowledgeDebris(key: string): void {
+    const d = this.debris.get(key);
+    if (!d) return;
+    this.debris.delete(key);
+    this.spawnExtinguish(d.x, d.y, Date.now());
+    this.persistDebris();
+  }
+
+  private spawnExtinguish(x: number, y: number, now: number): void {
+    this.crisisEffects.push({ x, y, startedAt: now });
+  }
+
+  private persistDebris(): void {
+    try {
+      if (typeof localStorage === 'undefined') return;
+      localStorage.setItem(DEBRIS_STORAGE_KEY, JSON.stringify([...this.debris.values()]));
+    } catch {
+      // Storage full/unavailable — debris just won't survive a refresh.
+    }
   }
 
   showPermissionBubble(id: number): void {

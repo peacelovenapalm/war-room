@@ -145,6 +145,10 @@ export interface PollStateInfo {
   state: PollStateValue;
   waitingFor?: string;
   at: number;
+  /** Epoch ms when the state TRANSITION happened, derived from the server's
+   *  `ageMs` (skew-free: `Date.now() - ageMs` at receipt). Anchors crisis
+   *  aging (smoke → fire → alarm). Absent for pre-v1 servers. */
+  since?: number;
 }
 
 export interface Character {
@@ -213,6 +217,12 @@ export interface Character {
    *  time (ms) so the value expires visually if the poller/server goes silent.
    *  blocked → loudest ⚠ NEEDS INPUT chip; failed/stopped → their chips. */
   pollState?: PollStateInfo;
+  /** Active fire at this desk (v1 crisis layer): present while the agent is
+   *  needs-input. `since` anchors the smoke → fire → alarm aging. Maintained
+   *  by OfficeState.updateCrises. */
+  crisis?: { since: number };
+  /** Visual state from the previous crisis tick (transition detection). */
+  lastVisualState?: string;
 
   // -- Agent Teams --
   /** Team name this agent belongs to */

@@ -410,7 +410,12 @@ export function useExtensionMessages(
         const id = msg.id as number;
         const state = msg.state as PollStateValue | undefined;
         const wasBlocked = os.characters.get(id)?.pollState?.state === 'blocked';
-        os.setAgentPollState(id, state, msg.waitingFor as string | undefined);
+        os.setAgentPollState(
+          id,
+          state,
+          msg.waitingFor as string | undefined,
+          msg.ageMs as number | undefined,
+        );
         if (state === 'blocked' && !wasBlocked) {
           playPermissionSound();
         }
