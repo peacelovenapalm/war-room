@@ -406,3 +406,27 @@ build + start + curl + headless screenshot
    subjects (see review findings); otherwise push as-is.
 3. **M5 soak** — after the runbooks: use it daily for a month; watch
    laptop-sleep/reconnect behavior (the one untested DoD line).
+
+---
+
+## 2026-07-07 — v0 DEPLOYED to NEXUS + briefing feature + gamification next
+
+- ✓ **NEXUS deploy DONE** (Greg ran the runbook 2026-07-06 evening): docker
+  `war-room` on nexus 127.0.0.1:3141, `tailscale serve` at
+  https://nexus.tail722a2e.ts.net:8484 (TAILNET ONLY — verified, no funnel).
+  Serve needed a one-time `sudo tailscale set --operator=gregory` (done).
+  Runbook rewritten to the no-sudo tailscale-serve path (`ee07a41`).
+- ✓ **Briefing feature shipped + live** (`6ef83e6`, `3df55e8`, `3b0d555`):
+  GET /api/briefing + HUD BRIEFING panel — today's todo top-3 + half-baked
+  tracker gates (glyph+word, colorblind-safe). Sources on NEXUS (ro mounts):
+  todo from the vault-notifier clone (self-refreshes every 15 min), tracker
+  from /data/repos/completion-2026-07 (deploy runbook rsyncs laptop STATE.md
+  → also un-stales the projects-board). Live-verified over tailnet: health ok,
+  3 start-now items, 10 gates. Server tests 236/236, webview 48/48.
+- ✗ STILL BLOCKED (unchanged): Mac hooks + poller launchd installs (runbooks
+  above) — until then the office has no live agents, only the briefing panel.
+- **NEXT ITERATION DIRECTION:** Greg's verdict after first browse —
+  "aesthetics work, but it lacks fun or gamification." Full design contract
+  seed: `.planning/GAMIFICATION-BRIEF.md` (crisis/triage layer → shift-report
+  scorecard → real-milestone progression → emergence → expression; hard
+  guardrails carried over). Read it FIRST before building v1.
