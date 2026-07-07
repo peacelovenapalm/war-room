@@ -592,3 +592,46 @@ entry — "a mechanic isn't done until its help section exists" is CI-enforced.
   Greg's open questions; #6 supplied by real life. Everything buildable
   without Greg's input is built — remaining scope needs his answers,
   the MINI/poller runbooks, and a NEXUS redeploy.
+
+### Iteration 2b — adversarial review pass (2026-07-07, same night)
+
+Independent adversarial review of the full `war-room/v0...v1` diff (subagent,
+v0-review method: refute every claim). **Hard constraints HELD:** colorblind
+(all new signals shape+text, no color-only channel found), no dark patterns
+on money (lower spend always grades better), no function gated behind
+progress, WS plane / MIT / no config auto-writes.
+
+**Real bugs found → FIXED same session** (commits `592007b`, `dfb9097`,
+`94dfa50`, `88b42ec`):
+
+1. `/resume` replayed historical JSONL usage records into today's token
+   spend (efficiency = money integrity) → 5-min timestamp cutoff on
+   shift-token recording.
+2. Coworker Stop heartbeats counted as completed turns, deflating
+   tokens-per-turn toward LEAN → only Claude sessions count turns.
+3. Blocked episode leaked open when a burning agent was removed →
+   endBlocked on agent removal.
+4. TTL/sweep telemetry loss faked "✓ RESOLVED / ALL CLEAR" while the human
+   was still being waited on → sweep clears broadcast `stale:true`; the
+   webview drops the badge/fire WITHOUT the celebration (client TTL expiry
+   also silent). Honest-feedback rule: celebrate only observed resolutions.
+5. Adapter: overlapping ticks (slow server) could double-read files →
+   in-flight guard; truncated/rotated rollouts stalled forever → offset
+   reset; one-prompt Gemini sessions never rendered → post-seed new
+   sessions count as activity; coworkers never left the office →
+   idle SessionEnd (Codex 30 min, Gemini 60 min) + map pruning.
+6. Poll cwd-matching could tag a coworker with a Claude session's blocked
+   state → cwd fallback skips non-claude agents; same-machine coworkers
+   were dropped by the tracked-dir gate → provider bypass.
+7. Blocked episodes now persist across server restarts (no re-ignite
+   inflation); briefing baseline captures at day start, not first panel open.
+
+**Deferred (logged, low severity):** TriagePanel first-paint now=0 frame;
+ShiftPanel staleness marker on failed refresh; debris keys reuse agent ids
+across restarts; yesterday's ledger overwritten at midnight (no previous-day
+card); ◆ glyph shared by GEMINI badge and GATES row (words disambiguate);
+night-dim vs label use slightly different empty conditions; locally-anchored
+fires (no poll state) reset to SMOKE on refresh (documented behavior).
+
+Gates after fixes: server 246/246, webview 68/68, bin 21/21, lint + tsc
+clean, `npm run build` clean.
