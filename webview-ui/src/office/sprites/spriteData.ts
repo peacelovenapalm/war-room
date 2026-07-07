@@ -18,7 +18,8 @@ function resolveBubbleSprite(data: BubbleSpriteJson): SpriteData {
   return data.pixels.map((row) => row.map((key) => data.palette[key] ?? key));
 }
 
-/** Permission bubble: white square with "..." in amber, and a tail pointer (11x13) */
+/** Needs-input alert badge: white warning triangle with dark "!" and a tail pointer
+ *  (13x11). Distinct SHAPE, not a tint — readable in grayscale (colorblind rule). */
 export const BUBBLE_PERMISSION_SPRITE: SpriteData = resolveBubbleSprite(bubblePermissionData);
 
 /** Waiting bubble: white square with green checkmark, and a tail pointer (11x13) */
