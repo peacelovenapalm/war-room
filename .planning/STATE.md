@@ -26,10 +26,12 @@ first every iteration; check the kill criterion before building anything.
       plane; remote sessions render hooks-only (label + state, no JSONL).
       Local acceptance: two machines (MACBOOK local + MINI-SIM simulated)
       visible in one browser view, machine identity in TEXT (evidence below).
-- [ ] **M3 Colorblind pass.** Shape + text label for every state; per-agent
-      name tags; needs-input as a distinct SHAPE (e.g. ⚠ badge + "NEEDS
-      INPUT" text), not a tint. Acceptance: grayscale screenshot of the
-      dashboard is fully readable.
+- [x] **M3 Colorblind pass.** Every agent state = SHAPE glyph + TEXT chip
+      (⚠ NEEDS INPUT / ▶ WORKING / ✓ DONE / ✗ FAILED / ■ STOPPED / ○ IDLE);
+      per-agent name tags (#id [MACHINE] folder) always visible; needs-input
+      is the loudest signal (inverted white chip + warning-triangle bubble
+      sprite, never a tint). Acceptance met: grayscale screenshot fully
+      readable (evidence below). ✓ done 2026-07-06.
 - [ ] **M4 needs-input poller.** Small script per machine: poll
       `claude agents --json` every ~15s, POST normalized state to the server;
       render `state:"blocked"` + `waitingFor` as the loudest badge on screen.
@@ -165,6 +167,53 @@ Everything below ran LOCALLY (NEXUS deploy is gated). Built from clean
   pixel-agents/war-room entries; `~/.pixel-agents/server.json` cleaned up;
   port 3141 closed; test containers removed.
 
+## M3 acceptance evidence (2026-07-06)
+
+Commits `61a1204` (state chips + name tags), `+2` (alert bubble sprite,
+canvas/DebugView glyphs). Built from `npm run build`; server
+`node dist/cli.js --port 3141` (WAR_ROOM_MACHINE=MACBOOK, cwd vault, test
+token); 3 MINI-SIM sessions simulated over the authenticated hook ingest +
+6 live local MACBOOK sessions from JSONL.
+
+- ✓ **State = SHAPE + TEXT everywhere.** New `webview-ui/src/office/agentState.ts`
+  derives one visual state per agent; ToolOverlay renders it as a glyph+word
+  chip. Chip vocabulary intentionally covers the `claude agents --json`
+  states so the M4 poller reuses it unchanged (FAILED/STOPPED wired but not
+  yet reachable — they arrive with the poller).
+- ✓ **needs-input is the loudest signal:** inverted white bold chip
+  "⚠ NEEDS INPUT" (always full-size, zIndex above everything, shown even
+  with labels off) + the canvas permission bubble redrawn as a white warning
+  triangle with dark "!" (was: amber "..." tint). Covers BOTH permission
+  prompts ("Needs approval" detail) and idle-prompt ("Waiting for input").
+- ✓ **Identity always visible as TEXT:** full panel shows "#id [MACHINE]
+  folder"; when labels are off, a compact name tag (glyph + STATE word +
+  identity) still renders for every agent — identity/state are never hidden.
+- ✓ **Other tint-only signals demoted to reinforcement:** DebugView tool
+  dots → ✓/⚠/▶ glyphs; JSONL status → "✓ JSONL connected"/"✗ JSONL not
+  found"; fuel gauge gains % TEXT; seat picker ●/✓/✗ glyphs; invalid
+  furniture ghost gets a bold ✗ (was green/red tint only).
+- ✓ **Grayscale acceptance (met literally):** `.planning/evidence/m3-dashboard.png`
+  (1800x1240, 5x zoom, 9 agents: ▶ WORKING "Running: npm run build"
+  #7 [MINI-SIM] turffinder; ⚠ NEEDS INPUT "Needs approval" #8 [MINI-SIM]
+  arcade; ✓ DONE #9 [MINI-SIM] nexus-tools; ▶ WORKING "Fetching web content"
+  #3 [MACBOOK] vault (live session); ○ IDLE × rest) and
+  `.planning/evidence/m3-dashboard-grayscale.png` (canvas luminance
+  conversion — no ImageMagick on this Mac; "canvas script" path of the
+  acceptance). Every agent's identity and state reads in grayscale; the
+  NEEDS INPUT chip is the single brightest element.
+- ✓ **Gates:** check-types + eslint clean; webview 41/41, server 213/213;
+  fresh `npm run build` served the reworked UI for the evidence run.
+- ✓ **Guards intact after runs:** `~/.claude/settings.json` 0 pixel-agents/
+  war-room entries; `~/.pixel-agents/server.json` removed; port 3141 closed;
+  temp driver script deleted.
+- ⚠ **e2e specs not run** (they need live `claude` sessions + the harness).
+  Detail strings the specs assert ("Needs approval", "Waiting for input",
+  "Idle") were deliberately kept in the overlay panel, but two behavior
+  changes may need spec touch-ups when e2e next runs: (1) idle agents now
+  render a compact name tag instead of NO overlay when labels are off;
+  (2) a permission/awaiting-input agent shows its full stack even with
+  labels off (loud rule).
+
 ## Config guard (important — do not undo)
 
 The CLI's default `hooksEnabled: true` would have auto-written Pixel Agents
@@ -199,7 +248,12 @@ Greg runs himself.
 
 ## Next step (one)
 
-**Greg runs the two gated runbooks** (deploy on NEXUS, then hooks on the
-MacBook), and we verify a REAL MacBook session appears on the NEXUS
-dashboard. After that: **M3 colorblind pass** (shape + text for every state;
-the M1 render bug earmarked for M3 is already fixed in M2).
+**M4 needs-input poller**: per-machine script polling `claude agents --json`
+every ~15s, POSTing normalized state to the server; render `state:"blocked"`
+
+- `waitingFor` through the existing ⚠ NEEDS INPUT chip (already built —
+  `STATE_CHIPS` in `webview-ui/src/office/agentState.ts` covers blocked/
+  failed/stopped). Still pending from M2 (gated on Greg, unchanged): run the
+  NEXUS deploy + Mac hooks runbooks. Note for the NEXUS deploy: the Docker
+  image bakes `dist/` at build time, so the rsync+rebuild in the runbook picks
+  up M3 automatically.
