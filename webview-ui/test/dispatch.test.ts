@@ -13,6 +13,9 @@ import {
   canFocusAgent,
   detectSendFailures,
   dismissDispatchEntry,
+  DISPATCH_EFFORT_VALUES,
+  DISPATCH_MODEL_OPTIONS,
+  DISPATCH_MODEL_PATTERN,
   DISPATCH_SEND_TIMEOUT_MS,
   DISPATCH_STATUS_CHIPS,
   DISPATCH_STATUSES,
@@ -403,5 +406,53 @@ describe('splitCwdIntoRootSubpath', () => {
       ok: true,
       cwd: '/Users/dev/proj/src/lib',
     });
+  });
+});
+
+describe('DISPATCH_MODEL_OPTIONS (CallModal MODEL dropdown registry)', () => {
+  it('gives every dispatchable UI provider a non-empty options list', () => {
+    for (const provider of DISPATCH_UI_PROVIDERS) {
+      const options = DISPATCH_MODEL_OPTIONS[provider];
+      expect(options, `${provider} missing a MODEL_OPTIONS entry`).toBeDefined();
+      expect(options?.length ?? 0, `${provider} has no dropdown options`).toBeGreaterThan(0);
+    }
+  });
+
+  it("every provider's first option is the default (no flag) entry", () => {
+    for (const provider of DISPATCH_UI_PROVIDERS) {
+      const first = DISPATCH_MODEL_OPTIONS[provider]?.[0];
+      expect(first?.value, `${provider} first option must be the blank/default value`).toBe('');
+    }
+  });
+
+  it('every non-default option value matches the wire-level model pattern', () => {
+    for (const provider of DISPATCH_UI_PROVIDERS) {
+      for (const opt of DISPATCH_MODEL_OPTIONS[provider] ?? []) {
+        if (opt.value === '') continue;
+        expect(
+          DISPATCH_MODEL_PATTERN.test(opt.value),
+          `${provider} option "${opt.value}" fails the server's model pattern`,
+        ).toBe(true);
+      }
+    }
+  });
+
+  it('has no duplicate values within a single provider list', () => {
+    for (const provider of DISPATCH_UI_PROVIDERS) {
+      const values = (DISPATCH_MODEL_OPTIONS[provider] ?? []).map((o) => o.value);
+      expect(new Set(values).size, `${provider} has duplicate MODEL option values`).toBe(
+        values.length,
+      );
+    }
+  });
+});
+
+describe('DISPATCH_EFFORT_VALUES', () => {
+  it('does not include "minimal" — not a real claude --effort value', () => {
+    expect((DISPATCH_EFFORT_VALUES as readonly string[]).includes('minimal')).toBe(false);
+  });
+
+  it('matches the documented claude --effort levels exactly', () => {
+    expect(DISPATCH_EFFORT_VALUES).toEqual(['low', 'medium', 'high', 'xhigh', 'max']);
   });
 });

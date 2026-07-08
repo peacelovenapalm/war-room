@@ -56,7 +56,7 @@ export type DispatchProvider = (typeof DISPATCH_PROVIDERS)[number];
  *  enum here is intentionally broader than any one provider supports, since
  *  effort is validated once at the request level and providers without a
  *  matching flag simply omit it. */
-export const DISPATCH_EFFORT_VALUES = ['minimal', 'low', 'medium', 'high', 'xhigh', 'max'] as const;
+export const DISPATCH_EFFORT_VALUES = ['low', 'medium', 'high', 'xhigh', 'max'] as const;
 export type DispatchEffort = (typeof DISPATCH_EFFORT_VALUES)[number];
 
 /** A short model identifier/alias (e.g. 'fable', 'claude-fable-5', 'o3') —

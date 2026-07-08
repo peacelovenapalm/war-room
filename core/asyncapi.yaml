@@ -992,7 +992,7 @@ components:
         providers have an --effort-equivalent flag (currently claude); the
         runner silently omits it for the rest.
       type: string
-      enum: [minimal, low, medium, high, xhigh, max]
+      enum: [low, medium, high, xhigh, max]
 
     SaveAgentSeats:
       description: Persist seat assignments for current agents.

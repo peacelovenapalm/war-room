@@ -3,7 +3,7 @@ import { useEffect, useState } from 'react';
 import {
   DISPATCH_EFFORT_PROVIDERS,
   DISPATCH_EFFORT_VALUES,
-  DISPATCH_MODEL_PATTERN,
+  DISPATCH_MODEL_OPTIONS,
   DISPATCH_PROMPT_MAX_CHARS,
   DISPATCH_UI_PROVIDERS,
   type DispatchEffort,
@@ -121,14 +121,9 @@ export function CallModal({ isOpen, onClose, prefill, onSend }: CallModalProps) 
       ? joinRootSubpath(root, subpath)
       : { ok: false, reason: 'no project chosen' };
   const showEffort = provider !== '' && DISPATCH_EFFORT_PROVIDERS.includes(provider);
-  const modelValid = model.trim() === '' || DISPATCH_MODEL_PATTERN.test(model.trim());
+  const modelOptions = provider !== '' ? (DISPATCH_MODEL_OPTIONS[provider] ?? []) : [];
   const canSubmit =
-    machine.trim() !== '' &&
-    provider !== '' &&
-    joined.ok &&
-    prompt.trim() !== '' &&
-    remaining >= 0 &&
-    modelValid;
+    machine.trim() !== '' && provider !== '' && joined.ok && prompt.trim() !== '' && remaining >= 0;
 
   const handleSubmit = () => {
     if (!canSubmit || !joined.ok || !joined.cwd) return;
@@ -189,7 +184,10 @@ export function CallModal({ isOpen, onClose, prefill, onSend }: CallModalProps) 
                   <select
                     className="border-2 border-border bg-bg text-text py-4 px-8 rounded-none"
                     value={provider}
-                    onChange={(e) => setProvider(e.target.value as DispatchProvider)}
+                    onChange={(e) => {
+                      setProvider(e.target.value as DispatchProvider);
+                      setModel('');
+                    }}
                   >
                     <option value="">— choose a provider —</option>
                     {selectedMachine.providers
@@ -239,18 +237,18 @@ export function CallModal({ isOpen, onClose, prefill, onSend }: CallModalProps) 
 
                 <label className="flex flex-col gap-3 text-sm">
                   <span className="font-bold">MODEL (optional)</span>
-                  <input
-                    type="text"
+                  <select
                     className="border-2 border-border bg-bg text-text py-4 px-8 rounded-none"
                     value={model}
                     onChange={(e) => setModel(e.target.value)}
-                    placeholder="e.g. fable, opus, o3"
-                  />
-                  {!modelValid && (
-                    <span className="text-2xs text-status-permission font-bold">
-                      ⚠ letters, digits, ".", "_", "/", "-" only
-                    </span>
-                  )}
+                  >
+                    {modelOptions.length === 0 && <option value="">default (no flag)</option>}
+                    {modelOptions.map((opt) => (
+                      <option key={opt.value} value={opt.value}>
+                        {opt.label}
+                      </option>
+                    ))}
+                  </select>
                 </label>
 
                 {showEffort && (

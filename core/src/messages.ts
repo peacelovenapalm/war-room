@@ -418,7 +418,7 @@ export interface DispatchRequest {
   effort?: DispatchEffortValue;
 }
 
-export type DispatchEffortValue = 'minimal' | 'low' | 'medium' | 'high' | 'xhigh' | 'max';
+export type DispatchEffortValue = 'low' | 'medium' | 'high' | 'xhigh' | 'max';
 
 export interface ExportLayout {
   type: 'exportLayout';

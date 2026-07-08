@@ -31,7 +31,7 @@ export type DispatchActionValue = 'dispatch' | 'focus';
 export const DISPATCH_PROMPT_MAX_CHARS = 4000;
 
 /** Mirrors dispatchStore.ts DISPATCH_EFFORT_VALUES — the modal's EFFORT dropdown options. */
-export const DISPATCH_EFFORT_VALUES = ['minimal', 'low', 'medium', 'high', 'xhigh', 'max'] as const;
+export const DISPATCH_EFFORT_VALUES = ['low', 'medium', 'high', 'xhigh', 'max'] as const;
 export type DispatchEffort = (typeof DISPATCH_EFFORT_VALUES)[number];
 
 /** Providers with a real --effort-equivalent flag (bin/lib/dispatch-rules.mjs
@@ -42,6 +42,50 @@ export const DISPATCH_EFFORT_PROVIDERS: readonly DispatchProvider[] = ['claude']
 /** Mirrors dispatchStore.ts's model pattern — client-side hint only, the
  *  server validates for real. */
 export const DISPATCH_MODEL_PATTERN = /^[a-zA-Z0-9._/-]{1,64}$/;
+
+/** One MODEL dropdown entry: `value: ''` renders as "default (no flag)" and
+ *  is omitted from argv entirely (buildArgv only appends --model when a
+ *  non-empty value is present). */
+export interface DispatchModelOption {
+  value: string;
+  label: string;
+}
+
+/** Per-provider MODEL dropdown options (CallModal — scope change 2026-07-08:
+ *  free-text MODEL box replaced with a curated dropdown after Greg typed
+ *  "4.6" into it and codex rejected it: `The '4.6' model is not supported
+ *  when using Codex with a ChatGPT account.`).
+ *
+ *  - claude: aliases from `claude --help`'s --model description ("Provide an
+ *    alias for the latest model (e.g. 'fable', 'opus', or 'sonnet') or a
+ *    model's full name") — fable/opus/sonnet/haiku each track a live Claude
+ *    model family, verified 2026-07-08.
+ *  - codex: Greg's Codex CLI runs on a ChatGPT plan, not an API key — most
+ *    model ids 4xx immediately ("... not supported when using Codex with a
+ *    ChatGPT account"), confirmed live for 'gpt-5.5-codex' this session
+ *    (`codex exec -m gpt-5.5-codex` → the same 400 as the '4.6' failure).
+ *    Bare 'gpt-5.5' is the only id confirmed to run
+ *    (`~/.codex/config.toml`'s `[tui.model_availability_nux]` also lists only
+ *    "gpt-5.5"). Re-verify with a real `codex exec` run before adding more
+ *    entries — don't extrapolate from the 5.5 family naming pattern.
+ *
+ *  This enum is intentionally NOT enforced server-side (dispatchStore.ts
+ *  keeps the old permissive regex) — a stale dropdown should degrade to "the
+ *  option Greg wants isn't listed yet," never "the server 400s a model that
+ *  started working after this file was written." */
+export const DISPATCH_MODEL_OPTIONS: Partial<Record<DispatchProvider, DispatchModelOption[]>> = {
+  claude: [
+    { value: '', label: 'default (no flag)' },
+    { value: 'fable', label: 'fable' },
+    { value: 'opus', label: 'opus' },
+    { value: 'sonnet', label: 'sonnet' },
+    { value: 'haiku', label: 'haiku' },
+  ],
+  codex: [
+    { value: '', label: 'default (no flag)' },
+    { value: 'gpt-5.5', label: 'gpt-5.5 (verified — ChatGPT plan)' },
+  ],
+};
 
 /** DENIED chips are sticky (dismiss only); every other terminal status
  *  auto-clears after this long so the tray doesn't grow forever. */
