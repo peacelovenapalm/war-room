@@ -764,3 +764,18 @@ until the refreshed forwarder is installed. Gates verified by orchestrator:
 server 320/320, webview 139/139, bin 57/57, tsc/lint/build clean.
 **Go-live addition: re-run macbook-hooks-install.sh on BOTH Macs** (idempotent,
 token kept) so the forwarder gains the X-Pid header.
+
+### 2026-07-08 (go-live) — v1 + dispatch DEPLOYED AND E2E-VERIFIED ✓
+
+Greg authorized production deploy + all bash. Executed and verified live:
+NEXUS redeployed (dispatch API serving JSON; funnel-check FAIL was a false
+alarm — `tailscale funnel status` lists tailnet-only serves too, :8484 is
+"(tailnet only)"; runbook grep needs tightening). X-Pid forwarders
+reinstalled on BOTH Macs (smoke 200 each). Dispatch runners installed +
+launchd-loaded on BOTH Macs; allowlists armed: providers claude/codex/
+gemini, roots /Users/greg/code + /Users/greg/Brain2, focus:true.
+**E2E PASSED over the real WS plane:** claude -p dispatched to MACBOOK →
+ringing → answered (pid) → exited 0, run log contains the exact expected
+output, audit JSONL complete on both ends; deny test on MINI →
+`denied path-not-allowlisted` (2xx). Everything Greg asked for is LIVE.
+M5 soak/streak clock is running.
