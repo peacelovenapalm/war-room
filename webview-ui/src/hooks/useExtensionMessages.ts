@@ -13,6 +13,7 @@ import type { OfficeState } from '../office/engine/officeState.js';
 import { setFloorSprites } from '../office/floorTiles.js';
 import { buildDynamicCatalog } from '../office/layout/furnitureCatalog.js';
 import { migrateLayoutColors } from '../office/layout/layoutSerializer.js';
+import { disposeSpriteTextureCache } from '../office/sprites/manifestToPixiSpritesheet.js';
 import { setPetTemplates } from '../office/sprites/petSpriteData.js';
 import { setCharacterTemplates } from '../office/sprites/spriteData.js';
 import {
@@ -629,6 +630,7 @@ export function useExtensionMessages(
           right: string[][][];
         }>;
         console.log(`[Webview] Received ${characters.length} pre-colored character sprites`);
+        disposeSpriteTextureCache();
         setCharacterTemplates(characters);
       } else if (msg.type === 'petSpritesLoaded') {
         const pets = msg.pets;
@@ -637,6 +639,7 @@ export function useExtensionMessages(
         }
         const petNames = Array.isArray(msg.petNames) ? (msg.petNames as string[]) : undefined;
         console.log(`[Webview] Received ${pets.length} pet sprites`);
+        disposeSpriteTextureCache();
         setPetTemplates(
           pets as Array<{
             walkDown: string[][][];
@@ -650,10 +653,12 @@ export function useExtensionMessages(
       } else if (msg.type === 'floorTilesLoaded') {
         const sprites = msg.sprites as string[][][];
         console.log(`[Webview] Received ${sprites.length} floor tile patterns`);
+        disposeSpriteTextureCache();
         setFloorSprites(sprites);
       } else if (msg.type === 'wallTilesLoaded') {
         const sets = msg.sets as string[][][][];
         console.log(`[Webview] Received ${sets.length} wall tile set(s)`);
+        disposeSpriteTextureCache();
         setWallSprites(sets);
       } else if (msg.type === 'workspaceFolders') {
         const folders = msg.folders as WorkspaceFolder[];
