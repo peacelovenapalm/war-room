@@ -1,6 +1,13 @@
-import { useEffect, useRef, useState } from 'react';
+import { useCallback, useEffect, useRef, useState } from 'react';
 
 import { ambience } from '../ambience.js';
+import {
+  dismissDispatchEntry,
+  type DispatchActionValue,
+  type DispatchEntry,
+  type DispatchStatusValue,
+  upsertDispatchEntry,
+} from '../dispatch.js';
 import { playDoneSound, playPermissionSound, setSoundEnabled } from '../notificationSound.js';
 import type { OfficeState } from '../office/engine/officeState.js';
 import { setFloorSprites } from '../office/floorTiles.js';
@@ -87,6 +94,8 @@ interface ExtensionMessageState {
   setHooksEnabled: (v: boolean) => void;
   hooksInfoShown: boolean;
   progression: ProgressionSnapshot | null;
+  dispatchEntries: DispatchEntry[];
+  dismissDispatch: (id: string) => void;
 }
 
 function saveAgentSeats(os: OfficeState): void {
@@ -125,6 +134,7 @@ export function useExtensionMessages(
   const [hooksEnabled, setHooksEnabled] = useState(true);
   const [hooksInfoShown, setHooksInfoShown] = useState(true);
   const [progression, setProgression] = useState<ProgressionSnapshot | null>(null);
+  const [dispatchEntries, setDispatchEntries] = useState<DispatchEntry[]>([]);
 
   // Track whether initial layout has been loaded (ref to avoid re-render)
   const layoutReadyRef = useRef(false);
@@ -139,6 +149,8 @@ export function useExtensionMessages(
       folderName?: string;
       machine?: string;
       provider?: string;
+      sessionId?: string;
+      cwd?: string;
     }> = [];
 
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
@@ -199,6 +211,8 @@ export function useExtensionMessages(
             p.folderName,
             p.machine,
             p.provider,
+            p.sessionId,
+            p.cwd,
           );
         }
         pendingAgents = [];
@@ -215,6 +229,8 @@ export function useExtensionMessages(
         const folderName = msg.folderName as string | undefined;
         const machine = msg.machine as string | undefined;
         const provider = msg.provider as string | undefined;
+        const sessionId = msg.sessionId as string | undefined;
+        const cwd = msg.cwd as string | undefined;
         const isTeammate = msg.isTeammate as boolean | undefined;
         const teammateName = msg.teammateName as string | undefined;
         const teammateParentId = msg.parentAgentId as number | undefined;
@@ -259,6 +275,8 @@ export function useExtensionMessages(
             folderName,
             machine,
             provider,
+            sessionId,
+            cwd,
           );
         }
         saveAgentSeats(os);
@@ -297,6 +315,8 @@ export function useExtensionMessages(
         const folderNames = (msg.folderNames || {}) as Record<number, string>;
         const machines = (msg.machines || {}) as Record<number, string>;
         const providers = (msg.providers || {}) as Record<number, string>;
+        const sessionIds = (msg.sessionIds || {}) as Record<number, string>;
+        const cwds = (msg.cwds || {}) as Record<number, string>;
         // Buffer agents — they'll be added in layoutLoaded after seats are built
         for (const id of incoming) {
           const m = meta[id];
@@ -308,6 +328,8 @@ export function useExtensionMessages(
             folderName: folderNames[id],
             machine: machines[id],
             provider: providers[id],
+            sessionId: sessionIds[id],
+            cwd: cwds[id],
           });
         }
         // Standalone server sends layoutLoaded BEFORE existingAgents, so the
@@ -325,6 +347,8 @@ export function useExtensionMessages(
               p.folderName,
               p.machine,
               p.provider,
+              p.sessionId,
+              p.cwd,
             );
           }
           pendingAgents = [];
@@ -655,6 +679,20 @@ export function useExtensionMessages(
           streakLongest: msg.streakLongest as number,
           unlocks: (msg.unlocks as Record<string, boolean>) ?? {},
         });
+      } else if (msg.type === 'dispatchUpdate') {
+        setDispatchEntries((prev) =>
+          upsertDispatchEntry(prev, {
+            id: msg.id as string,
+            action: msg.action as DispatchActionValue,
+            status: msg.status as DispatchStatusValue,
+            machine: msg.machine as string,
+            provider: msg.provider as string | undefined,
+            promptPreview: msg.promptPreview as string | undefined,
+            reason: msg.reason as string | undefined,
+            pid: msg.pid as number | undefined,
+            exitCode: msg.exitCode as number | undefined,
+          }),
+        );
       }
     };
     const unsubscribe = transport.onMessage(handler);
@@ -662,6 +700,10 @@ export function useExtensionMessages(
     return unsubscribe;
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [getOfficeState]);
+
+  const dismissDispatch = useCallback((id: string) => {
+    setDispatchEntries((prev) => dismissDispatchEntry(prev, id));
+  }, []);
 
   return {
     agents,
@@ -684,5 +726,7 @@ export function useExtensionMessages(
     setHooksEnabled,
     hooksInfoShown,
     progression,
+    dispatchEntries,
+    dismissDispatch,
   };
 }

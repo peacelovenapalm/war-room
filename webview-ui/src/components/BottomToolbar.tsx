@@ -22,6 +22,8 @@ interface BottomToolbarProps {
   onToggleUnlocks: () => void;
   isHelpOpen: boolean;
   onToggleHelp: () => void;
+  isCallOpen: boolean;
+  onToggleCall: () => void;
 }
 
 export function BottomToolbar({
@@ -39,6 +41,8 @@ export function BottomToolbar({
   onToggleUnlocks,
   isHelpOpen,
   onToggleHelp,
+  isCallOpen,
+  onToggleCall,
 }: BottomToolbarProps) {
   const [isFolderPickerOpen, setIsFolderPickerOpen] = useState(false);
   const [isBypassMenuOpen, setIsBypassMenuOpen] = useState(false);
@@ -164,6 +168,13 @@ export function BottomToolbar({
         title="Office decor unlocks"
       >
         Unlocks
+      </Button>
+      <Button
+        variant={isCallOpen ? 'active' : 'default'}
+        onClick={onToggleCall}
+        title="Call a coworker"
+      >
+        Call
       </Button>
       <Button
         variant={isSettingsOpen ? 'active' : 'default'}

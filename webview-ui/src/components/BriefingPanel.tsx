@@ -1,5 +1,6 @@
 import { useEffect, useState } from 'react';
 
+import { Button } from './ui/Button.js';
 import { Modal } from './ui/Modal.js';
 
 /** Poll cadence while the panel is open. */
@@ -35,6 +36,10 @@ interface Briefing {
 interface BriefingPanelProps {
   isOpen: boolean;
   onClose: () => void;
+  /** DISPATCH bridge (mechanic #6b): pre-fill the CALL modal's prompt with a
+   *  todo line's text and open it. Omitted entirely when the modal isn't
+   *  wired up yet (defensive — BriefingPanel must not assume it exists). */
+  onDispatchTodo?: (prompt: string) => void;
 }
 
 /** Colorblind rule: every status is GLYPH + WORD, color reinforcement only. */
@@ -72,7 +77,13 @@ function SectionSummary({ sections }: { sections: TodoBriefing['sections'] }) {
   );
 }
 
-function TodoSection({ todo }: { todo: TodoBriefing | null }) {
+function TodoSection({
+  todo,
+  onDispatchTodo,
+}: {
+  todo: TodoBriefing | null;
+  onDispatchTodo?: (prompt: string) => void;
+}) {
   return (
     <div className="mb-16">
       <h3 className="text-lg font-bold mb-6">TODAY {todo ? `— START NOW (${todo.date})` : ''}</h3>
@@ -83,8 +94,19 @@ function TodoSection({ todo }: { todo: TodoBriefing | null }) {
       ) : (
         <ol className="list-decimal pl-18 flex flex-col gap-4 m-0">
           {todo.startNow.map((item, i) => (
-            <li key={i} className="text-sm">
-              {item}
+            <li key={i} className="text-sm flex items-center justify-between gap-8">
+              <span>{item}</span>
+              {onDispatchTodo && (
+                <Button
+                  variant="ghost"
+                  size="sm"
+                  className="shrink-0"
+                  title="Dispatch this todo to a coworker"
+                  onClick={() => onDispatchTodo(item)}
+                >
+                  Dispatch
+                </Button>
+              )}
             </li>
           ))}
         </ol>
@@ -135,7 +157,7 @@ function TrackerSection({ tracker }: { tracker: TrackerBriefing | null }) {
  *  Fetches GET /api/briefing (same-origin, unauthenticated dashboard-read
  *  endpoint) on open and every 5 minutes while open. Both halves render
  *  gracefully when their env-var-wired source isn't configured on the host. */
-export function BriefingPanel({ isOpen, onClose }: BriefingPanelProps) {
+export function BriefingPanel({ isOpen, onClose, onDispatchTodo }: BriefingPanelProps) {
   const [briefing, setBriefing] = useState<Briefing | null>(null);
   const [error, setError] = useState(false);
 
@@ -172,7 +194,7 @@ export function BriefingPanel({ isOpen, onClose }: BriefingPanelProps) {
         {error && !briefing && (
           <div className="text-sm text-status-permission mb-8">⚠ unable to reach /api/briefing</div>
         )}
-        <TodoSection todo={briefing?.todo ?? null} />
+        <TodoSection todo={briefing?.todo ?? null} onDispatchTodo={onDispatchTodo} />
         <TrackerSection tracker={briefing?.tracker ?? null} />
       </div>
     </Modal>
