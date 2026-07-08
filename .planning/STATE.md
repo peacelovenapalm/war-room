@@ -779,3 +779,20 @@ ringing → answered (pid) → exited 0, run log contains the exact expected
 output, audit JSONL complete on both ends; deny test on MINI →
 `denied path-not-allowlisted` (2xx). Everything Greg asked for is LIVE.
 M5 soak/streak clock is running.
+
+### 2026-07-08 (fixes) — dispatch UX round 2 DEPLOYED ✓ (`efe3a99`…)
+
+Greg's live testing found: codex denied trust at non-repo cwd, gemini dead
+(Google IneligibleTierError even on 0.49.0 — GEMINI SCRAPPED from dispatch,
+Greg's call; 6a rendering kept), results invisible, only 2 cwd choices, no
+model/effort. Fixed + deployed: resultTail capture (~8KB, runner→server→WS
+
+- GET /api/dispatch/recent, clickable in tray), subpath input under roots,
+  codex --skip-git-repo-check (allowlist = trust boundary), model/effort
+  pickers (claude+codex, flags verified via --help), gemini out of the picker.
+  Allowlists on both Macs → providers [claude, codex]. Gates verified:
+  server 329/329, webview 152/152, bin 63/63. PROD E2E: codex → real MACBOOK
+  → exited 0, resultTail contains expected output, /api/dispatch/recent
+  returns it. Also fixed ship-to-mini.sh (ssh -n; stdin-drain ate the piped
+  confirm and silently no-opped a ship — caught by md5 diff, MINI re-shipped
+- runner kickstarted).
