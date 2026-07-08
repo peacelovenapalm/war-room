@@ -809,3 +809,21 @@ sockets pin to the dead container ~10 min after each redeploy (502 burst,
 self-heals; ingest verified 200 across all event types now, container logs
 show both Macs posting). Gates: webview 158/158, server 329, bin 63.
 Deployed; PROD E2E codex -m gpt-5.5 → exited 0 + resultTail verified.
+
+### 2026-07-08 (overnight) — v2 GAME DESIGN COMPLETE, ready for build kickoff
+
+Greg's verdict on v1: "this is closer to v0.5" — wants a full gamified
+studio sim he'd play over office-management games. 15-question vision
+lock, then an ultracode design workflow (18 agents: 8 sonnet designers →
+8 sonnet critics → sonnet synthesis → FABLE adversarial review).
+Verdict READY-WITH-NOTES; fable fixed 9 fabricated repo claims, 2
+hard-rule violations (uncapped dispatch Cash farm; client-side Cash
+mutation) and 2 contradictions IN the docs before commit. Committed:
+.planning/v2/{GAME-DESIGN,BUILD-PLAN,KICKOFF}.md + sections/ (reference
+only — contain known-false claims the main docs correct; trust order
+documented in KICKOFF). Build = G0 engine port → G1 employees → G2
+economy+building → G3 command/automation (real-money milestone — Greg
+reviews thresholds) → G4 missions/world → G5 art (worktree-canary,
+codex-budget warning) → G6 phone; strictly linear; new-session sonnet
+ultracode; per-milestone deploy gates need fresh Greg authorization.
+Top risks recorded in the workflow result + BUILD-PLAN.
