@@ -179,6 +179,40 @@
     font-size: 16px; /* text-2xs */
   }
 
+  /* ── Employee persona badges (G1) — same chip shape as .state-chip;
+     glyph + TEXT LABEL are the primary signal, border color reinforces. */
+  .badge-chip {
+    @apply inline-flex items-center gap-4 rounded-none leading-none whitespace-nowrap font-pixel;
+    border: 2px solid var(--color-border);
+    background: var(--color-bg);
+    color: var(--color-text);
+    padding: 2px 6px 3px;
+    font-size: 16px; /* text-2xs */
+    letter-spacing: 0.5px;
+  }
+  .badge-chip--rookie {
+    color: var(--color-text-muted);
+    opacity: 0.8;
+  }
+  .badge-chip--fast {
+    border-color: var(--color-status-active);
+  }
+  .badge-chip--sloppy {
+    border-color: var(--color-danger);
+  }
+  .badge-chip--meticulous {
+    border-color: var(--color-status-success);
+  }
+  .badge-chip--night-owl {
+    border-color: var(--color-accent);
+  }
+  .badge-chip--efficient {
+    border-color: var(--color-status-success);
+  }
+  .badge-chip--burns-tokens {
+    border-color: var(--color-warning);
+  }
+
   /* ── Crisis & triage layer (v1 mechanic #1) ─────────────────────
      Stage identity is SHAPE (glyph + canvas silhouette) + TEXT + age; the
      colors below are reinforcement only. ALARM inverts (white) — the house
