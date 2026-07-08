@@ -15,6 +15,9 @@ import { dispatchStore } from './dispatchStore.js';
 import { economyStore } from './economyStore.js';
 import type { Employee, ScoreTrack } from './employeeStore.js';
 import { employeeStore } from './employeeStore.js';
+import { addRoom, buyFurniture, expandOffice, sell } from './officeLayoutStore.js';
+import type { RoomType } from './officeLayoutTypes.js';
+import { RoomType as RoomTypeValues } from './officeLayoutTypes.js';
 import { applyPollStates, parsePollBody, startPollStateSweep } from './pollStateHandler.js';
 import { progression } from './progressionStore.js';
 import { shiftStats } from './shiftStats.js';
@@ -91,6 +94,7 @@ export async function createHttpServer(options: HttpServerOptions): Promise<Http
   registerDispatchRoutes(app, options);
   registerEmployeeRoutes(app);
   registerEconomyRoutes(app);
+  registerBuildingRoutes(app, options);
   registerWebSocketRoute(app, options);
 
   // ── Listen ──────────────────────────────────────────────────
@@ -442,6 +446,90 @@ function registerEconomyRoutes(app: FastifyInstance): void {
   app.post<{ Body: Record<string, unknown> }>('/api/economy/vacation', async (request, reply) => {
     const active = request.body?.active === true;
     reply.send({ ok: true, economy: economyStore.setVacationMode(active) });
+  });
+}
+
+// ── Building (v2 mechanic G2 — GAME-DESIGN.md §5) ───────────────
+
+const ROOM_TYPE_VALUES: readonly string[] = Object.values(RoomTypeValues);
+
+/**
+ * Building routes. Same trust level as /api/employees/economy
+ * (unauthenticated local-webview player-action plane). Every route is
+ * check-debit(-or-refund)-persist-broadcast — the client never mutates
+ * Cash (§5.7); it applies the layout change locally only on `{ok:true}`.
+ * Decisions are `{ok:false, reason}` at 200, never 4xx.
+ */
+function registerBuildingRoutes(app: FastifyInstance, options: HttpServerOptions): void {
+  app.post('/api/building/expand', async (_request, reply) => {
+    const result = expandOffice();
+    if (result.ok) {
+      options.store.broadcast({
+        type: 'officeExpanded',
+        layout: result.layout,
+        bayCount: economyStore.getBayCount(),
+      });
+      reply.send({ ok: true, layout: result.layout });
+    } else {
+      reply.send({ ok: false, reason: result.reason });
+    }
+  });
+
+  app.post<{ Body: Record<string, unknown> }>('/api/building/room', async (request, reply) => {
+    const body = request.body ?? {};
+    const type = body.type;
+    if (typeof type !== 'string' || !ROOM_TYPE_VALUES.includes(type)) {
+      reply.send({ ok: false, reason: 'invalid-room-type' });
+      return;
+    }
+    const colStart = Number(body.colStart);
+    const rowStart = Number(body.rowStart);
+    const colEnd = Number(body.colEnd);
+    const rowEnd = Number(body.rowEnd);
+    if (![colStart, rowStart, colEnd, rowEnd].every(Number.isInteger)) {
+      reply.send({ ok: false, reason: 'invalid-rect' });
+      return;
+    }
+    const result = addRoom({ colStart, rowStart, colEnd, rowEnd }, type as RoomType);
+    if (result.ok) {
+      options.store.broadcast({ type: 'officeLayoutUpdated', layout: result.layout });
+      reply.send({ ok: true, layout: result.layout });
+    } else {
+      reply.send({ ok: false, reason: result.reason });
+    }
+  });
+
+  app.post<{ Body: Record<string, unknown> }>('/api/building/furniture', async (request, reply) => {
+    const body = request.body ?? {};
+    const type = body.type;
+    const col = Number(body.col);
+    const row = Number(body.row);
+    if (typeof type !== 'string' || !Number.isInteger(col) || !Number.isInteger(row)) {
+      reply.send({ ok: false, reason: 'invalid-request' });
+      return;
+    }
+    const result = buyFurniture(type, col, row);
+    if (result.ok) {
+      options.store.broadcast({ type: 'officeLayoutUpdated', layout: result.layout });
+      reply.send({ ok: true, layout: result.layout });
+    } else {
+      reply.send({ ok: false, reason: result.reason });
+    }
+  });
+
+  app.post<{ Body: Record<string, unknown> }>('/api/building/sell', async (request, reply) => {
+    const uid = request.body?.uid;
+    if (typeof uid !== 'string' || uid === '') {
+      reply.send({ ok: false, reason: 'invalid-uid' });
+      return;
+    }
+    const result = sell(uid);
+    if (result.ok) {
+      options.store.broadcast({ type: 'officeLayoutUpdated', layout: result.layout });
+      reply.send({ ok: true, layout: result.layout });
+    } else {
+      reply.send({ ok: false, reason: result.reason });
+    }
   });
 }
 

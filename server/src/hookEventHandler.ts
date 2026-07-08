@@ -1,10 +1,13 @@
 import * as path from 'path';
 
+import { employeeId } from '../../core/src/employeeId.js';
 import type { AgentEvent, HookProvider } from '../../core/src/provider.js';
 import type { AgentStateStore } from './agentStateStore.js';
+import { buffsForDesk } from './buildingBuffs.js';
 import { SESSION_END_GRACE_MS } from './constants.js';
 import { economyStore } from './economyStore.js';
-import { employeeStore } from './employeeStore.js';
+import { employeeStore, XP_TURN } from './employeeStore.js';
+import { getOfficeLayout } from './officeLayoutStore.js';
 import { progression } from './progressionStore.js';
 import type { SessionRouter } from './sessionRouter.js';
 import { shiftStats } from './shiftStats.js';
@@ -710,12 +713,33 @@ export class HookEventHandler {
       // and exclusion as progression/shiftStats above — added alongside,
       // not instead of. outputTokens is the agent's cumulative session
       // total; employeeStore derives its own per-turn delta from it.
+      //
+      // Building (v2 mechanic G2, GAME-DESIGN §5.5): if this employee is
+      // already on record and assigned to a desk, look up that desk's Dev
+      // Pit room-membership XP bonus and pass it through as an explicit
+      // xpOverride — buffs are computed server-side, point-in-time, at the
+      // moment the real event resolves (never a client-side/cached read).
+      // `assignedRoomId` holds the desk's PlacedFurniture uid (assign()'s
+      // param name predates G2's buildings; it is used here as the desk-uid
+      // reference the buff resolver needs).
+      let xpOverride: number | undefined;
+      const existingEmp = employeeStore.getById(employeeId(agent.machine, agent.projectDir));
+      if (existingEmp?.assignedRoomId) {
+        const layout = getOfficeLayout();
+        if (layout) {
+          const buffs = buffsForDesk(layout, existingEmp.assignedRoomId);
+          if (buffs.xpBonusPct > 0) {
+            xpOverride = Math.round(XP_TURN * (1 + buffs.xpBonusPct / 100));
+          }
+        }
+      }
       employeeStore.recordTurn(
         agent.machine,
         agent.projectDir,
         agent.folderName ?? path.basename(agent.projectDir),
         {
           outputTokensCumulative: agent.outputTokens,
+          xpOverride,
         },
       );
       // Economy (v2 mechanic G2, GAME-DESIGN §3): same real-event source

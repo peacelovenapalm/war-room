@@ -88,6 +88,10 @@ export const EditTool = {
   EYEDROPPER: 'eyedropper',
   ERASE: 'erase',
   PETS: 'pets',
+  /** Drag-rectangle room tagging (G2, GAME-DESIGN §5.7). */
+  ROOM_TAG: 'room_tag',
+  /** 50% flat refund on furniture/rooms; no-op-with-toast on bays (G2, §5.7). */
+  SELL: 'sell',
 } as const;
 export type EditTool = (typeof EditTool)[keyof typeof EditTool];
 
@@ -120,6 +124,28 @@ export interface PlacedFurniture {
   color?: ColorValue;
 }
 
+/** Typed room tag (G2, GAME-DESIGN §5.3) — a player-drawn rectangle over
+ *  already-purchased floor, metadata only (not a new tile type), matching
+ *  the pets/tileColors precedent. */
+export const RoomType = {
+  DEV_PIT: 'dev_pit',
+  SERVER_ROOM: 'server_room',
+  BREAK_ROOM: 'break_room',
+  WAR_ROOM: 'war_room',
+  KITCHEN: 'kitchen',
+} as const;
+export type RoomType = (typeof RoomType)[keyof typeof RoomType];
+
+export interface PlacedRoom {
+  uid: string;
+  type: RoomType;
+  colStart: number;
+  rowStart: number;
+  colEnd: number;
+  rowEnd: number;
+  createdAt: number;
+}
+
 export interface OfficeLayout {
   version: 1;
   cols: number;
@@ -132,6 +158,9 @@ export interface OfficeLayout {
   layoutRevision?: number;
   /** Pets placed in the office. Optional for backward-compat; migrateLayout coerces to []. */
   pets?: PlacedPet[];
+  /** Typed room tags (G2, GAME-DESIGN §5.3). Optional for backward-compat;
+   *  migrateLayout coerces to []. */
+  rooms?: PlacedRoom[];
 }
 
 /** Agent session states surfaced by `claude agents --json` (M4 poller). */

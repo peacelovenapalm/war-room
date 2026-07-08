@@ -66,6 +66,21 @@ export const ROOM_COST: Record<string, number> = {
   kitchen: 250,
 };
 
+/** Cash cost of buffed furniture pieces (§3.1 "Furniture piece 20-200").
+ *  Server-authoritative — /api/building/furniture looks up cost here,
+ *  never trusts a client-supplied price. Mirrors the buff-carrying subset
+ *  of webview-ui's furnitureBuffs.ts / this file's buildingBuffs.ts
+ *  FURNITURE_BUFFS table; plain decor furniture (everything else) stays
+ *  free, unchanged v1 behavior. */
+export const FURNITURE_COST: Record<string, number> = {
+  PC_FRONT_ON_1: 150,
+  PC_FRONT_ON_2: 150,
+  PC_FRONT_ON_3: 150,
+  WHITEBOARD: 60,
+  COFFEE_TABLE: 30,
+  COFFEE: 20,
+};
+
 /** Furniture-adjacency + room-membership buff pool per desk — ONE shared
  *  cap, not two independent 40% caps (§9.19). */
 export const ADJACENCY_AND_ROOM_BONUS_CAP_PCT = 40;

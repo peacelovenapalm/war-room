@@ -353,6 +353,11 @@ function migrateLayout(layout: OfficeLayout): OfficeLayout {
     layout = { ...layout, pets: [] };
   }
 
+  // Default rooms to empty array if absent (G2, same backward-compat shape as pets).
+  if (!layout.rooms) {
+    layout = { ...layout, rooms: [] };
+  }
+
   if (layout.tileColors && layout.tileColors.length === layout.tiles.length) {
     return layout; // Already migrated tile colors
   }
