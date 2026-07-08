@@ -12,6 +12,7 @@ import type { AssetCache, SetHooksEnabledSideEffect } from './clientMessageHandl
 import { handleClientMessage } from './clientMessageHandler.js';
 import { HOOK_API_PREFIX, MAX_HOOK_BODY_SIZE } from './constants.js';
 import { dispatchStore } from './dispatchStore.js';
+import type { Employee, ScoreTrack } from './employeeStore.js';
 import { employeeStore } from './employeeStore.js';
 import { applyPollStates, parsePollBody, startPollStateSweep } from './pollStateHandler.js';
 import { progression } from './progressionStore.js';
@@ -87,6 +88,7 @@ export async function createHttpServer(options: HttpServerOptions): Promise<Http
   registerHookRoute(app, options);
   registerPollRoute(app, options);
   registerDispatchRoutes(app, options);
+  registerEmployeeRoutes(app);
   registerWebSocketRoute(app, options);
 
   // ── Listen ──────────────────────────────────────────────────
@@ -320,6 +322,100 @@ function registerDispatchRoutes(app: FastifyInstance, options: HttpServerOptions
   );
 }
 
+// ── Employees (v2 mechanic G1 — GAME-DESIGN.md §4) ──────────────
+
+const SCORE_TRACKS = ['speed', 'accuracy', 'nightOwl', 'tokenEfficiency'] as const;
+
+/** Wire shape — drops internal-only bookkeeping fields (last-seen token
+ *  counts, decay timestamps, the raw rolling-turns ring buffer) that never
+ *  belong on the broadcast/response plane. */
+function toEmployeeSnapshot(emp: Employee): Record<string, unknown> {
+  return {
+    type: 'employeeSnapshot',
+    id: emp.id,
+    machine: emp.machine,
+    projectDir: emp.projectDir,
+    projectLabel: emp.projectLabel,
+    name: emp.name,
+    spriteIndex: emp.spriteIndex,
+    defaultProvider: emp.defaultProvider,
+    defaultModel: emp.defaultModel,
+    status: emp.status,
+    rank: emp.rank,
+    xp: emp.xp,
+    mood: emp.mood,
+    moodBoost: emp.moodBoost,
+    scores: emp.scores,
+    trainingBonus: emp.trainingBonus,
+    assignedRoomId: emp.assignedRoomId,
+    createdAt: emp.createdAt,
+    lastActiveAt: emp.lastActiveAt,
+    lowMoodStreakDays: emp.lowMoodStreakDays,
+    breakUntil: emp.breakUntil,
+  };
+}
+
+/**
+ * Employee roster routes. Same trust level as /api/briefing/dispatch's
+ * machine-list routes (unauthenticated — this is a local-webview-initiated
+ * player action plane, not remote-machine telemetry ingest; the server is
+ * tailnet-only). Mutating verbs return `{ok:false, reason}` on a failed
+ * gate at 200, never 4xx — "deny is a decision," same posture as
+ * dispatchStore's decision plane.
+ */
+function registerEmployeeRoutes(app: FastifyInstance): void {
+  app.get('/api/employees', async () => employeeStore.getAll().map(toEmployeeSnapshot));
+
+  app.get<{ Params: { id: string }; Querystring: { limit?: string } }>(
+    '/api/employees/:id/history',
+    async (request) => {
+      const limit = Number(request.query.limit ?? 50);
+      return employeeStore.history(request.params.id, Number.isFinite(limit) ? limit : 50);
+    },
+  );
+
+  const verb = (
+    path: string,
+    fn: (
+      id: string,
+      body: Record<string, unknown>,
+    ) => { ok: boolean; reason?: string; employee?: Employee },
+  ) => {
+    app.post<{ Params: { id: string }; Body: Record<string, unknown> }>(
+      `/api/employees/:id/${path}`,
+      async (request, reply) => {
+        const result = fn(request.params.id, request.body ?? {});
+        reply.send(
+          result.ok
+            ? {
+                ok: true,
+                employee: result.employee ? toEmployeeSnapshot(result.employee) : undefined,
+              }
+            : { ok: false, reason: result.reason },
+        );
+      },
+    );
+  };
+
+  verb('train', (id, body) => {
+    const track = body.track;
+    if (typeof track !== 'string' || !(SCORE_TRACKS as readonly string[]).includes(track)) {
+      return { ok: false, reason: 'invalid-track' };
+    }
+    return employeeStore.train(id, track as ScoreTrack);
+  });
+  verb('promote', (id) => employeeStore.promote(id));
+  verb('break', (id) => employeeStore.break_(id));
+  verb('fire', (id) => employeeStore.fire(id));
+  verb('retire', (id) => employeeStore.retire(id));
+  verb('rehire', (id) => employeeStore.rehire(id));
+  verb('onboard', (id) => employeeStore.onboard(id));
+  verb('assign', (id, body) => {
+    const roomId = typeof body.roomId === 'string' ? body.roomId : undefined;
+    return employeeStore.assign(id, roomId);
+  });
+}
+
 /** Normalize an X-Machine header value to an uppercase label, or undefined if invalid. */
 export function sanitizeMachineLabel(raw: unknown): string | undefined {
   const value = Array.isArray(raw) ? raw[0] : raw;
@@ -414,6 +510,17 @@ function registerWebSocketRoute(app: FastifyInstance, options: HttpServerOptions
       safeSend(socket, broadcast as unknown as Record<string, unknown>);
     }
 
+    // Employees (v2 mechanic G1): one employeeSnapshot broadcast per
+    // mutation (turn recorded, crisis resolved, verb applied), plus the
+    // full current roster replayed on connect so a page refresh doesn't
+    // wait for the next real event to populate the roster.
+    const unsubscribeEmployees = employeeStore.onChange((emp) => {
+      safeSend(socket, toEmployeeSnapshot(emp));
+    });
+    for (const emp of employeeStore.getAll()) {
+      safeSend(socket, toEmployeeSnapshot(emp));
+    }
+
     // Handle incoming client messages
     socket.on('message', (data: Buffer | string) => {
       try {
@@ -439,6 +546,7 @@ function registerWebSocketRoute(app: FastifyInstance, options: HttpServerOptions
       store.off('broadcast', onBroadcast);
       unsubscribeProgression();
       unsubscribeDispatch();
+      unsubscribeEmployees();
     });
   });
 }
