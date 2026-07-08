@@ -12,6 +12,7 @@ import type { AssetCache, SetHooksEnabledSideEffect } from './clientMessageHandl
 import { handleClientMessage } from './clientMessageHandler.js';
 import { HOOK_API_PREFIX, MAX_HOOK_BODY_SIZE } from './constants.js';
 import { dispatchStore } from './dispatchStore.js';
+import { economyStore } from './economyStore.js';
 import type { Employee, ScoreTrack } from './employeeStore.js';
 import { employeeStore } from './employeeStore.js';
 import { applyPollStates, parsePollBody, startPollStateSweep } from './pollStateHandler.js';
@@ -89,6 +90,7 @@ export async function createHttpServer(options: HttpServerOptions): Promise<Http
   registerPollRoute(app, options);
   registerDispatchRoutes(app, options);
   registerEmployeeRoutes(app);
+  registerEconomyRoutes(app);
   registerWebSocketRoute(app, options);
 
   // ── Listen ──────────────────────────────────────────────────
@@ -215,6 +217,7 @@ function registerPollRoute(app: FastifyInstance, options: HttpServerOptions): vo
         shiftStats,
         progression,
         employeeStore,
+        economyStore,
       );
       if (!options.embedded && (result.matched > 0 || result.cleared > 0)) {
         console.log(
@@ -417,6 +420,31 @@ function registerEmployeeRoutes(app: FastifyInstance): void {
   });
 }
 
+// ── Economy (v2 mechanic G2 — GAME-DESIGN.md §3) ────────────────
+
+/**
+ * Economy routes. Same trust level as /api/employees (unauthenticated
+ * local-webview player-action plane; the server is tailnet-only).
+ * GET routes are read-only. The vacation toggle is `{ok:true}` always
+ * (a boolean flip, nothing to deny).
+ */
+function registerEconomyRoutes(app: FastifyInstance): void {
+  app.get('/api/economy', async () => economyStore.getSnapshot());
+
+  // GET /api/economy/summary — check-in digest (GAME-DESIGN §2). G4's
+  // worldEventStore adds the "top-5 flavor events" narrative line; until
+  // then this is the raw snapshot + recent ledger tail.
+  app.get('/api/economy/summary', async () => {
+    const snapshot = economyStore.getSnapshot();
+    return { ...snapshot, recentLedger: snapshot.ledger.slice(-20) };
+  });
+
+  app.post<{ Body: Record<string, unknown> }>('/api/economy/vacation', async (request, reply) => {
+    const active = request.body?.active === true;
+    reply.send({ ok: true, economy: economyStore.setVacationMode(active) });
+  });
+}
+
 /** Normalize an X-Machine header value to an uppercase label, or undefined if invalid. */
 export function sanitizeMachineLabel(raw: unknown): string | undefined {
   const value = Array.isArray(raw) ? raw[0] : raw;
@@ -522,6 +550,16 @@ function registerWebSocketRoute(app: FastifyInstance, options: HttpServerOptions
       safeSend(socket, toEmployeeSnapshot(emp));
     }
 
+    // Economy (v2 mechanic G2, GAME-DESIGN §2 "Connect catch-up"): run the
+    // offline-progress Reputation-decay catch-up once per connect, THEN
+    // subscribe + send the current snapshot — own broadcast plane (not
+    // tied to any single agent), same rationale as progression above.
+    economyStore.catchUpOffline();
+    const unsubscribeEconomy = economyStore.onChange((snapshot) => {
+      safeSend(socket, { type: 'economyUpdate', ...snapshot });
+    });
+    safeSend(socket, { type: 'economyUpdate', ...economyStore.getSnapshot() });
+
     // Handle incoming client messages
     socket.on('message', (data: Buffer | string) => {
       try {
@@ -548,6 +586,7 @@ function registerWebSocketRoute(app: FastifyInstance, options: HttpServerOptions
       unsubscribeProgression();
       unsubscribeDispatch();
       unsubscribeEmployees();
+      unsubscribeEconomy();
     });
   });
 }

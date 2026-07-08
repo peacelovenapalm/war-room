@@ -22,6 +22,7 @@ import * as path from 'path';
 
 import { normalizeProjectPath } from '../../core/src/normalizeProjectPath.js';
 import type { AgentStateStore } from './agentStateStore.js';
+import type { EconomyStore } from './economyStore.js';
 import type { EmployeeStore } from './employeeStore.js';
 import type { ProgressionStore } from './progressionStore.js';
 import type { ShiftStats } from './shiftStats.js';
@@ -44,6 +45,11 @@ export type CrisisXpSink = Pick<ProgressionStore, 'recordCrisisResolved'>;
  *  take different arguments (employeeStore needs machine/projectDir to
  *  resolve identity; progressionStore is account-wide). */
 export type EmployeeCrisisXpSink = Pick<EmployeeStore, 'recordCrisisResolved'>;
+
+/** Economy (v2 mechanic G2): the same OBSERVED-transition-only contract as
+ *  CrisisXpSink — never fires for the "no longer reported" clear or the
+ *  TTL sweep. */
+export type EconomyCrisisSink = Pick<EconomyStore, 'recordCrisisResolved'>;
 
 /** Poll states older than this are swept (poller assumed dead). */
 export const POLL_STATE_TTL_MS = 60_000;
@@ -145,6 +151,7 @@ export function applyPollStates(
   stats?: BlockedEpisodeSink,
   progressionSink?: CrisisXpSink,
   employeeSink?: EmployeeCrisisXpSink,
+  economySink?: EconomyCrisisSink,
 ): { matched: number; cleared: number } {
   const machineAgents: Array<[number, AgentState]> = [];
   for (const [id, agent] of store) {
@@ -174,6 +181,7 @@ export function applyPollStates(
       // reported" clear below or the TTL sweep (see CrisisXpSink doc).
       progressionSink?.recordCrisisResolved(now);
       employeeSink?.recordCrisisResolved(agent.machine, agent.projectDir, now);
+      economySink?.recordCrisisResolved(now);
     }
     // `since` survives refresh ticks while the STATE VALUE is unchanged — it is
     // the transition time that anchors crisis aging (smoke → fire → alarm).

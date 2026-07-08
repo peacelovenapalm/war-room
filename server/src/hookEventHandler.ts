@@ -3,6 +3,7 @@ import * as path from 'path';
 import type { AgentEvent, HookProvider } from '../../core/src/provider.js';
 import type { AgentStateStore } from './agentStateStore.js';
 import { SESSION_END_GRACE_MS } from './constants.js';
+import { economyStore } from './economyStore.js';
 import { employeeStore } from './employeeStore.js';
 import { progression } from './progressionStore.js';
 import type { SessionRouter } from './sessionRouter.js';
@@ -717,6 +718,9 @@ export class HookEventHandler {
           outputTokensCumulative: agent.outputTokens,
         },
       );
+      // Economy (v2 mechanic G2, GAME-DESIGN §3): same real-event source
+      // and exclusion as above — Cash + the once/day streak-touch bonus.
+      economyStore.recordTurnCompleted();
     }
     this.markAgentWaiting(agent, agentId, awaitingInput);
   }

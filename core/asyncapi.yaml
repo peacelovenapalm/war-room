@@ -109,6 +109,10 @@ components:
         - $ref: '#/components/schemas/EmployeeSnapshot'
         - $ref: '#/components/schemas/EmployeeHired'
         - $ref: '#/components/schemas/EmployeeQuit'
+        # Economy + Building (v2 mechanic G2 — GAME-DESIGN.md §3/§5)
+        - $ref: '#/components/schemas/EconomyUpdate'
+        - $ref: '#/components/schemas/OfficeExpanded'
+        - $ref: '#/components/schemas/OfficeLayoutUpdated'
         # Layout
         - $ref: '#/components/schemas/LayoutLoaded'
         # Assets
@@ -819,6 +823,94 @@ components:
           type: string
         name:
           type: string
+
+    EconomyCurrencyValue:
+      type: string
+      enum: [cash, reputation]
+
+    EconomyLedgerEntry:
+      description: One Cash/Reputation ledger line (capped ring buffer, 200 entries).
+      type: object
+      additionalProperties: false
+      required: [ts, delta, currency, reason]
+      properties:
+        ts:
+          type: integer
+        delta:
+          type: number
+        currency:
+          $ref: '#/components/schemas/EconomyCurrencyValue'
+        reason:
+          type: string
+          description: >-
+            The anti-dark-pattern grep-test surface — every award traces to
+            an observed real event, never a bare timer or token volume.
+
+    EconomyUpdate:
+      description: >-
+        Economy snapshot (v2 mechanic G2, GAME-DESIGN §3): dual currency —
+        Cash (liquid, spendable) and Reputation (permanent, slow, never
+        spent) — plus office-wide grime and the studio vacation-mode flag.
+        Broadcast whenever it changes and sent again to every client on
+        WebSocket connect (after the offline-progress Reputation-decay
+        catch-up runs). Cash/Reputation come ONLY from real, observed
+        events — never token volume.
+      type: object
+      additionalProperties: false
+      required: [type, cash, reputation, grime, vacationMode, bayCount, ledger]
+      properties:
+        type:
+          const: economyUpdate
+        cash:
+          type: integer
+        reputation:
+          type: integer
+        grime:
+          type: number
+          description: Office-wide 0-100, cosmetic + morale-decay-rate multiplier when >70.
+        vacationMode:
+          type: boolean
+        bayCount:
+          type: integer
+          description: Office-expansion bays purchased so far (GAME-DESIGN §5.2).
+        ledger:
+          type: array
+          items:
+            $ref: '#/components/schemas/EconomyLedgerEntry'
+
+    OfficeExpanded:
+      description: >-
+        A bay (4-col floor expansion, GAME-DESIGN §5.2) was purchased —
+        broadcast by POST /api/building/expand on success. Carries the new
+        full layout so every connected screen picks up the extra floor
+        (and its doorway) without a re-fetch.
+      type: object
+      additionalProperties: false
+      required: [type, layout, bayCount]
+      properties:
+        type:
+          const: officeExpanded
+        layout:
+          type: object
+          description: Opaque OfficeLayout object — format defined by webview-ui, same as LayoutLoaded.
+        bayCount:
+          type: integer
+
+    OfficeLayoutUpdated:
+      description: >-
+        The office layout changed via a room tag, buffed-furniture
+        purchase, or sell action (GAME-DESIGN §5.7) — broadcast by
+        POST /api/building/{room,furniture,sell} on success. Carries the
+        new full layout, same shape as OfficeExpanded/LayoutLoaded.
+      type: object
+      additionalProperties: false
+      required: [type, layout]
+      properties:
+        type:
+          const: officeLayoutUpdated
+        layout:
+          type: object
+          description: Opaque OfficeLayout object — format defined by webview-ui, same as LayoutLoaded.
 
     LayoutLoaded:
       description: |

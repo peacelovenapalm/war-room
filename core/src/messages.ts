@@ -32,6 +32,9 @@ export type ServerMessage =
   | EmployeeSnapshot
   | EmployeeHired
   | EmployeeQuit
+  | EconomyUpdate
+  | OfficeExpanded
+  | OfficeLayoutUpdated
   | LayoutLoaded
   | FurnitureAssetsLoaded
   | CharacterSpritesLoaded
@@ -304,6 +307,36 @@ export interface EmployeeQuit {
   type: 'employeeQuit';
   id: string;
   name: string;
+}
+
+export interface EconomyUpdate {
+  type: 'economyUpdate';
+  cash: number;
+  reputation: number;
+  grime: number;
+  vacationMode: boolean;
+  bayCount: number;
+  ledger: EconomyLedgerEntry[];
+}
+
+export interface EconomyLedgerEntry {
+  ts: number;
+  delta: number;
+  currency: EconomyCurrencyValue;
+  reason: string;
+}
+
+export type EconomyCurrencyValue = 'cash' | 'reputation';
+
+export interface OfficeExpanded {
+  type: 'officeExpanded';
+  layout: Record<string, any>;
+  bayCount: number;
+}
+
+export interface OfficeLayoutUpdated {
+  type: 'officeLayoutUpdated';
+  layout: Record<string, any>;
 }
 
 export interface LayoutLoaded {

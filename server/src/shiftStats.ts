@@ -21,6 +21,7 @@ import * as path from 'path';
 
 import type { Briefing } from './briefingProvider.js';
 import { getBriefing } from './briefingProvider.js';
+import { economyStore } from './economyStore.js';
 import { progression } from './progressionStore.js';
 import { pushShiftReport } from './shiftPush.js';
 
@@ -127,11 +128,15 @@ export class ShiftStats {
       onDayClose ??
       ((report) => {
         pushShiftReport(report);
-        progression.recordShiftDayClosed({
+        const summary = {
           date: report.date,
           turnsCompleted: report.turnsCompleted,
           efficiency: report.efficiency,
-        });
+        };
+        progression.recordShiftDayClosed(summary);
+        // Economy (v2 mechanic G2, GAME-DESIGN §3): same day-close call
+        // site as progression above — added alongside, not instead of.
+        economyStore.recordShiftDayClosed(summary);
       });
   }
 

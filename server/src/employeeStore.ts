@@ -40,6 +40,7 @@ import { hashString, mulberry32 } from '../../core/src/deterministicRandom.js';
 import { employeeId } from '../../core/src/employeeId.js';
 import { computeLevel, xpForLevel } from '../../core/src/leveling.js';
 import { LAYOUT_FILE_DIR } from './constants.js';
+import { economyStore } from './economyStore.js';
 import { EMPLOYEE_NAMES } from './employeeNames.js';
 import { EFFICIENCY_LEAN_MAX, EFFICIENCY_STEADY_MAX } from './shiftStats.js';
 
@@ -721,5 +722,11 @@ export class EmployeeStore {
   }
 }
 
-/** Process-wide instance (the server is single-process). */
-export const employeeStore = new EmployeeStore();
+/** Process-wide instance (the server is single-process), wired to the real
+ *  economyStore singleton (G2) for Reputation awards + vacation-mode
+ *  awareness — the no-op defaults above only apply to test-constructed
+ *  instances (`new EmployeeStore(path, ledgerDir)`), never this one. */
+export const employeeStore = new EmployeeStore(undefined, undefined, {
+  isVacationActive: () => economyStore.isVacationActive(),
+  awardReputation: (delta, reason) => economyStore.addReputation(delta, reason),
+});
