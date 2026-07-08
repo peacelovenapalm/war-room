@@ -24,8 +24,9 @@
  *      decision, reason as data) or honor it:
  *        - dispatch: build argv (prompt is ALWAYS one argv element, never a
  *          shell string), accept, spawn(..., { shell: false }), report
- *          started (pid) then exited (exitCode); stdout/stderr -> a per-run
- *          log file.
+ *          started (pid) then exited (exitCode + a capped resultTail read
+ *          from the per-run log so the run's actual output reaches the
+ *          dashboard); stdout/stderr -> a per-run log file.
  *        - focus: best-effort AppleScript front-the-terminal-by-pid, report
  *          the outcome AS the decision itself (accept = fronted, deny =
  *          could not).
@@ -65,6 +66,12 @@ const execAsync = promisify(exec);
 const POST_TIMEOUT_MS = 10_000;
 const FOCUS_TIMEOUT_MS = 5_000;
 const MIN_INTERVAL_MS = 2_000;
+/** Tail of the per-run log posted alongside `exited` — the only place a run's
+ *  actual output reaches the dashboard (otherwise it's stranded in a log file
+ *  on whichever machine ran it). Capped well under the server's own cap
+ *  (dispatchStore.ts DISPATCH_RESULT_TAIL_MAX_CHARS) so a chatty run never
+ *  balloons the status POST. */
+const RESULT_TAIL_MAX_BYTES = 8 * 1024;
 
 // ── Config ──────────────────────────────────────────────────────
 
@@ -234,6 +241,27 @@ function audit(cfg, event, fields) {
   }
 }
 
+/** Read the last RESULT_TAIL_MAX_BYTES of a run's log file. Tolerant of a
+ *  missing/unreadable file (returns undefined) — a lost result tail must
+ *  never block the `exited` status POST. */
+function readResultTail(logPath) {
+  try {
+    const stat = fs.statSync(logPath);
+    const start = Math.max(0, stat.size - RESULT_TAIL_MAX_BYTES);
+    const length = stat.size - start;
+    const fd = fs.openSync(logPath, 'r');
+    try {
+      const buffer = Buffer.alloc(length);
+      fs.readSync(fd, buffer, 0, length, start);
+      return buffer.toString('utf8');
+    } finally {
+      fs.closeSync(fd);
+    }
+  } catch {
+    return undefined;
+  }
+}
+
 function runDispatch(cfg, item, argv, deps) {
   const spawnImpl = deps.spawn ?? spawn;
   ensureLogDir(cfg);
@@ -241,6 +269,11 @@ function runDispatch(cfg, item, argv, deps) {
   let logStream;
   try {
     logStream = fs.createWriteStream(logPath, { flags: 'a' });
+    // createWriteStream opens the fd lazily/async — a bad log dir surfaces as
+    // an 'error' event, not a synchronous throw. An unhandled 'error' event
+    // crashes the process, so this permanent listener keeps the run's
+    // spawn/exit reporting alive even when logging itself is broken.
+    logStream.on('error', () => {});
   } catch {
     logStream = null;
   }
@@ -258,10 +291,26 @@ function runDispatch(cfg, item, argv, deps) {
   audit(cfg, 'started', { id: item.id, pid: child.pid, provider: item.provider, cwd: item.cwd });
 
   child.on('exit', (code) => {
-    logStream?.end();
     const exitCode = typeof code === 'number' ? code : -1;
-    void postStatus(cfg, item.id, { event: 'exited', exitCode }, deps.fetch ?? fetch);
-    audit(cfg, 'exited', { id: item.id, pid: child.pid, exitCode });
+    // Read the tail AFTER the log stream settles — reading immediately on
+    // 'exit' can race the write stream's buffered data. Guards against
+    // double-reporting: whichever of 'finish' (clean flush) or 'error' (a
+    // stream that never opened, e.g. an unwritable log dir) fires first wins.
+    let reported = false;
+    const reportExited = () => {
+      if (reported) return;
+      reported = true;
+      const resultTail = readResultTail(logPath);
+      void postStatus(cfg, item.id, { event: 'exited', exitCode, resultTail }, deps.fetch ?? fetch);
+      audit(cfg, 'exited', { id: item.id, pid: child.pid, exitCode, resultTail });
+    };
+    if (logStream) {
+      logStream.once('finish', reportExited);
+      logStream.once('error', reportExited);
+      logStream.end();
+    } else {
+      reportExited();
+    }
   });
   child.on('error', (err) => {
     log(`⚠ spawn error for ${item.id}: ${shortErr(err)}`);

@@ -208,6 +208,76 @@ test('tick: accepts a valid dispatch request, spawns it, and reports started + e
   assert.equal(exited.body.exitCode, 0);
 });
 
+test('tick: exited status carries a resultTail read from the per-run log', async () => {
+  const item = {
+    id: 'req-tail',
+    action: 'dispatch',
+    provider: 'claude',
+    cwd: tmpDir,
+    prompt: 'say hi',
+  };
+  const { server, captured, port } = await startStubServer(stubHandler({ pending: [item] }));
+  const cfg = baseCfg(port);
+  const allowlist = { providers: ['claude'], roots: [tmpDir], focus: false };
+  await tick(
+    cfg,
+    { handled: new Set() },
+    {
+      readAllowlist: () => allowlist,
+      spawn: () => {
+        // Built by hand (not fakeChild) so stdout 'data' is guaranteed to
+        // fire — and be captured by the log stream — strictly before 'exit'.
+        const child = new EventEmitter();
+        child.pid = 4242;
+        child.stdout = new EventEmitter();
+        child.stderr = new EventEmitter();
+        setImmediate(() => {
+          child.stdout.emit('data', Buffer.from('CODEX DISPATCH OK\n'));
+          setImmediate(() => child.emit('exit', 0));
+        });
+        return child;
+      },
+    },
+  );
+  await new Promise((resolve) => setTimeout(resolve, 150));
+  server.close();
+
+  const exited = captured.find(
+    (c) => c.url === '/api/dispatch/req-tail/status' && c.body.event === 'exited',
+  );
+  assert.ok(exited, 'expected an exited status POST');
+  assert.match(exited.body.resultTail, /CODEX DISPATCH OK/);
+});
+
+test('tick: a missing/unreadable log file yields an undefined resultTail, never throws', async () => {
+  const item = {
+    id: 'req-no-log',
+    action: 'dispatch',
+    provider: 'claude',
+    cwd: tmpDir,
+    prompt: 'hi',
+  };
+  const { server, captured, port } = await startStubServer(stubHandler({ pending: [item] }));
+  // logDir does not exist and cannot be created (points inside a file, not a dir).
+  const blockedLogDir = path.join(tmpDir, 'blocked-log-dir');
+  fs.writeFileSync(blockedLogDir, 'not a directory');
+  const cfg = baseCfg(port, { logDir: path.join(blockedLogDir, 'nested') });
+  const allowlist = { providers: ['claude'], roots: [tmpDir], focus: false };
+  await tick(
+    cfg,
+    { handled: new Set() },
+    { readAllowlist: () => allowlist, spawn: () => fakeChild(0) },
+  );
+  await new Promise((resolve) => setTimeout(resolve, 150));
+  server.close();
+
+  const exited = captured.find(
+    (c) => c.url === '/api/dispatch/req-no-log/status' && c.body.event === 'exited',
+  );
+  assert.ok(exited, 'expected an exited status POST despite the unwritable log dir');
+  assert.equal(exited.body.resultTail, undefined);
+});
+
 test('tick: focus reports its outcome AS the decision (accept/deny), never a separate status', async () => {
   const item = { id: 'req-4', action: 'focus', pid: 999 };
   const { server, captured, port } = await startStubServer(stubHandler({ pending: [item] }));
