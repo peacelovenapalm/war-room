@@ -228,8 +228,73 @@ test('validateRequest: unknown action denies', () => {
 
 test('buildArgv: maps each provider to its documented argv shape', () => {
   assert.deepEqual(buildArgv({ provider: 'claude', prompt: 'hello' }), ['claude', '-p', 'hello']);
-  assert.deepEqual(buildArgv({ provider: 'codex', prompt: 'hello' }), ['codex', 'exec', 'hello']);
+  assert.deepEqual(buildArgv({ provider: 'codex', prompt: 'hello' }), [
+    'codex',
+    'exec',
+    '--skip-git-repo-check',
+    'hello',
+  ]);
   assert.deepEqual(buildArgv({ provider: 'gemini', prompt: 'hello' }), ['gemini', '-p', 'hello']);
+});
+
+test('buildArgv: codex always carries --skip-git-repo-check (allowlist containment is the trust boundary)', () => {
+  const argv = buildArgv({ provider: 'codex', prompt: 'hi' });
+  assert.ok(argv.includes('--skip-git-repo-check'));
+});
+
+test('buildArgv: threads an optional model per-provider, in the right position', () => {
+  assert.deepEqual(buildArgv({ provider: 'claude', prompt: 'hi', model: 'fable' }), [
+    'claude',
+    '-p',
+    '--model',
+    'fable',
+    'hi',
+  ]);
+  assert.deepEqual(buildArgv({ provider: 'codex', prompt: 'hi', model: 'o3' }), [
+    'codex',
+    'exec',
+    '--skip-git-repo-check',
+    '--model',
+    'o3',
+    'hi',
+  ]);
+  // gemini's -p TAKES the prompt as its value, so --model must precede it.
+  assert.deepEqual(buildArgv({ provider: 'gemini', prompt: 'hi', model: 'flash' }), [
+    'gemini',
+    '--model',
+    'flash',
+    '-p',
+    'hi',
+  ]);
+});
+
+test('buildArgv: threads --effort for claude only — codex/gemini have no effort flag, silently omitted', () => {
+  assert.deepEqual(buildArgv({ provider: 'claude', prompt: 'hi', effort: 'high' }), [
+    'claude',
+    '-p',
+    '--effort',
+    'high',
+    'hi',
+  ]);
+  assert.deepEqual(buildArgv({ provider: 'codex', prompt: 'hi', effort: 'high' }), [
+    'codex',
+    'exec',
+    '--skip-git-repo-check',
+    'hi',
+  ]);
+  assert.deepEqual(buildArgv({ provider: 'gemini', prompt: 'hi', effort: 'high' }), [
+    'gemini',
+    '-p',
+    'hi',
+  ]);
+});
+
+test('buildArgv: blank/whitespace-only model or effort strings are treated as absent', () => {
+  assert.deepEqual(buildArgv({ provider: 'claude', prompt: 'hi', model: '  ', effort: '' }), [
+    'claude',
+    '-p',
+    'hi',
+  ]);
 });
 
 test('buildArgv: a shell-metacharacter-laden prompt stays ONE argv element, never split/interpolated', () => {
@@ -243,7 +308,7 @@ test('buildArgv: a shell-metacharacter-laden prompt stays ONE argv element, neve
 test('buildArgv: backticks and $() command-substitution syntax pass through inert as data', () => {
   const malicious = '`whoami` && echo $(cat /etc/passwd)';
   const argv = buildArgv({ provider: 'codex', prompt: malicious });
-  assert.equal(argv[2], malicious);
+  assert.equal(argv.at(-1), malicious);
 });
 
 test('buildArgv: unknown provider returns null rather than throwing', () => {

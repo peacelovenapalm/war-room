@@ -127,6 +127,13 @@ export function validateRequest(request, allowlist) {
   return { ok: false, reason: 'path-not-allowlisted' };
 }
 
+/** Providers with a real `--effort` (or equivalent) flag, verified against
+ *  each CLI's own `--help` output — see the buildArgv doc comment below for
+ *  the exact flags per provider. Requesting effort for a provider not in
+ *  this set is honored by validation (a generic effort string) but silently
+ *  omitted from argv here rather than passed to a flag that doesn't exist. */
+const PROVIDERS_WITH_EFFORT = new Set(['claude']);
+
 /**
  * Build the argv array for a validated dispatch request. The prompt is
  * ALWAYS a single argv element — never concatenated into a shell string —
@@ -134,18 +141,57 @@ export function validateRequest(request, allowlist) {
  * inert: `child_process.spawn(argv[0], argv.slice(1), { shell: false })`
  * passes it straight through as one exec() argument.
  *
- * @param {{ provider: string, prompt: string }} request
+ * Per-provider flags (verified via `<cli> --help` / `<cli> exec --help` on
+ * 2026-07-08 — re-verify if a CLI's help output changes):
+ *   - claude: `-p` (`--print`) is a boolean flag, `--model <model>` and
+ *     `--effort <level>` each take a value, prompt is a trailing positional.
+ *   - codex: `codex exec [OPTIONS] [PROMPT]` — prompt is positional.
+ *     `--skip-git-repo-check` is required here because the runner's OWN
+ *     allowlist containment check (validateRequest, realpath + relative)
+ *     is already the trust boundary for "is this cwd allowed" — codex's own
+ *     git-repo trust prompt would otherwise block non-interactive `exec` runs
+ *     at a cwd that is a legitimate allowlisted root but not a git repo (or
+ *     not yet trusted by codex itself), which is exactly the failure seen in
+ *     production. `-m`/`--model <MODEL>` takes a value; there is no
+ *     `--effort` flag, so effort is never appended for codex.
+ *   - gemini: `-p`/`--prompt <string>` TAKES the prompt as its own value
+ *     (unlike claude's boolean `-p`), so any other flags must come BEFORE
+ *     `-p`. `-m`/`--model` takes a value; there is no effort flag, so effort
+ *     is never appended for gemini.
+ *
+ * @param {{ provider: string, prompt: string, model?: string, effort?: string }} request
  * @returns {string[] | null} argv, or null for an unknown provider (should
  *   never happen post-validateRequest — defensive only, never throws).
  */
 export function buildArgv(request) {
+  const model =
+    typeof request?.model === 'string' && request.model.trim() !== '' ? request.model : undefined;
+  const effort =
+    typeof request?.effort === 'string' && request.effort.trim() !== ''
+      ? request.effort
+      : undefined;
+  const includeEffort = (provider) => effort !== undefined && PROVIDERS_WITH_EFFORT.has(provider);
+
   switch (request?.provider) {
-    case 'claude':
-      return ['claude', '-p', request.prompt];
-    case 'codex':
-      return ['codex', 'exec', request.prompt];
-    case 'gemini':
-      return ['gemini', '-p', request.prompt];
+    case 'claude': {
+      const argv = ['claude', '-p'];
+      if (model) argv.push('--model', model);
+      if (includeEffort('claude')) argv.push('--effort', effort);
+      argv.push(request.prompt);
+      return argv;
+    }
+    case 'codex': {
+      const argv = ['codex', 'exec', '--skip-git-repo-check'];
+      if (model) argv.push('--model', model);
+      argv.push(request.prompt);
+      return argv;
+    }
+    case 'gemini': {
+      const argv = ['gemini'];
+      if (model) argv.push('--model', model);
+      argv.push('-p', request.prompt);
+      return argv;
+    }
     default:
       return null;
   }
