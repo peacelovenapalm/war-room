@@ -3,6 +3,7 @@ import * as path from 'path';
 import type { AgentEvent, HookProvider } from '../../core/src/provider.js';
 import type { AgentStateStore } from './agentStateStore.js';
 import { SESSION_END_GRACE_MS } from './constants.js';
+import { employeeStore } from './employeeStore.js';
 import { progression } from './progressionStore.js';
 import type { SessionRouter } from './sessionRouter.js';
 import { shiftStats } from './shiftStats.js';
@@ -704,6 +705,18 @@ export class HookEventHandler {
     if (!awaitingInput && (!agent.providerId || agent.providerId === 'claude')) {
       shiftStats.recordTurnEnd();
       progression.recordTurnEnd();
+      // Employees (v2 mechanic G1, GAME-DESIGN §4): same real-event source
+      // and exclusion as progression/shiftStats above — added alongside,
+      // not instead of. outputTokens is the agent's cumulative session
+      // total; employeeStore derives its own per-turn delta from it.
+      employeeStore.recordTurn(
+        agent.machine,
+        agent.projectDir,
+        agent.folderName ?? path.basename(agent.projectDir),
+        {
+          outputTokensCumulative: agent.outputTokens,
+        },
+      );
     }
     this.markAgentWaiting(agent, agentId, awaitingInput);
   }

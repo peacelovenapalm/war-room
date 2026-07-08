@@ -12,6 +12,7 @@ import type { AssetCache, SetHooksEnabledSideEffect } from './clientMessageHandl
 import { handleClientMessage } from './clientMessageHandler.js';
 import { HOOK_API_PREFIX, MAX_HOOK_BODY_SIZE } from './constants.js';
 import { dispatchStore } from './dispatchStore.js';
+import { employeeStore } from './employeeStore.js';
 import { applyPollStates, parsePollBody, startPollStateSweep } from './pollStateHandler.js';
 import { progression } from './progressionStore.js';
 import { shiftStats } from './shiftStats.js';
@@ -211,6 +212,7 @@ function registerPollRoute(app: FastifyInstance, options: HttpServerOptions): vo
         Date.now(),
         shiftStats,
         progression,
+        employeeStore,
       );
       if (!options.embedded && (result.matched > 0 || result.cleared > 0)) {
         console.log(

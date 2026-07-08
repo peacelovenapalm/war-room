@@ -22,6 +22,7 @@ import * as path from 'path';
 
 import { normalizeProjectPath } from '../../core/src/normalizeProjectPath.js';
 import type { AgentStateStore } from './agentStateStore.js';
+import type { EmployeeStore } from './employeeStore.js';
 import type { ProgressionStore } from './progressionStore.js';
 import type { ShiftStats } from './shiftStats.js';
 import type { AgentState, PollStateValue } from './types.js';
@@ -37,6 +38,12 @@ export type BlockedEpisodeSink = Pick<ShiftStats, 'startBlocked' | 'endBlocked'>
  *  sweep (which explicitly marks its clears `stale`). Hard guardrail: stale
  *  clears never award XP — the session may still be stuck. */
 export type CrisisXpSink = Pick<ProgressionStore, 'recordCrisisResolved'>;
+
+/** Employees (v2 mechanic G1): the same real-event contract as
+ *  CrisisXpSink above, cloned rather than shared since the two stores
+ *  take different arguments (employeeStore needs machine/projectDir to
+ *  resolve identity; progressionStore is account-wide). */
+export type EmployeeCrisisXpSink = Pick<EmployeeStore, 'recordCrisisResolved'>;
 
 /** Poll states older than this are swept (poller assumed dead). */
 export const POLL_STATE_TTL_MS = 60_000;
@@ -137,6 +144,7 @@ export function applyPollStates(
   now: number = Date.now(),
   stats?: BlockedEpisodeSink,
   progressionSink?: CrisisXpSink,
+  employeeSink?: EmployeeCrisisXpSink,
 ): { matched: number; cleared: number } {
   const machineAgents: Array<[number, AgentState]> = [];
   for (const [id, agent] of store) {
@@ -165,6 +173,7 @@ export function applyPollStates(
       // non-blocked state) — never fires for the silent "no longer
       // reported" clear below or the TTL sweep (see CrisisXpSink doc).
       progressionSink?.recordCrisisResolved(now);
+      employeeSink?.recordCrisisResolved(agent.machine, agent.projectDir, now);
     }
     // `since` survives refresh ticks while the STATE VALUE is unchanged — it is
     // the transition time that anchors crisis aging (smoke → fire → alarm).
