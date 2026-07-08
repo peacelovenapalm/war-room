@@ -1,6 +1,6 @@
 import { useEffect, useState } from 'react';
 
-import { buildCopyIdLine, type DispatchMachine, machineSupportsFocus } from '../dispatch.js';
+import { buildCopyIdLine, canFocusAgent, type DispatchMachine } from '../dispatch.js';
 import { deriveVisualState, STATE_CHIPS } from '../office/agentState.js';
 import { formatAge } from '../office/crisis.js';
 import type { OfficeState } from '../office/engine/officeState.js';
@@ -95,13 +95,13 @@ export function AgentDrawer({
   const blockedAge = since !== undefined ? formatAge(now - since) : null;
   // The runner's focus action fronts a terminal by OS pid — it ignores
   // sessionId entirely and denies with reason "missing-pid" without one.
-  // No pid is captured anywhere in this system today (JSONL transcripts and
-  // hook events carry no OS pid), so FOCUS is honestly unavailable until
-  // that telemetry exists — never send a request we know the runner will
-  // reject.
-  const pid: number | undefined = undefined;
-  const hasRunner = machineSupportsFocus(machines, ch.machine);
-  const canFocus = pid !== undefined && hasRunner;
+  // pid arrives via the hook forwarder's X-Pid header (server AgentState.pid,
+  // carried through AgentCreated/ExistingAgents/agentPidUpdate); it's absent
+  // for sessions predating the forwarder install, so FOCUS stays honestly
+  // disabled ("NO PID") until telemetry actually arrives for THIS session —
+  // never send a request we know the runner will deny.
+  const pid = ch.pid;
+  const canFocus = canFocusAgent(pid, machines, ch.machine);
   const copyLine = buildCopyIdLine(ch.machine, ch.cwd, ch.sessionId);
 
   const handleFocus = () => {

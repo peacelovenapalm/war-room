@@ -151,6 +151,7 @@ export function useExtensionMessages(
       provider?: string;
       sessionId?: string;
       cwd?: string;
+      pid?: number;
     }> = [];
 
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
@@ -213,6 +214,7 @@ export function useExtensionMessages(
             p.provider,
             p.sessionId,
             p.cwd,
+            p.pid,
           );
         }
         pendingAgents = [];
@@ -231,6 +233,7 @@ export function useExtensionMessages(
         const provider = msg.provider as string | undefined;
         const sessionId = msg.sessionId as string | undefined;
         const cwd = msg.cwd as string | undefined;
+        const pid = msg.pid as number | undefined;
         const isTeammate = msg.isTeammate as boolean | undefined;
         const teammateName = msg.teammateName as string | undefined;
         const teammateParentId = msg.parentAgentId as number | undefined;
@@ -277,6 +280,7 @@ export function useExtensionMessages(
             provider,
             sessionId,
             cwd,
+            pid,
           );
         }
         saveAgentSeats(os);
@@ -317,6 +321,7 @@ export function useExtensionMessages(
         const providers = (msg.providers || {}) as Record<number, string>;
         const sessionIds = (msg.sessionIds || {}) as Record<number, string>;
         const cwds = (msg.cwds || {}) as Record<number, string>;
+        const pids = (msg.pids || {}) as Record<number, number>;
         // Buffer agents — they'll be added in layoutLoaded after seats are built
         for (const id of incoming) {
           const m = meta[id];
@@ -330,6 +335,7 @@ export function useExtensionMessages(
             provider: providers[id],
             sessionId: sessionIds[id],
             cwd: cwds[id],
+            pid: pids[id],
           });
         }
         // Standalone server sends layoutLoaded BEFORE existingAgents, so the
@@ -669,6 +675,8 @@ export function useExtensionMessages(
       } else if (msg.type === 'agentTokenUsage') {
         const id = msg.id as number;
         os.setAgentTokens(id, msg.inputTokens as number, msg.outputTokens as number);
+      } else if (msg.type === 'agentPidUpdate') {
+        os.setAgentPid(msg.id as number, msg.pid as number);
       } else if (msg.type === 'progressionUpdate') {
         setProgression({
           xp: msg.xp as number,

@@ -10,6 +10,7 @@ import { describe, expect, it } from 'vitest';
 
 import {
   buildCopyIdLine,
+  canFocusAgent,
   detectSendFailures,
   dismissDispatchEntry,
   DISPATCH_SEND_TIMEOUT_MS,
@@ -204,6 +205,33 @@ describe('machineSupportsFocus', () => {
 
   it('is false when no machine is given', () => {
     expect(machineSupportsFocus(machines, undefined)).toBe(false);
+  });
+});
+
+describe('canFocusAgent (drawer FOCUS button eligibility)', () => {
+  const machines = [
+    { machine: 'MACBOOK', providers: ['claude'], roots: ['/x'], focus: true },
+    { machine: 'MINI', providers: ['claude'], roots: ['/y'], focus: false },
+  ];
+
+  it('is true with both a pid and a focus-capable runner', () => {
+    expect(canFocusAgent(4242, machines, 'MACBOOK')).toBe(true);
+  });
+
+  it('is false with a runner but no pid ("NO PID -- use COPY ID")', () => {
+    expect(canFocusAgent(undefined, machines, 'MACBOOK')).toBe(false);
+  });
+
+  it('is false with a pid but no focus-capable runner ("NO RUNNER")', () => {
+    expect(canFocusAgent(4242, machines, 'MINI')).toBe(false);
+  });
+
+  it('is false with a pid but no runner at all on that machine', () => {
+    expect(canFocusAgent(4242, machines, 'NEXUS')).toBe(false);
+  });
+
+  it('is false with neither pid nor machine', () => {
+    expect(canFocusAgent(undefined, machines, undefined)).toBe(false);
   });
 });
 

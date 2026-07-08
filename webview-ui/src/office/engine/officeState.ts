@@ -401,6 +401,7 @@ export class OfficeState {
     provider?: string,
     sessionId?: string,
     cwd?: string,
+    pid?: number,
   ): void {
     if (this.characters.has(id)) return;
 
@@ -459,6 +460,9 @@ export class OfficeState {
     }
     if (cwd) {
       ch.cwd = cwd;
+    }
+    if (pid !== undefined) {
+      ch.pid = pid;
     }
     if (!skipSpawnEffect) {
       ch.matrixEffect = 'spawn';
@@ -1106,6 +1110,13 @@ export class OfficeState {
     if (!ch) return;
     ch.inputTokens = inputTokens;
     ch.outputTokens = outputTokens;
+  }
+
+  /** Late-arriving pid telemetry (mechanic #6b FOCUS) — see AgentPidUpdate. */
+  setAgentPid(id: number, pid: number): void {
+    const ch = this.characters.get(id);
+    if (!ch) return;
+    ch.pid = pid;
   }
 
   update(dt: number): void {

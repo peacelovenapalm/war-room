@@ -222,6 +222,11 @@ export interface Character {
   /** Real project directory (mechanic #6b detail drawer's "project dir" field),
    *  distinct from folderName (the short multi-root workspace label). */
   cwd?: string;
+  /** OS process id of the session (mechanic #6b FOCUS dispatch target),
+   *  captured server-side from the hook forwarder's X-Pid header. Absent
+   *  until the first hook event with pid telemetry arrives — drawer shows
+   *  "NO PID" until then. Never rendered as a badge, only in the drawer. */
+  pid?: number;
   /** Latest state from the per-machine needs-input poller (`claude agents --json`,
    *  arriving via the server's agentPollState broadcast). `at` = client receipt
    *  time (ms) so the value expires visually if the poller/server goes silent.

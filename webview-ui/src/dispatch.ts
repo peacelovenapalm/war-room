@@ -144,6 +144,19 @@ export function machineSupportsFocus(
   return machines.some((m) => m.machine === machine && m.focus);
 }
 
+/** Drawer FOCUS button eligibility (mechanic #6b): needs BOTH a real pid
+ *  (from server hook telemetry, AgentCreated/ExistingAgents/agentPidUpdate)
+ *  and a live runner on that machine advertising focus support. Pure so the
+ *  two honest disabled states ("NO PID" vs "NO RUNNER") are unit-testable
+ *  without a rendering harness. */
+export function canFocusAgent(
+  pid: number | undefined,
+  machines: DispatchMachine[],
+  machine: string | undefined,
+): boolean {
+  return pid !== undefined && machineSupportsFocus(machines, machine);
+}
+
 // ── Send-failure detection ──────────────────────────────────────────
 //
 // dispatchRequest has NO ack on the wire: an invalid send (bad provider,
