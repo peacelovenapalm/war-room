@@ -704,3 +704,14 @@ forward: one agent per checkout, or verified worktrees.
 
 **Wave 2 queued:** mechanic #5 expression (decor unlocks consuming the
 flags). NEXUS still runs v0 — none of this is visible until redeploy.
+
+### 2026-07-08 — wave 2: mechanic #5 expression ✓ (`28bdee8`)
+
+Decor unlocks consuming the progression flags, existing office sprites
+only: Desk Pot (3-day streak), Cactus (7-day), Large Plant (30-day),
+Coffee Machine (5 LEAN days), Wall Clock (level 5), Framed Painting
+(level 10). Locked items simply don't render (no teasers); UNLOCKS panel
+lists each with TEXT requirement + UNLOCKED/LOCKED word; help section
+added. Gates re-verified by the orchestrator at HEAD: server 279/279,
+webview 102/102, bin 21/21, tsc/lint/build clean. v1 fun layer complete;
+visible after NEXUS redeploy.
