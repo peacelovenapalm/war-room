@@ -11,6 +11,7 @@ import { getBriefing } from './briefingProvider.js';
 import type { AssetCache, SetHooksEnabledSideEffect } from './clientMessageHandler.js';
 import { handleClientMessage } from './clientMessageHandler.js';
 import { HOOK_API_PREFIX, MAX_HOOK_BODY_SIZE } from './constants.js';
+import { dispatchStore } from './dispatchStore.js';
 import { applyPollStates, parsePollBody, startPollStateSweep } from './pollStateHandler.js';
 import { progression } from './progressionStore.js';
 import { shiftStats } from './shiftStats.js';
@@ -84,6 +85,7 @@ export async function createHttpServer(options: HttpServerOptions): Promise<Http
   registerBriefingRoute(app);
   registerHookRoute(app, options);
   registerPollRoute(app, options);
+  registerDispatchRoutes(app, options);
   registerWebSocketRoute(app, options);
 
   // ── Listen ──────────────────────────────────────────────────
@@ -211,6 +213,93 @@ function registerPollRoute(app: FastifyInstance, options: HttpServerOptions): vo
   );
 }
 
+// ── Dispatch queue (v1 mechanic #6b — "call a coworker") ───────
+
+/** How often stale (unanswered past TTL) ringing requests are swept to `expired`. */
+const DISPATCH_SWEEP_INTERVAL_MS = 30_000;
+
+/**
+ * Dispatch queue routes. The server never shells out — these routes only
+ * read/write dispatchStore.ts's in-memory (persisted) queue; the actual CLI
+ * spawn happens on a per-machine runner (bin/dispatch-runner.mjs) that polls
+ * `/api/dispatch/poll` over the same Bearer-authed channel as the needs-input
+ * poller. Decision routes are always 2xx: deny and unknown-id are decision
+ * payloads, never 403/404 (see dispatchStore.ts doc comment).
+ */
+function registerDispatchRoutes(app: FastifyInstance, options: HttpServerOptions): void {
+  const sweepTimer = setInterval(() => dispatchStore.sweepExpired(), DISPATCH_SWEEP_INTERVAL_MS);
+  sweepTimer.unref?.();
+  app.addHook('onClose', () => clearInterval(sweepTimer));
+
+  // GET /api/dispatch/machines -- unauthenticated, like /api/briefing (tailnet-only
+  // server). Only machines with a live runner advertisement are listed — a machine
+  // without a runner is honestly absent, never stale-listed.
+  app.get('/api/dispatch/machines', async () => dispatchStore.getMachines());
+
+  // POST /api/dispatch/poll -- runner poll (Bearer + X-Machine). The body advertises
+  // this tick's allowlisted providers/roots/focus capability; the response carries
+  // this machine's ringing requests WITH the full prompt -- the only place it
+  // travels the wire, and only to a Bearer-authed runner.
+  app.post<{ Body: Record<string, unknown> }>(
+    '/api/dispatch/poll',
+    { preHandler: bearerAuth(options.token) },
+    async (request, reply) => {
+      const machine = sanitizeMachineLabel(request.headers['x-machine']);
+      if (!machine) {
+        reply.code(400).send({ error: 'missing/invalid X-Machine header' });
+        return;
+      }
+      const body = request.body ?? {};
+      const providers = Array.isArray(body.providers)
+        ? body.providers.filter((p): p is string => typeof p === 'string')
+        : [];
+      const roots = Array.isArray(body.roots)
+        ? body.roots.filter((r): r is string => typeof r === 'string')
+        : [];
+      const focus = body.focus === true;
+      dispatchStore.recordAdvertisement(machine, { providers, roots, focus });
+      reply.send({ pending: dispatchStore.pendingFor(machine) });
+    },
+  );
+
+  // POST /api/dispatch/:id/decision -- runner decision (Bearer). Deny AND an
+  // unknown/already-decided id are BOTH 2xx -- a decision, never an HTTP error.
+  app.post<{ Params: { id: string }; Body: Record<string, unknown> }>(
+    '/api/dispatch/:id/decision',
+    { preHandler: bearerAuth(options.token) },
+    async (request, reply) => {
+      const body = request.body ?? {};
+      const decision =
+        body.decision === 'accept' || body.decision === 'deny' ? body.decision : undefined;
+      if (!decision) {
+        reply.code(400).send({ error: 'expected body { decision: "accept" | "deny" }' });
+        return;
+      }
+      const reason = typeof body.reason === 'string' ? body.reason : undefined;
+      const pid = typeof body.pid === 'number' ? body.pid : undefined;
+      reply.send(dispatchStore.decide(request.params.id, decision, { reason, pid }));
+    },
+  );
+
+  // POST /api/dispatch/:id/status -- runner-reported lifecycle event (Bearer):
+  // spawn started (attaches pid) or the process exited (terminal, carries exitCode).
+  app.post<{ Params: { id: string }; Body: Record<string, unknown> }>(
+    '/api/dispatch/:id/status',
+    { preHandler: bearerAuth(options.token) },
+    async (request, reply) => {
+      const body = request.body ?? {};
+      const event = body.event === 'started' || body.event === 'exited' ? body.event : undefined;
+      if (!event) {
+        reply.code(400).send({ error: 'expected body { event: "started" | "exited" }' });
+        return;
+      }
+      const pid = typeof body.pid === 'number' ? body.pid : undefined;
+      const exitCode = typeof body.exitCode === 'number' ? body.exitCode : undefined;
+      reply.send(dispatchStore.reportStatus(request.params.id, { event, pid, exitCode }));
+    },
+  );
+}
+
 /** Normalize an X-Machine header value to an uppercase label, or undefined if invalid. */
 export function sanitizeMachineLabel(raw: unknown): string | undefined {
   const value = Array.isArray(raw) ? raw[0] : raw;
@@ -278,6 +367,17 @@ function registerWebSocketRoute(app: FastifyInstance, options: HttpServerOptions
     });
     safeSend(socket, { type: 'progressionUpdate', ...progression.getSnapshot() });
 
+    // Dispatch (v1 mechanic #6b): own broadcast plane (not tied to any single
+    // agent) -- one dispatchUpdate per lifecycle transition, plus a replay of
+    // non-terminal (ringing/answered) entries on connect so a page refresh
+    // doesn't lose in-flight "call a coworker" state.
+    const unsubscribeDispatch = dispatchStore.onUpdate((broadcast) => {
+      safeSend(socket, broadcast as unknown as Record<string, unknown>);
+    });
+    for (const broadcast of dispatchStore.getActive()) {
+      safeSend(socket, broadcast as unknown as Record<string, unknown>);
+    }
+
     // Handle incoming client messages
     socket.on('message', (data: Buffer | string) => {
       try {
@@ -302,6 +402,7 @@ function registerWebSocketRoute(app: FastifyInstance, options: HttpServerOptions
       store.off('agentRemoved', onAgentRemoved);
       store.off('broadcast', onBroadcast);
       unsubscribeProgression();
+      unsubscribeDispatch();
     });
   });
 }

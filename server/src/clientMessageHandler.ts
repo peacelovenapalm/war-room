@@ -2,6 +2,7 @@ import type { AgentRuntime } from './agentRuntime.js';
 import type { AgentStateStore } from './agentStateStore.js';
 import type { LoadedAssets, LoadedCharacterSprites, LoadedPetSprites } from './assetLoader.js';
 import { readConfig, writeConfig } from './configPersistence.js';
+import { dispatchStore } from './dispatchStore.js';
 import { readLayoutFromFile, writeLayoutToFile } from './layoutPersistence.js';
 import { claudeProvider } from './providers/index.js';
 
@@ -102,6 +103,27 @@ export function handleClientMessage(
     case 'setHooksInfoShown':
       adapter?.setSetting(KEY_HOOKS_INFO_SHOWN, true);
       break;
+
+    // Dispatch (v1 mechanic #6b — "call a coworker"): enqueue only. The
+    // server never shells out; a per-machine runner polls the queue and
+    // decides locally. enqueue() broadcasts a `dispatchUpdate` (ringing or,
+    // on validation failure, nothing) over the same WS plane every client
+    // (including this one) already listens on -- no separate ack needed.
+    case 'dispatchRequest': {
+      const action = msg.action === 'dispatch' || msg.action === 'focus' ? msg.action : undefined;
+      const machine = typeof msg.machine === 'string' ? msg.machine : undefined;
+      if (!action || !machine) break;
+      dispatchStore.enqueue({
+        action,
+        machine,
+        provider: typeof msg.provider === 'string' ? msg.provider : undefined,
+        cwd: typeof msg.cwd === 'string' ? msg.cwd : undefined,
+        prompt: typeof msg.prompt === 'string' ? msg.prompt : undefined,
+        sessionId: typeof msg.sessionId === 'string' ? msg.sessionId : undefined,
+        pid: typeof msg.pid === 'number' ? msg.pid : undefined,
+      });
+      break;
+    }
 
     case 'addExternalAssetDirectory': {
       const newPath = msg.path as string | undefined;
