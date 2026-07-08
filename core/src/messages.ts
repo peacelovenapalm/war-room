@@ -27,6 +27,7 @@ export type ServerMessage =
   | AgentTeamInfo
   | AgentTokenUsage
   | ProgressionUpdate
+  | DispatchUpdate
   | LayoutLoaded
   | FurnitureAssetsLoaded
   | CharacterSpritesLoaded
@@ -51,6 +52,7 @@ export type ClientMessage =
   | SetHooksEnabled
   | SetHooksInfoShown
   | SetWatchAllSessions
+  | DispatchRequest
   | ExportLayout
   | ImportLayout
   | OpenSessionsFolder
@@ -204,6 +206,23 @@ export interface ProgressionUpdate {
   streakLongest: number;
   unlocks: Record<string, boolean>;
 }
+
+export interface DispatchUpdate {
+  type: 'dispatchUpdate';
+  id: string;
+  action: DispatchActionValue;
+  status: DispatchStatusValue;
+  machine: string;
+  provider?: string;
+  promptPreview?: string;
+  reason?: string;
+  pid?: number;
+  exitCode?: number;
+}
+
+export type DispatchActionValue = 'dispatch' | 'focus';
+
+export type DispatchStatusValue = 'ringing' | 'answered' | 'denied' | 'expired' | 'exited';
 
 export interface LayoutLoaded {
   type: 'layoutLoaded';
@@ -370,6 +389,17 @@ export interface SetHooksInfoShown {
 export interface SetWatchAllSessions {
   type: 'setWatchAllSessions';
   enabled: boolean;
+}
+
+export interface DispatchRequest {
+  type: 'dispatchRequest';
+  action: DispatchActionValue;
+  machine: string;
+  provider?: string;
+  cwd?: string;
+  prompt?: string;
+  sessionId?: string;
+  pid?: number;
 }
 
 export interface ExportLayout {

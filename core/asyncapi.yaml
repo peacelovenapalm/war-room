@@ -102,6 +102,8 @@ components:
         - $ref: '#/components/schemas/AgentTokenUsage'
         # Progression (v1 mechanic #3)
         - $ref: '#/components/schemas/ProgressionUpdate'
+        # Dispatch (v1 mechanic #6b — call a coworker)
+        - $ref: '#/components/schemas/DispatchUpdate'
         # Layout
         - $ref: '#/components/schemas/LayoutLoaded'
         # Assets
@@ -132,6 +134,7 @@ components:
         - $ref: '#/components/schemas/SetHooksEnabled'
         - $ref: '#/components/schemas/SetHooksInfoShown'
         - $ref: '#/components/schemas/SetWatchAllSessions'
+        - $ref: '#/components/schemas/DispatchRequest'
         - $ref: '#/components/schemas/ExportLayout'
         - $ref: '#/components/schemas/ImportLayout'
         - $ref: '#/components/schemas/OpenSessionsFolder'
@@ -522,6 +525,67 @@ components:
           additionalProperties:
             type: boolean
 
+    DispatchUpdate:
+      description: >-
+        Dispatch queue lifecycle (v1 mechanic #6b — "call a coworker"):
+        broadcast whenever a dispatch or focus request changes state, and
+        replayed for non-terminal entries to every client on WebSocket
+        connect. Lifecycle: ringing -> answered -> exited, or ringing ->
+        denied / expired. `promptPreview` is a ~120-char truncation only —
+        the full prompt NEVER travels over this broadcast plane (it is
+        carried solely on the Bearer-authed runner poll). Rendered as a
+        distinct glyph + WORD per status (colorblind rule): (ringing) ->
+        (answered) / (denied) / (expired) / (exited).
+      type: object
+      additionalProperties: false
+      required: [type, id, action, status, machine]
+      properties:
+        type:
+          const: dispatchUpdate
+        id:
+          type: string
+          description: Dispatch request UUID.
+        action:
+          $ref: '#/components/schemas/DispatchActionValue'
+        status:
+          $ref: '#/components/schemas/DispatchStatusValue'
+        machine:
+          type: string
+          description: Target machine TEXT label the request was dispatched to.
+        provider:
+          type: string
+          description: Coworker provider id ('claude', 'codex', 'gemini') — dispatch action only.
+        promptPreview:
+          type: string
+          description: >-
+            Truncated (~120 char) preview of the prompt — dispatch action
+            only. The full prompt is never broadcast.
+        reason:
+          type: string
+          description: Deny/failure reason (data, not an error) — e.g. "path-not-allowlisted".
+        pid:
+          type: integer
+          description: Process id of the spawned CLI (dispatch) or focused session (focus), once known.
+        exitCode:
+          type: integer
+          description: Exit code of the spawned process — exited status only.
+
+    DispatchActionValue:
+      description: Dispatch queue entry kind.
+      type: string
+      enum: [dispatch, focus]
+
+    DispatchStatusValue:
+      description: >-
+        Dispatch queue lifecycle status. `ringing` = queued, awaiting a
+        runner's decision. `answered` = a runner accepted (dispatch: CLI
+        run in progress; focus: terminal fronted). `denied` = a runner
+        (or the server, for an unknown/expired id) refused — a decision,
+        never an HTTP error. `expired` = no runner answered within the
+        TTL. `exited` = the spawned dispatch process ended (dispatch only).
+      type: string
+      enum: [ringing, answered, denied, expired, exited]
+
     LayoutLoaded:
       description: |
         Office layout (tiles, furniture, colors). `null` when no layout file or
@@ -810,6 +874,45 @@ components:
           const: closeAgent
         id:
           type: integer
+
+    DispatchRequest:
+      description: >-
+        Ask a machine's dispatch runner to either start a real headless CLI
+        run (action "dispatch") or bring a session's terminal to front
+        (action "focus"). The server never shells out — this is a queue
+        entry; a per-machine runner (opt-in, runbook-installed) polls it
+        over the authed channel and decides locally against its own
+        allowlist (`~/.war-room/dispatch.json`), which the server cannot
+        override. `prompt` travels only as far as the server's queue and
+        the runner's authed poll — it is never echoed back over this
+        WebSocket plane (see DispatchUpdate.promptPreview).
+      type: object
+      additionalProperties: false
+      required: [type, action, machine]
+      properties:
+        type:
+          const: dispatchRequest
+        action:
+          $ref: '#/components/schemas/DispatchActionValue'
+        machine:
+          type: string
+          description: Target machine TEXT label (from a live GET /api/dispatch/machines advertisement).
+        provider:
+          type: string
+          description: Coworker provider id ('claude', 'codex', 'gemini') — required for action "dispatch".
+        cwd:
+          type: string
+          description: Project directory the CLI should run in — required for action "dispatch".
+        prompt:
+          type: string
+          maxLength: 4000
+          description: Prompt text, passed to the runner as a single argv element — required for action "dispatch".
+        sessionId:
+          type: string
+          description: Session id to bring to front — action "focus" (sessionId or pid required).
+        pid:
+          type: integer
+          description: Process id to bring to front — action "focus" (sessionId or pid required).
 
     SaveAgentSeats:
       description: Persist seat assignments for current agents.
