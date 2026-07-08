@@ -3,6 +3,7 @@ import { useEffect, useRef, useState } from 'react';
 import type { WorkspaceFolder } from '../hooks/useExtensionMessages.js';
 import { isBrowserRuntime } from '../runtime.js';
 import { transport } from '../transport/index.js';
+import { SoundToggle } from './SoundToggle.js';
 import { Button } from './ui/Button.js';
 import { Dropdown, DropdownItem } from './ui/Dropdown.js';
 
@@ -164,6 +165,7 @@ export function BottomToolbar({
       <Button variant={isHelpOpen ? 'active' : 'default'} onClick={onToggleHelp} title="Help (?)">
         Help
       </Button>
+      <SoundToggle />
     </div>
   );
 }

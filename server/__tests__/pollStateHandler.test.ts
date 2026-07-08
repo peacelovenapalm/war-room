@@ -227,6 +227,46 @@ describe('applyPollStates', () => {
     applyPollStates(store, 'MACBOOK', 'MACBOOK', [{ id: 'long-block', state: 'blocked' }], 30_000);
     expect(broadcasts.length).toBe(2);
   });
+
+  it('awards progression XP only for an OBSERVED transition away from blocked, never for a silent poller-drop clear', () => {
+    const recordCrisisResolved = vi.fn();
+    store.set(20, createTestAgent({ id: 20, sessionId: 'xp-sess' }));
+    applyPollStates(
+      store,
+      'MACBOOK',
+      'MACBOOK',
+      [{ id: 'xp-sess', state: 'blocked' }],
+      1000,
+      undefined,
+      { recordCrisisResolved },
+    );
+    expect(recordCrisisResolved).not.toHaveBeenCalled();
+    // Observed transition: the poller explicitly reports a new, non-blocked state.
+    applyPollStates(
+      store,
+      'MACBOOK',
+      'MACBOOK',
+      [{ id: 'xp-sess', state: 'working' }],
+      2000,
+      undefined,
+      { recordCrisisResolved },
+    );
+    expect(recordCrisisResolved).toHaveBeenCalledTimes(1);
+    expect(recordCrisisResolved).toHaveBeenCalledWith(2000);
+    // Re-block, then let the poller silently stop reporting it (ambiguous —
+    // never a positive observation) — must NOT award XP.
+    applyPollStates(
+      store,
+      'MACBOOK',
+      'MACBOOK',
+      [{ id: 'xp-sess', state: 'blocked' }],
+      3000,
+      undefined,
+      { recordCrisisResolved },
+    );
+    applyPollStates(store, 'MACBOOK', 'MACBOOK', [], 4000, undefined, { recordCrisisResolved });
+    expect(recordCrisisResolved).toHaveBeenCalledTimes(1); // still just the one observed resolution
+  });
 });
 
 describe('startPollStateSweep', () => {

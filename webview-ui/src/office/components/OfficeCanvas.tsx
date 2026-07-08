@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useRef } from 'react';
 
+import { ambience } from '../../ambience.js';
 import {
   CAMERA_FOLLOW_LERP,
   CAMERA_FOLLOW_SNAP_THRESHOLD,
@@ -10,6 +11,7 @@ import {
 } from '../../constants.js';
 import { unlockAudio } from '../../notificationSound.js';
 import { transport } from '../../transport/index.js';
+import { stageForAge } from '../crisis.js';
 import { canPlaceFurniture, getWallPlacementRow } from '../editor/editorActions.js';
 import type { EditorState } from '../editor/editorState.js';
 import { startGameLoop } from '../engine/gameLoop.js';
@@ -71,6 +73,11 @@ export function OfficeCanvas({
   const isEraseDraggingRef = useRef(false);
   // Zoom scroll accumulator for trackpad pinch sensitivity
   const zoomAccumulatorRef = useRef(0);
+  // Sound layer (v1): last-seen fire stage per agent (chirp on escalation)
+  // and already-announced extinguish effects (ding on observed resolution) —
+  // both mirror the exact visible signal 1:1, never carry extra information.
+  const crisisStageRef = useRef<Map<number, string>>(new Map());
+  const announcedExtinguishRef = useRef<WeakSet<object>>(new WeakSet());
 
   // Clamp pan so the map edge can't go past a margin inside the viewport
   const clampPan = useCallback(
@@ -120,6 +127,34 @@ export function OfficeCanvas({
     const stop = startGameLoop(canvas, {
       update: (dt) => {
         officeState.update(dt);
+
+        // Sound layer (v1): alarm chirp on FIRE/ALARM escalation — same
+        // stage transition the fire silhouette already renders.
+        const now = Date.now();
+        const seenIds = new Set<number>();
+        for (const ch of officeState.characters.values()) {
+          if (!ch.crisis || ch.matrixEffect === 'despawn') continue;
+          seenIds.add(ch.id);
+          const stage = stageForAge(now - ch.crisis.since);
+          const prevStage = crisisStageRef.current.get(ch.id);
+          if (stage !== prevStage) {
+            if (stage === 'fire' || stage === 'alarm') {
+              ambience.playAlarmChirp(now);
+            }
+            crisisStageRef.current.set(ch.id, stage);
+          }
+        }
+        for (const id of crisisStageRef.current.keys()) {
+          if (!seenIds.has(id)) crisisStageRef.current.delete(id);
+        }
+
+        // Ding on observed resolution — one per extinguish effect, matching
+        // the floating "✓ RESOLVED" tag 1:1 (ToolOverlay renders one per entry).
+        for (const effect of officeState.crisisEffects) {
+          if (announcedExtinguishRef.current.has(effect)) continue;
+          announcedExtinguishRef.current.add(effect);
+          ambience.playResolvedDing(now);
+        }
       },
       render: (ctx) => {
         // Canvas dimensions are in device pixels
@@ -253,6 +288,11 @@ export function OfficeCanvas({
           characters: officeState.characters,
         };
 
+        // Night-shift ambience duck mirrors the same emptiness check the
+        // dimmed-canvas + "NIGHT SHIFT" label already use.
+        const isNightMode = officeState.characters.size === 0;
+        ambience.setNightMode(isNightMode);
+
         const { offsetX, offsetY } = renderFrame(
           ctx,
           w,
@@ -273,7 +313,7 @@ export function OfficeCanvas({
             debris: officeState.debris.values(),
             effects: officeState.crisisEffects,
             now: Date.now(),
-            nightMode: officeState.characters.size === 0,
+            nightMode: isNightMode,
           },
         );
         offsetRef.current = { x: offsetX, y: offsetY };
@@ -501,6 +541,7 @@ export function OfficeCanvas({
   const handleMouseDown = useCallback(
     (e: React.MouseEvent) => {
       unlockAudio();
+      ambience.arm();
       // Middle mouse button (button 1) starts panning
       if (e.button === 1) {
         e.preventDefault();

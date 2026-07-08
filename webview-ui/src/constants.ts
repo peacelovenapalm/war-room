@@ -122,6 +122,54 @@ export const PERMISSION_NOTE_2_START_SEC = 0.12;
 export const PERMISSION_NOTE_DURATION_SEC = 0.15;
 export const PERMISSION_VOLUME = 0.12;
 
+// ── Ambience & Event SFX (v1 sound layer) ───────────────────
+// Procedural WebAudio only — no external assets, no network fetches.
+// Every sound reinforces a signal that is ALSO visible as shape+text
+// (colorblind hard rule extends to audio: never the only signal).
+export const AMBIENCE_STORAGE_KEY = 'war-room.ambience.enabled.v1';
+/** Default is ON per Greg's 2026-07-07 decision; toggle persists per-browser. */
+export const AMBIENCE_DEFAULT_ENABLED = true;
+
+/** Room-tone bed: filtered noise + a very low sine "hum". Always subtle. */
+export const AMBIENCE_NOISE_BUFFER_SEC = 2;
+export const AMBIENCE_NOISE_LOWPASS_HZ = 380;
+export const AMBIENCE_NOISE_VOLUME = 0.02;
+export const AMBIENCE_HUM_HZ = 68;
+export const AMBIENCE_HUM_VOLUME = 0.015;
+/** Night-shift duck: office is empty, ambience drops to near-silent. */
+export const AMBIENCE_DUCK_FACTOR = 0.22;
+export const AMBIENCE_GAIN_RAMP_SEC = 1.4;
+
+/** Event SFX rate limits (ms) — a burst of events must not machine-gun. */
+export const SFX_MIN_INTERVAL_MS = {
+  chirp: 4_000,
+  ding: 900,
+  chime: 2_500,
+  blip: 1_200,
+} as const;
+
+// Alarm chirp: desk escalates to FIRE/ALARM — short sharp double-beep.
+export const CHIRP_HZ = 1_320;
+export const CHIRP_NOTE_DURATION_SEC = 0.09;
+export const CHIRP_GAP_SEC = 0.11;
+export const CHIRP_VOLUME = 0.16;
+
+// Resolved ding: a single crisis clears — bright single note.
+export const DING_HZ = 1_568; // G6
+export const DING_DURATION_SEC = 0.16;
+export const DING_VOLUME = 0.13;
+
+// All-clear chime: last crisis clears — warmer ascending triad.
+export const CHIME_HZ = [523.25, 659.25, 783.99]; // C5, E5, G5
+export const CHIME_NOTE_GAP_SEC = 0.09;
+export const CHIME_DURATION_SEC = 0.32;
+export const CHIME_VOLUME = 0.11;
+
+// Session arrival blip: soft, low-key.
+export const BLIP_HZ = 494; // B4
+export const BLIP_DURATION_SEC = 0.07;
+export const BLIP_VOLUME = 0.08;
+
 // ── Furniture Animation ─────────────────────────────────────
 export const FURNITURE_ANIM_INTERVAL_SEC = 0.2;
 

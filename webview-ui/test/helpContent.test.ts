@@ -20,9 +20,11 @@ const REQUIRED_SECTION_IDS = [
   'briefing',
   'shift-report',
   'machines',
+  'progression',
   'coworkers',
   'emergence',
   'data-sources',
+  'sound',
 ];
 
 describe('help content completeness', () => {

@@ -22,6 +22,7 @@ import * as path from 'path';
 
 import { normalizeProjectPath } from '../../core/src/normalizeProjectPath.js';
 import type { AgentStateStore } from './agentStateStore.js';
+import type { ProgressionStore } from './progressionStore.js';
 import type { ShiftStats } from './shiftStats.js';
 import type { AgentState, PollStateValue } from './types.js';
 import { POLL_STATE_VALUES } from './types.js';
@@ -29,6 +30,13 @@ import { POLL_STATE_VALUES } from './types.js';
 /** The slice of ShiftStats the poll layer feeds (blocked episodes). Callers
  *  that don't track stats (unit tests) pass nothing. */
 export type BlockedEpisodeSink = Pick<ShiftStats, 'startBlocked' | 'endBlocked'>;
+
+/** The slice of ProgressionStore the poll layer feeds (v1 mechanic #3).
+ *  Fed ONLY on an observed state transition away from blocked — never on
+ *  the ambiguous "poller stopped reporting" clear, and never on the TTL
+ *  sweep (which explicitly marks its clears `stale`). Hard guardrail: stale
+ *  clears never award XP — the session may still be stuck. */
+export type CrisisXpSink = Pick<ProgressionStore, 'recordCrisisResolved'>;
 
 /** Poll states older than this are swept (poller assumed dead). */
 export const POLL_STATE_TTL_MS = 60_000;
@@ -128,6 +136,7 @@ export function applyPollStates(
   entries: PollEntry[],
   now: number = Date.now(),
   stats?: BlockedEpisodeSink,
+  progressionSink?: CrisisXpSink,
 ): { matched: number; cleared: number } {
   const machineAgents: Array<[number, AgentState]> = [];
   for (const [id, agent] of store) {
@@ -152,6 +161,10 @@ export function applyPollStates(
       stats?.startBlocked(`agent:${agentId}`, now, now);
     } else if (prev?.state === 'blocked' && entry.state !== 'blocked') {
       stats?.endBlocked(`agent:${agentId}`, now);
+      // An OBSERVED resolution (the poller explicitly reported a new,
+      // non-blocked state) — never fires for the silent "no longer
+      // reported" clear below or the TTL sweep (see CrisisXpSink doc).
+      progressionSink?.recordCrisisResolved(now);
     }
     // `since` survives refresh ticks while the STATE VALUE is unchanged — it is
     // the transition time that anchors crisis aging (smoke → fire → alarm).

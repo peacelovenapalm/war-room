@@ -1,5 +1,6 @@
 import { useEffect, useRef, useState } from 'react';
 
+import { ambience } from '../ambience.js';
 import { buildTriageRows, type TriageRow } from '../office/crisis.js';
 import { formatAge } from '../office/crisis.js';
 import type { OfficeState } from '../office/engine/officeState.js';
@@ -58,6 +59,7 @@ export function TriagePanel({ officeState }: TriagePanelProps) {
   // The calm moment: the board flashes ✓ ALL CLEAR when the last row resolves.
   if (prevCountRef.current > 0 && rows.length === 0) {
     allClearUntilRef.current = now + ALL_CLEAR_MS;
+    ambience.playAllClearChime(now);
   }
   prevCountRef.current = rows.length;
 

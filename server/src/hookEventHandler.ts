@@ -3,6 +3,7 @@ import * as path from 'path';
 import type { AgentEvent, HookProvider } from '../../core/src/provider.js';
 import type { AgentStateStore } from './agentStateStore.js';
 import { SESSION_END_GRACE_MS } from './constants.js';
+import { progression } from './progressionStore.js';
 import type { SessionRouter } from './sessionRouter.js';
 import { shiftStats } from './shiftStats.js';
 import { getInlineTeammates, hasInlineTeammates } from './teamUtils.js';
@@ -669,12 +670,14 @@ export class HookEventHandler {
 
   /** Handle Stop: Claude finished responding, mark agent as waiting. */
   private handleStop(agent: AgentState, agentId: number, awaitingInput = false): void {
-    // Shift report (v1 mechanic #2): a finished turn (Stop) counts as a
-    // completion; going idle waiting on the user does not. Coworker
-    // heartbeats (Codex/Gemini synthesize Stop but contribute no JSONL
-    // tokens) are excluded so they can't deflate the efficiency score.
+    // Shift report (v1 mechanic #2) + progression (v1 mechanic #3): a
+    // finished turn (Stop) counts as a completion; going idle waiting on the
+    // user does not. Coworker heartbeats (Codex/Gemini synthesize Stop but
+    // contribute no JSONL tokens) are excluded so they can't deflate the
+    // efficiency score or farm XP/streak from heartbeat noise.
     if (!awaitingInput && (!agent.providerId || agent.providerId === 'claude')) {
       shiftStats.recordTurnEnd();
+      progression.recordTurnEnd();
     }
     this.markAgentWaiting(agent, agentId, awaitingInput);
   }

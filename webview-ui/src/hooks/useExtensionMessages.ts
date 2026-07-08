@@ -1,5 +1,6 @@
 import { useEffect, useRef, useState } from 'react';
 
+import { ambience } from '../ambience.js';
 import { playDoneSound, playPermissionSound, setSoundEnabled } from '../notificationSound.js';
 import type { OfficeState } from '../office/engine/officeState.js';
 import { setFloorSprites } from '../office/floorTiles.js';
@@ -52,6 +53,19 @@ export interface WorkspaceFolder {
   path: string;
 }
 
+/** Progression snapshot (v1 mechanic #3) — mirrors core/src/messages.ts'
+ *  ProgressionUpdate without importing the server-facing generated types
+ *  (same convention ShiftPanel.tsx uses for ShiftReport). */
+export interface ProgressionSnapshot {
+  xp: number;
+  level: number;
+  xpIntoLevel: number;
+  xpForNextLevel: number;
+  streakCurrent: number;
+  streakLongest: number;
+  unlocks: Record<string, boolean>;
+}
+
 interface ExtensionMessageState {
   agents: number[];
   selectedAgent: number | null;
@@ -72,6 +86,7 @@ interface ExtensionMessageState {
   hooksEnabled: boolean;
   setHooksEnabled: (v: boolean) => void;
   hooksInfoShown: boolean;
+  progression: ProgressionSnapshot | null;
 }
 
 function saveAgentSeats(os: OfficeState): void {
@@ -109,6 +124,7 @@ export function useExtensionMessages(
   const [alwaysShowLabels, setAlwaysShowLabels] = useState(false);
   const [hooksEnabled, setHooksEnabled] = useState(true);
   const [hooksInfoShown, setHooksInfoShown] = useState(true);
+  const [progression, setProgression] = useState<ProgressionSnapshot | null>(null);
 
   // Track whether initial layout has been loaded (ref to avoid re-render)
   const layoutReadyRef = useRef(false);
@@ -204,6 +220,9 @@ export function useExtensionMessages(
         const teammateParentId = msg.parentAgentId as number | undefined;
         const teamName = msg.teamName as string | undefined;
         setAgents((prev) => (prev.includes(id) ? prev : [...prev, id]));
+        // Soft blip on a genuinely new session/coworker arrival (not the
+        // bulk existingAgents/layoutLoaded restore of already-open sessions).
+        ambience.playArrivalBlip();
         // Don't auto-select teammates (keep focus on lead)
         if (!isTeammate) {
           setSelectedAgent(id);
@@ -626,6 +645,16 @@ export function useExtensionMessages(
       } else if (msg.type === 'agentTokenUsage') {
         const id = msg.id as number;
         os.setAgentTokens(id, msg.inputTokens as number, msg.outputTokens as number);
+      } else if (msg.type === 'progressionUpdate') {
+        setProgression({
+          xp: msg.xp as number,
+          level: msg.level as number,
+          xpIntoLevel: msg.xpIntoLevel as number,
+          xpForNextLevel: msg.xpForNextLevel as number,
+          streakCurrent: msg.streakCurrent as number,
+          streakLongest: msg.streakLongest as number,
+          unlocks: (msg.unlocks as Record<string, boolean>) ?? {},
+        });
       }
     };
     const unsubscribe = transport.onMessage(handler);
@@ -654,5 +683,6 @@ export function useExtensionMessages(
     hooksEnabled,
     setHooksEnabled,
     hooksInfoShown,
+    progression,
   };
 }

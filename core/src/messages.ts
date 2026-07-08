@@ -26,6 +26,7 @@ export type ServerMessage =
   | SubagentToolPermission
   | AgentTeamInfo
   | AgentTokenUsage
+  | ProgressionUpdate
   | LayoutLoaded
   | FurnitureAssetsLoaded
   | CharacterSpritesLoaded
@@ -191,6 +192,17 @@ export interface AgentTokenUsage {
   id: number;
   inputTokens: number;
   outputTokens: number;
+}
+
+export interface ProgressionUpdate {
+  type: 'progressionUpdate';
+  xp: number;
+  level: number;
+  xpIntoLevel: number;
+  xpForNextLevel: number;
+  streakCurrent: number;
+  streakLongest: number;
+  unlocks: Record<string, boolean>;
 }
 
 export interface LayoutLoaded {

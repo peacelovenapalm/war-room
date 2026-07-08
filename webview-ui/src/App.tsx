@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
 
+import { ambience } from './ambience.js';
 import { toMajorMinor } from './changelogData.js';
 import { BottomToolbar } from './components/BottomToolbar.js';
 import { BriefingPanel } from './components/BriefingPanel.js';
@@ -8,6 +9,7 @@ import { DebugView } from './components/DebugView.js';
 import { EditActionBar } from './components/EditActionBar.js';
 import { HelpModal } from './components/HelpModal.js';
 import { MigrationNotice } from './components/MigrationNotice.js';
+import { ProgressionHUD } from './components/ProgressionHUD.js';
 import { SettingsModal } from './components/SettingsModal.js';
 import { ShiftPanel } from './components/ShiftPanel.js';
 import { Tooltip } from './components/Tooltip.js';
@@ -85,6 +87,7 @@ function App() {
     hooksEnabled,
     setHooksEnabled,
     hooksInfoShown,
+    progression,
   } = useExtensionMessages(getOfficeState, editor.setLastSavedLayout, isEditDirty);
 
   // Show migration notice once layout reset is detected
@@ -116,6 +119,24 @@ function App() {
     };
     window.addEventListener('keydown', onKeyDown);
     return () => window.removeEventListener('keydown', onKeyDown);
+  }, []);
+
+  // Sound layer (v1): arm the AudioContext on the first gesture ANYWHERE on
+  // the page (autoplay policy). Skips the SOUND toggle itself — it manages
+  // its own arm+enable sequencing so the very first click both starts audio
+  // AND doesn't immediately flip it back off.
+  useEffect(() => {
+    const armOnGesture = (e: Event) => {
+      const target = e.target as HTMLElement | null;
+      if (target?.closest('[data-sound-toggle]')) return;
+      ambience.arm();
+    };
+    window.addEventListener('pointerdown', armOnGesture);
+    window.addEventListener('keydown', armOnGesture);
+    return () => {
+      window.removeEventListener('pointerdown', armOnGesture);
+      window.removeEventListener('keydown', armOnGesture);
+    };
   }, []);
 
   const currentMajorMinor = toMajorMinor(extensionVersion);
@@ -289,6 +310,9 @@ function App() {
 
           {/* TRIAGE incident board (v1): auto-appears when a crisis exists */}
           <TriagePanel officeState={officeState} />
+
+          {/* PROGRESSION HUD (v1 mechanic #3): level + streak + XP bar, always visible */}
+          <ProgressionHUD progression={progression} />
 
           {/* Night shift (v1 #4): empty office → dimmed canvas + TEXT label */}
           {agents.length === 0 && subagentCharacters.length === 0 && (
