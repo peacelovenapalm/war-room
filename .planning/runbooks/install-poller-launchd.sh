@@ -49,7 +49,15 @@ case "${MACHINE}" in
 esac
 [ -f "${POLLER}" ] || fail "poller not found at ${POLLER}"
 command -v claude >/dev/null || warn "claude CLI not on PATH for this shell — poller logs ⚠ and keeps retrying until it is"
+# Resolve node to a STABLE path. `command -v node` under fnm returns an
+# ephemeral ~/.local/state/fnm_multishells/<pid>/bin path that dies with this
+# shell — baking it into the plist gives launchd a dead binary on next boot.
 NODE_BIN="$(command -v node)" || fail "node not found on PATH"
+NODE_BIN="$(realpath "${NODE_BIN}")"
+case "${NODE_BIN}" in
+  *fnm_multishells*) fail "node still resolves to an ephemeral fnm multishell path (${NODE_BIN}) — install a stable node (brew install node) or fix fnm" ;;
+esac
+[ -x "${NODE_BIN}" ] || fail "resolved node is not executable: ${NODE_BIN}"
 [ -f "${ENV_FILE}" ] && grep -q 'WAR_ROOM_TOKEN=' "${ENV_FILE}" \
   || fail "no token in ${ENV_FILE} — run macbook-hooks-install.sh first (it stores the token)"
 # Extract the token value for the plist env block (launchd does not source shell files).
@@ -97,7 +105,7 @@ cat > "${PLIST}" <<PLIST_EOF
     <key>WAR_ROOM_URL</key><string>${SERVER_URL}</string>
     <key>WAR_ROOM_TOKEN</key><string>${TOKEN}</string>
     <key>WAR_ROOM_MACHINE</key><string>${MACHINE}</string>
-    <key>PATH</key><string>$(dirname "${NODE_BIN}"):/usr/local/bin:/opt/homebrew/bin:/usr/bin:/bin</string>
+    <key>PATH</key><string>$(dirname "${NODE_BIN}"):${HOME}/.local/bin:/usr/local/bin:/opt/homebrew/bin:/usr/bin:/bin</string>
   </dict>
   <key>RunAtLoad</key><true/>
   <key>KeepAlive</key><true/>
