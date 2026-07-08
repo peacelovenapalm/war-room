@@ -894,3 +894,104 @@ hard rule). Pixel-perfect parity with the old canvas renderer was not
 attempted (GAME-DESIGN §8.1 rev 2: "better is welcome").
 
 Proceed to G1 (Employees).
+
+### 2026-07-08 (later) — G1 employees ✓ DONE (colony-sim layer, mood-only)
+
+Wave A (server, tasks 1-8, commits `9901065`..`99dfd28`) then Wave B
+(webview, tasks 9-12, commits `bf67d60`..`fa7aa88`), one agent, one
+checkout, sequential — no collisions. Implements GAME-DESIGN.md §4 rev 2
+exactly (mood-only, the three needs meters CUT per interrogation delta).
+
+**Server:** `core/src/leveling.ts` extracted from `progressionStore.ts`
+as pure `{base,step}`-parameterizable functions (progressionStore.ts
+keeps its single-arg public API — 15/15 tests green, zero edits).
+`server/src/employeeStore.ts` — identity via `core/src/employeeId.ts`
+(machine:project, provider is an attribute, §9.4); fire blacklists the
+routing key and the next telemetry allocates a fresh `#n` record, a
+natural quit never blacklists and auto-rehires under the same id on the
+next real event (§9.5); derived traits/badges gated at MIN_SAMPLES=5;
+employee-local XP on the flatter `{base:60,step:30}` curve; deterministic
+mulberry32 quit roll (XP halved, never reset to 1). New shared core
+primitives beyond the literal task list: `core/src/deterministicRandom.ts`
+(FNV-1a hash + mulberry32 — never `Math.random()` for anything that must
+replay identically) and `core/src/quips.ts` (template one-liners, no LLM).
+Wired into the exact two real event call sites `progression`/`shiftStats`
+already use: `hookEventHandler.ts`'s `handleStop` (turn completion) and
+`pollStateHandler.ts`'s `applyPollStates` (observed crisis resolution,
+never a stale sweep). 10 HTTP routes (`server/src/httpServer.ts`),
+unauthenticated (same trust level as `/api/briefing`/dispatch-machines —
+local-webview player-action plane), `{ok:false,reason}` at 200 never
+4xx. `employeeSnapshot` WS broadcast + full-roster replay on connect.
+
+**Webview:** `office/personaBadges.ts` (glyph+TEXT chips, mirrors
+`agentState.ts`'s `STATE_CHIPS` shape — that convention lives there, not
+`crisis.ts`, correcting an earlier draft's misattribution).
+`office/mood.ts` — pure functions; `CharacterState.BURNED_OUT` added to
+the existing enum (not a parallel state machine) renders a droop pose by
+reusing an existing walk-cycle frame and applies a 0.6x walk-speed
+multiplier (not numerically specified by GAME-DESIGN — a documented
+judgment call); wired into `characters.ts`'s three idle-transition sites
+and the movement/sprite-getter code. `officeState.ts`'s `addAgent` stamps
+a stable `employeeId` FK computed via the same shared function the server
+uses; `useExtensionMessages.ts` subscribes to `employeeSnapshot` and sets
+`moodBand` on any character whose FK matches — live, reactive, not inert
+plumbing. `components/EmployeeRoster.tsx` — ROSTER/HALL OF FAME tabs,
+clones `AgentDrawer.tsx`'s row conventions, verbs POST to the routes and
+wait for the next broadcast (server-authoritative, no optimistic local
+mutation). Wired into `BottomToolbar.tsx`/`App.tsx` (new "Employees"
+toggle). `asyncapi.yaml` gained `sampleCount` on `EmployeeSnapshot` (the
+ROOKIE-badge gate the client needs; the raw rolling-turns ring buffer
+stays server-only).
+
+**Deviation (acceptance criterion, documented explicitly per the
+kickoff's instructions):** the literal ask — "actually running a Claude
+Code turn against the dev server and re-querying, not a fixture-only
+test" — was attempted for real. Built an isolated-HOME standalone server,
+verified hook auto-install touched ONLY the scratch home (real
+`~/.claude/settings.json` count unchanged, no scratch paths/ports leaked
+in), then ran `claude -p`. It failed: `--dangerously-skip-permissions`
+was denied by the permission classifier ("no explicit user instruction
+authorizes this exact unsandboxed invocation"), and without that flag the
+fresh isolated HOME had no auth ("Not logged in"). Rather than work
+around the classifier's denial, substituted the repo's own established
+stand-in: realistic hook payloads (`SessionStart`+`Stop`) posted directly
+to `/api/hooks/claude` over the authed `X-Machine` path — the exact
+pattern M2's acceptance evidence used and documented as accepted. Also
+discovered along the way: `PixelAgentsServer` alone (as
+`server.test.ts`/`dispatchRoutes.test.ts` use it) is a bare HTTP harness
+with no `AgentRuntime` attached — `employeeRoutes.test.ts` wires the full
+pipeline itself, cloning `cli.ts`'s own bootstrap, since it's the only
+way to drive a genuine adoption+Stop sequence through the real code path.
+
+**Verification:** server 355/355 (was 329, +26 — `employeeStore.test.ts`
+21, `employeeRoutes.test.ts` 5), webview 199/199 (was 184, +15 —
+`mood.test.ts` 10, `personaBadges.test.ts` 5), bin/poller 63/63
+unchanged. Root `check-types`, webview's own `tsc -b`, full `npm run
+lint`, root `npm test`, and `npm run build` all clean. Break-never-
+blocks-dispatch verified explicitly at both the store level
+(`employeeStore.test.ts`) and the HTTP/real-ingest level
+(`employeeRoutes.test.ts` — a 4th real turn succeeds while `on_break`).
+Fire-vs-quit identity verified explicitly (blacklist+`#n` vs
+auto-rehire-under-same-id), both unit and HTTP level. `token` grep sweep
+clean — every hit is `tokenEfficiency` (rewards LOWER spend, same
+polarity as `shiftStats`) or its plumbing; XP/moodBoost awards are all
+fixed constants, never token-scaled.
+
+Screenshots: `.planning/evidence/g1-employee-roster.png` + `-grayscale.png`
+(two real employees driven through the actual hook ingest — one crosses
+MIN_SAMPLES into real FAST/METICULOUS/EFFICIENT badges + active status,
+one stays ROOKIE/candidate; badges, mood glyph+number, rank/level/status
+all read by shape+text alone in grayscale).
+
+**Scoping decisions (forward-compatible, not implemented yet):** G2+
+dependencies (Cash/Reputation, vacation-mode flag) don't exist — verb
+gates run against real non-economic thresholds now; Reputation awards
+and vacation-awareness are injected callbacks, no-ops until G2 wires
+them. `employeeHired`/`employeeQuit` WS message types are defined
+(asyncapi.yaml) but not yet emitted — `employeeSnapshot` alone covers
+the roster UI's needs; the dedicated events are natural G4 Bark-digest
+wiring. No G1 help-modal section added (not CI-enforced for this new
+surface — `helpContent.test.ts` only gates a fixed, explicit list).
+
+No deploy at G1 (batches into G2's deploy gate). Proceed to G2
+(Economy + Building).
