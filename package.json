@@ -8,7 +8,10 @@
     "type": "git",
     "url": "https://github.com/pixel-agents-hq/pixel-agents"
   },
-  "workspaces": ["server", "webview-ui"],
+  "workspaces": [
+    "server",
+    "webview-ui"
+  ],
   "icon": "icon.png",
   "license": "MIT",
   "engines": {
@@ -84,7 +87,8 @@
     "webview-ui/src/**/*.{ts,tsx}": "eslint --fix",
     "scripts/**/*.{js,mjs}": "prettier --write",
     "*.{ts,tsx,js,mjs,css,json,md}": "prettier --write",
-    "webview-ui/**/*.{ts,tsx,js,css,json}": "prettier --write"
+    "webview-ui/**/*.{ts,tsx,js,css,json}": "prettier --write",
+    "core/**/*.{yaml,yml}": "prettier --write"
   },
   "dependencies": {
     "@fastify/cors": "^11.2.0",

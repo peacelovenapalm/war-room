@@ -492,16 +492,7 @@ components:
       type: object
       additionalProperties: false
       required:
-        [
-          type,
-          xp,
-          level,
-          xpIntoLevel,
-          xpForNextLevel,
-          streakCurrent,
-          streakLongest,
-          unlocks,
-        ]
+        [type, xp, level, xpIntoLevel, xpForNextLevel, streakCurrent, streakLongest, unlocks]
       properties:
         type:
           const: progressionUpdate
