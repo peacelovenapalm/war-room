@@ -1,3 +1,5 @@
+import type { Application } from 'pixi.js';
+import { Rectangle } from 'pixi.js';
 import { useCallback, useEffect, useRef } from 'react';
 
 import { ambience } from '../../ambience.js';
@@ -5,6 +7,7 @@ import {
   CAMERA_FOLLOW_LERP,
   CAMERA_FOLLOW_SNAP_THRESHOLD,
   PAN_MARGIN_FRACTION,
+  WAR_ROOM_ENGINE,
   ZOOM_MAX,
   ZOOM_MIN,
   ZOOM_SCROLL_THRESHOLD,
@@ -16,13 +19,26 @@ import { canPlaceFurniture, getWallPlacementRow } from '../editor/editorActions.
 import type { EditorState } from '../editor/editorState.js';
 import { startGameLoop } from '../engine/gameLoop.js';
 import type { OfficeState } from '../engine/officeState.js';
+import { startPixiApp } from '../engine/pixiApp.js';
+import type {
+  PixiEditorState,
+  PixiLayers,
+  PixiSelectionState,
+  PixiSpritePools,
+} from '../engine/pixiRenderer.js';
+import {
+  createPixiLayers,
+  createSpritePools,
+  getSpriteTexture,
+  renderFrame as renderPixiFrame,
+} from '../engine/pixiRenderer.js';
 import type {
   DeleteButtonBounds,
   EditorRenderState,
   RotateButtonBounds,
   SelectionRenderState,
 } from '../engine/renderer.js';
-import { renderFrame } from '../engine/renderer.js';
+import { renderFrame as renderCanvasFrame } from '../engine/renderer.js';
 import { getCatalogEntry, isRotatable } from '../layout/furnitureCatalog.js';
 import { EditTool, TILE_SIZE } from '../types.js';
 import { computeNormalModeCursor } from './officeCanvasCursor.js';
@@ -43,6 +59,16 @@ interface OfficeCanvasProps {
   onZoomChange: (zoom: number) => void;
   panRef: React.MutableRefObject<{ x: number; y: number }>;
 }
+
+/** Touch pointers currently down on the canvas, keyed by Pixi pointerId —
+ *  drives the two-finger pan/pinch-zoom gesture recognizer (task 9). */
+interface TrackedPointer {
+  x: number;
+  y: number;
+}
+
+const LONG_PRESS_MS = 500;
+const LONG_PRESS_MOVE_TOLERANCE_PX = 8;
 
 export function OfficeCanvas({
   officeState,
@@ -78,6 +104,21 @@ export function OfficeCanvas({
   // both mirror the exact visible signal 1:1, never carry extra information.
   const crisisStageRef = useRef<Map<number, string>>(new Map());
   const announcedExtinguishRef = useRef<WeakSet<object>>(new WeakSet());
+  // Pixi engine scene (null until Application.init() resolves — G0)
+  const pixiSceneRef = useRef<{
+    app: Application;
+    layers: PixiLayers;
+    pools: PixiSpritePools;
+  } | null>(null);
+  // Touch gesture state (task 9 — two-finger pan/pinch-zoom, long-press)
+  const touchPointersRef = useRef<Map<number, TrackedPointer>>(new Map());
+  const twoFingerGestureRef = useRef<{ midX: number; midY: number; dist: number } | null>(null);
+  const longPressRef = useRef<{
+    timer: ReturnType<typeof setTimeout>;
+    startX: number;
+    startY: number;
+    pointerId: number;
+  } | null>(null);
 
   // Clamp pan so the map edge can't go past a margin inside the viewport
   const clampPan = useCallback(
@@ -111,7 +152,181 @@ export function OfficeCanvas({
     canvas.style.width = `${rect.width}px`;
     canvas.style.height = `${rect.height}px`;
     // No ctx.scale(dpr) — we render directly in device pixels
+    const scene = pixiSceneRef.current;
+    if (scene) {
+      scene.app.stage.hitArea = new Rectangle(0, 0, canvas.width, canvas.height);
+    }
   }, []);
+
+  // Shared per-frame sim step: office FSM tick + sound-layer bookkeeping.
+  // Identical for both engines — only how the VISUAL frame gets drawn
+  // afterward differs (canvas ctx draw calls vs Pixi scene-graph mutation).
+  const stepSimulation = useCallback(
+    (dt: number) => {
+      officeState.update(dt);
+
+      const now = Date.now();
+      const seenIds = new Set<number>();
+      for (const ch of officeState.characters.values()) {
+        if (!ch.crisis || ch.matrixEffect === 'despawn') continue;
+        seenIds.add(ch.id);
+        const stage = stageForAge(now - ch.crisis.since);
+        const prevStage = crisisStageRef.current.get(ch.id);
+        if (stage !== prevStage) {
+          if (stage === 'fire' || stage === 'alarm') {
+            ambience.playAlarmChirp(now);
+          }
+          crisisStageRef.current.set(ch.id, stage);
+        }
+      }
+      for (const id of crisisStageRef.current.keys()) {
+        if (!seenIds.has(id)) crisisStageRef.current.delete(id);
+      }
+
+      for (const effect of officeState.crisisEffects) {
+        if (announcedExtinguishRef.current.has(effect)) continue;
+        announcedExtinguishRef.current.add(effect);
+        ambience.playResolvedDing(now);
+      }
+    },
+    [officeState],
+  );
+
+  // Camera follow + night-mode ambience duck — identical for both engines.
+  const applyCameraFollowAndAmbience = useCallback(() => {
+    if (officeState.cameraFollowId !== null) {
+      const followCh = officeState.characters.get(officeState.cameraFollowId);
+      if (followCh) {
+        const layout = officeState.getLayout();
+        const mapW = layout.cols * TILE_SIZE * zoom;
+        const mapH = layout.rows * TILE_SIZE * zoom;
+        const targetX = mapW / 2 - followCh.x * zoom;
+        const targetY = mapH / 2 - followCh.y * zoom;
+        const dx = targetX - panRef.current.x;
+        const dy = targetY - panRef.current.y;
+        if (
+          Math.abs(dx) < CAMERA_FOLLOW_SNAP_THRESHOLD &&
+          Math.abs(dy) < CAMERA_FOLLOW_SNAP_THRESHOLD
+        ) {
+          panRef.current = { x: targetX, y: targetY };
+        } else {
+          panRef.current = {
+            x: panRef.current.x + dx * CAMERA_FOLLOW_LERP,
+            y: panRef.current.y + dy * CAMERA_FOLLOW_LERP,
+          };
+        }
+      }
+    }
+    const isNightMode = officeState.characters.size === 0;
+    ambience.setNightMode(isNightMode);
+    return isNightMode;
+  }, [officeState, zoom, panRef]);
+
+  // Build the shared editor-overlay render state (field-identical between
+  // the canvas EditorRenderState and PixiEditorState shapes).
+  const buildEditorRenderState = useCallback(():
+    | EditorRenderState
+    | PixiEditorState
+    | undefined => {
+    if (!isEditMode) return undefined;
+    const showGhostBorder =
+      editorState.activeTool === EditTool.TILE_PAINT ||
+      editorState.activeTool === EditTool.WALL_PAINT ||
+      editorState.activeTool === EditTool.ERASE;
+    const editorRender: EditorRenderState = {
+      showGrid: true,
+      ghostSprite: null,
+      ghostMirrored: false,
+      ghostCol: editorState.ghostCol,
+      ghostRow: editorState.ghostRow,
+      ghostValid: editorState.ghostValid,
+      selectedCol: 0,
+      selectedRow: 0,
+      selectedW: 0,
+      selectedH: 0,
+      hasSelection: false,
+      isRotatable: false,
+      deleteButtonBounds: null,
+      rotateButtonBounds: null,
+      showGhostBorder,
+      ghostBorderHoverCol: showGhostBorder ? editorState.ghostCol : -999,
+      ghostBorderHoverRow: showGhostBorder ? editorState.ghostRow : -999,
+    };
+
+    if (editorState.activeTool === EditTool.FURNITURE_PLACE && editorState.ghostCol >= 0) {
+      const entry = getCatalogEntry(editorState.selectedFurnitureType);
+      if (entry) {
+        const placementRow = getWallPlacementRow(
+          editorState.selectedFurnitureType,
+          editorState.ghostRow,
+        );
+        editorRender.ghostSprite = entry.sprite;
+        editorRender.ghostRow = placementRow;
+        editorRender.ghostMirrored =
+          !!entry.mirrorSide && editorState.selectedFurnitureType.endsWith(':left');
+        editorRender.ghostValid = canPlaceFurniture(
+          officeState.getLayout(),
+          editorState.selectedFurnitureType,
+          editorState.ghostCol,
+          placementRow,
+        );
+      }
+    }
+
+    if (editorState.isDragMoving && editorState.dragUid && editorState.ghostCol >= 0) {
+      const draggedItem = officeState
+        .getLayout()
+        .furniture.find((f) => f.uid === editorState.dragUid);
+      if (draggedItem) {
+        const entry = getCatalogEntry(draggedItem.type);
+        if (entry) {
+          const ghostCol = editorState.ghostCol - editorState.dragOffsetCol;
+          const ghostRow = editorState.ghostRow - editorState.dragOffsetRow;
+          editorRender.ghostSprite = entry.sprite;
+          editorRender.ghostCol = ghostCol;
+          editorRender.ghostRow = ghostRow;
+          editorRender.ghostMirrored = !!entry.mirrorSide && draggedItem.type.endsWith(':left');
+          editorRender.ghostValid = canPlaceFurniture(
+            officeState.getLayout(),
+            draggedItem.type,
+            ghostCol,
+            ghostRow,
+            editorState.dragUid,
+          );
+        }
+      }
+    }
+
+    if (editorState.selectedFurnitureUid && !editorState.isDragMoving) {
+      const item = officeState
+        .getLayout()
+        .furniture.find((f) => f.uid === editorState.selectedFurnitureUid);
+      if (item) {
+        const entry = getCatalogEntry(item.type);
+        if (entry) {
+          editorRender.hasSelection = true;
+          editorRender.selectedCol = item.col;
+          editorRender.selectedRow = item.row;
+          editorRender.selectedW = entry.footprintW;
+          editorRender.selectedH = entry.footprintH;
+          editorRender.isRotatable = isRotatable(item.type);
+        }
+      }
+    }
+
+    return editorRender;
+  }, [isEditMode, editorState, officeState]);
+
+  const buildSelectionRenderState = useCallback(
+    (): SelectionRenderState | PixiSelectionState => ({
+      selectedAgentId: officeState.selectedAgentId,
+      hoveredAgentId: officeState.hoveredAgentId,
+      hoveredTile: officeState.hoveredTile,
+      seats: officeState.seats,
+      characters: officeState.characters,
+    }),
+    [officeState],
+  );
 
   useEffect(() => {
     const canvas = canvasRef.current;
@@ -124,185 +339,76 @@ export function OfficeCanvas({
       observer.observe(containerRef.current);
     }
 
-    const stop = startGameLoop(canvas, {
+    if (WAR_ROOM_ENGINE === 'canvas2d') {
+      const stop = startGameLoop(canvas, {
+        update: stepSimulation,
+        render: (ctx) => {
+          const w = canvas.width;
+          const h = canvas.height;
+          const editorRender = buildEditorRenderState() as EditorRenderState | undefined;
+          applyCameraFollowAndAmbience();
+          const selectionRender = buildSelectionRenderState() as SelectionRenderState;
+          const isNightMode = officeState.characters.size === 0;
+
+          const { offsetX, offsetY } = renderCanvasFrame(
+            ctx,
+            w,
+            h,
+            officeState.tileMap,
+            officeState.furniture,
+            officeState.getCharacters(),
+            zoom,
+            panRef.current.x,
+            panRef.current.y,
+            selectionRender,
+            editorRender,
+            officeState.getLayout().tileColors,
+            officeState.getLayout().cols,
+            officeState.getLayout().rows,
+            officeState.pets,
+            {
+              debris: officeState.debris.values(),
+              effects: officeState.crisisEffects,
+              now: Date.now(),
+              nightMode: isNightMode,
+            },
+          );
+          offsetRef.current = { x: offsetX, y: offsetY };
+          deleteButtonBoundsRef.current = editorRender?.deleteButtonBounds ?? null;
+          rotateButtonBoundsRef.current = editorRender?.rotateButtonBounds ?? null;
+        },
+      });
+
+      return () => {
+        stop();
+        observer.disconnect();
+      };
+    }
+
+    // ── Pixi path ──────────────────────────────────────────────
+    const handle = startPixiApp(canvas, {
       update: (dt) => {
-        officeState.update(dt);
+        const scene = pixiSceneRef.current;
+        if (!scene) return; // ready.then() below hasn't landed yet — skip this tick
+        stepSimulation(dt);
 
-        // Sound layer (v1): alarm chirp on FIRE/ALARM escalation — same
-        // stage transition the fire silhouette already renders.
-        const now = Date.now();
-        const seenIds = new Set<number>();
-        for (const ch of officeState.characters.values()) {
-          if (!ch.crisis || ch.matrixEffect === 'despawn') continue;
-          seenIds.add(ch.id);
-          const stage = stageForAge(now - ch.crisis.since);
-          const prevStage = crisisStageRef.current.get(ch.id);
-          if (stage !== prevStage) {
-            if (stage === 'fire' || stage === 'alarm') {
-              ambience.playAlarmChirp(now);
-            }
-            crisisStageRef.current.set(ch.id, stage);
-          }
-        }
-        for (const id of crisisStageRef.current.keys()) {
-          if (!seenIds.has(id)) crisisStageRef.current.delete(id);
-        }
-
-        // Ding on observed resolution — one per extinguish effect, matching
-        // the floating "✓ RESOLVED" tag 1:1 (ToolOverlay renders one per entry).
-        for (const effect of officeState.crisisEffects) {
-          if (announcedExtinguishRef.current.has(effect)) continue;
-          announcedExtinguishRef.current.add(effect);
-          ambience.playResolvedDing(now);
-        }
-      },
-      render: (ctx) => {
-        // Canvas dimensions are in device pixels
-        const w = canvas.width;
-        const h = canvas.height;
-
-        // Build editor render state
-        let editorRender: EditorRenderState | undefined;
-        if (isEditMode) {
-          const showGhostBorder =
-            editorState.activeTool === EditTool.TILE_PAINT ||
-            editorState.activeTool === EditTool.WALL_PAINT ||
-            editorState.activeTool === EditTool.ERASE;
-          editorRender = {
-            showGrid: true,
-            ghostSprite: null,
-            ghostMirrored: false,
-            ghostCol: editorState.ghostCol,
-            ghostRow: editorState.ghostRow,
-            ghostValid: editorState.ghostValid,
-            selectedCol: 0,
-            selectedRow: 0,
-            selectedW: 0,
-            selectedH: 0,
-            hasSelection: false,
-            isRotatable: false,
-            deleteButtonBounds: null,
-            rotateButtonBounds: null,
-            showGhostBorder,
-            ghostBorderHoverCol: showGhostBorder ? editorState.ghostCol : -999,
-            ghostBorderHoverRow: showGhostBorder ? editorState.ghostRow : -999,
-          };
-
-          // Ghost preview for furniture placement
-          if (editorState.activeTool === EditTool.FURNITURE_PLACE && editorState.ghostCol >= 0) {
-            const entry = getCatalogEntry(editorState.selectedFurnitureType);
-            if (entry) {
-              const placementRow = getWallPlacementRow(
-                editorState.selectedFurnitureType,
-                editorState.ghostRow,
-              );
-              editorRender.ghostSprite = entry.sprite;
-              editorRender.ghostRow = placementRow;
-              editorRender.ghostMirrored =
-                !!entry.mirrorSide && editorState.selectedFurnitureType.endsWith(':left');
-              editorRender.ghostValid = canPlaceFurniture(
-                officeState.getLayout(),
-                editorState.selectedFurnitureType,
-                editorState.ghostCol,
-                placementRow,
-              );
-            }
-          }
-
-          // Ghost preview for drag-to-move
-          if (editorState.isDragMoving && editorState.dragUid && editorState.ghostCol >= 0) {
-            const draggedItem = officeState
-              .getLayout()
-              .furniture.find((f) => f.uid === editorState.dragUid);
-            if (draggedItem) {
-              const entry = getCatalogEntry(draggedItem.type);
-              if (entry) {
-                const ghostCol = editorState.ghostCol - editorState.dragOffsetCol;
-                const ghostRow = editorState.ghostRow - editorState.dragOffsetRow;
-                editorRender.ghostSprite = entry.sprite;
-                editorRender.ghostCol = ghostCol;
-                editorRender.ghostRow = ghostRow;
-                editorRender.ghostMirrored =
-                  !!entry.mirrorSide && draggedItem.type.endsWith(':left');
-                editorRender.ghostValid = canPlaceFurniture(
-                  officeState.getLayout(),
-                  draggedItem.type,
-                  ghostCol,
-                  ghostRow,
-                  editorState.dragUid,
-                );
-              }
-            }
-          }
-
-          // Selection highlight
-          if (editorState.selectedFurnitureUid && !editorState.isDragMoving) {
-            const item = officeState
-              .getLayout()
-              .furniture.find((f) => f.uid === editorState.selectedFurnitureUid);
-            if (item) {
-              const entry = getCatalogEntry(item.type);
-              if (entry) {
-                editorRender.hasSelection = true;
-                editorRender.selectedCol = item.col;
-                editorRender.selectedRow = item.row;
-                editorRender.selectedW = entry.footprintW;
-                editorRender.selectedH = entry.footprintH;
-                editorRender.isRotatable = isRotatable(item.type);
-              }
-            }
-          }
-        }
-
-        // Camera follow: smoothly center on followed agent
-        if (officeState.cameraFollowId !== null) {
-          const followCh = officeState.characters.get(officeState.cameraFollowId);
-          if (followCh) {
-            const layout = officeState.getLayout();
-            const mapW = layout.cols * TILE_SIZE * zoom;
-            const mapH = layout.rows * TILE_SIZE * zoom;
-            const targetX = mapW / 2 - followCh.x * zoom;
-            const targetY = mapH / 2 - followCh.y * zoom;
-            const dx = targetX - panRef.current.x;
-            const dy = targetY - panRef.current.y;
-            if (
-              Math.abs(dx) < CAMERA_FOLLOW_SNAP_THRESHOLD &&
-              Math.abs(dy) < CAMERA_FOLLOW_SNAP_THRESHOLD
-            ) {
-              panRef.current = { x: targetX, y: targetY };
-            } else {
-              panRef.current = {
-                x: panRef.current.x + dx * CAMERA_FOLLOW_LERP,
-                y: panRef.current.y + dy * CAMERA_FOLLOW_LERP,
-              };
-            }
-          }
-        }
-
-        // Build selection render state
-        const selectionRender: SelectionRenderState = {
-          selectedAgentId: officeState.selectedAgentId,
-          hoveredAgentId: officeState.hoveredAgentId,
-          hoveredTile: officeState.hoveredTile,
-          seats: officeState.seats,
-          characters: officeState.characters,
-        };
-
-        // Night-shift ambience duck mirrors the same emptiness check the
-        // dimmed-canvas + "NIGHT SHIFT" label already use.
+        const editorRender = buildEditorRenderState() as PixiEditorState | undefined;
+        applyCameraFollowAndAmbience();
+        const selectionRender = buildSelectionRenderState() as PixiSelectionState;
         const isNightMode = officeState.characters.size === 0;
-        ambience.setNightMode(isNightMode);
 
-        const { offsetX, offsetY } = renderFrame(
-          ctx,
-          w,
-          h,
+        const { offsetX, offsetY } = renderPixiFrame(
+          scene.layers,
+          scene.pools,
+          canvas.width,
+          canvas.height,
           officeState.tileMap,
           officeState.furniture,
           officeState.getCharacters(),
           zoom,
           panRef.current.x,
           panRef.current.y,
+          getSpriteTexture,
           selectionRender,
           editorRender,
           officeState.getLayout().tileColors,
@@ -317,18 +423,41 @@ export function OfficeCanvas({
           },
         );
         offsetRef.current = { x: offsetX, y: offsetY };
-
-        // Store delete/rotate button bounds for hit-testing
         deleteButtonBoundsRef.current = editorRender?.deleteButtonBounds ?? null;
         rotateButtonBoundsRef.current = editorRender?.rotateButtonBounds ?? null;
       },
     });
 
+    handle.ready
+      .then((app) => {
+        const layers = createPixiLayers(app.stage);
+        const pools = createSpritePools();
+        pixiSceneRef.current = { app, layers, pools };
+        app.stage.eventMode = 'static';
+        app.stage.hitArea = new Rectangle(0, 0, canvas.width, canvas.height);
+      })
+      .catch(() => {
+        // Disposed before init resolved (fast unmount) — nothing to build.
+      });
+
     return () => {
-      stop();
+      handle.dispose();
+      pixiSceneRef.current = null;
       observer.disconnect();
     };
-  }, [officeState, resizeCanvas, isEditMode, editorState, _editorTick, zoom, panRef]);
+  }, [
+    officeState,
+    resizeCanvas,
+    isEditMode,
+    editorState,
+    _editorTick,
+    zoom,
+    panRef,
+    stepSimulation,
+    buildEditorRenderState,
+    buildSelectionRenderState,
+    applyCameraFollowAndAmbience,
+  ]);
 
   // Convert CSS mouse coords to world (sprite pixel) coords
   const screenToWorld = useCallback(
@@ -828,7 +957,9 @@ export function OfficeCanvas({
     [isEditMode, officeState, screenToTile],
   );
 
-  // Wheel: Ctrl+wheel to zoom, plain wheel/trackpad to pan
+  // Wheel: Ctrl+wheel to zoom (covers desktop trackpad pinch — browsers
+  // synthesize ctrlKey+wheel for trackpad pinch gestures), plain wheel/
+  // trackpad two-finger scroll to pan.
   const handleWheel = useCallback(
     (e: WheelEvent) => {
       e.preventDefault();
@@ -865,13 +996,131 @@ export function OfficeCanvas({
     return () => canvas.removeEventListener('wheel', handleWheel);
   }, [handleWheel]);
 
+  // ── Touch gestures (task 9 — phone prep) ──────────────────────
+  // Native PointerEvent already unifies mouse+touch for single-pointer
+  // tap/drag (the handlers above fire for touch too via React's synthetic
+  // mouse events on most browsers' single-finger touch-to-mouse emulation);
+  // these three gestures have no desktop-mouse equivalent and need explicit
+  // multi-touch tracking: two-finger drag → pan, pinch → zoom, long-press
+  // (≥500ms) → the right-click erase action.
+  const clearLongPress = useCallback(() => {
+    if (longPressRef.current) {
+      clearTimeout(longPressRef.current.timer);
+      longPressRef.current = null;
+    }
+  }, []);
+
+  const handlePointerDown = useCallback(
+    (e: React.PointerEvent) => {
+      if (e.pointerType !== 'touch') return;
+      touchPointersRef.current.set(e.pointerId, { x: e.clientX, y: e.clientY });
+
+      if (touchPointersRef.current.size === 1 && isEditMode) {
+        const { clientX, clientY, pointerId } = e;
+        const timer = setTimeout(() => {
+          const tracked = touchPointersRef.current.get(pointerId);
+          if (!tracked) return;
+          const tile = screenToTile(tracked.x, tracked.y);
+          if (
+            tile &&
+            (editorState.activeTool === EditTool.TILE_PAINT ||
+              editorState.activeTool === EditTool.WALL_PAINT ||
+              editorState.activeTool === EditTool.ERASE)
+          ) {
+            const layout = officeState.getLayout();
+            if (
+              tile.col >= 0 &&
+              tile.col < layout.cols &&
+              tile.row >= 0 &&
+              tile.row < layout.rows
+            ) {
+              isEraseDraggingRef.current = true;
+              onEditorEraseAction(tile.col, tile.row);
+            }
+          }
+          longPressRef.current = null;
+        }, LONG_PRESS_MS);
+        longPressRef.current = { timer, startX: clientX, startY: clientY, pointerId };
+      }
+
+      if (touchPointersRef.current.size === 2) {
+        clearLongPress();
+        officeState.cameraFollowId = null;
+        const pts = [...touchPointersRef.current.values()];
+        const midX = (pts[0].x + pts[1].x) / 2;
+        const midY = (pts[0].y + pts[1].y) / 2;
+        const dist = Math.hypot(pts[0].x - pts[1].x, pts[0].y - pts[1].y);
+        twoFingerGestureRef.current = { midX, midY, dist };
+      }
+    },
+    [isEditMode, editorState, officeState, onEditorEraseAction, screenToTile, clearLongPress],
+  );
+
+  const handlePointerMove = useCallback(
+    (e: React.PointerEvent) => {
+      if (e.pointerType !== 'touch') return;
+      if (!touchPointersRef.current.has(e.pointerId)) return;
+
+      if (longPressRef.current && longPressRef.current.pointerId === e.pointerId) {
+        const moved = Math.hypot(
+          e.clientX - longPressRef.current.startX,
+          e.clientY - longPressRef.current.startY,
+        );
+        if (moved > LONG_PRESS_MOVE_TOLERANCE_PX) clearLongPress();
+      }
+      touchPointersRef.current.set(e.pointerId, { x: e.clientX, y: e.clientY });
+
+      if (touchPointersRef.current.size === 2 && twoFingerGestureRef.current) {
+        const pts = [...touchPointersRef.current.values()];
+        const midX = (pts[0].x + pts[1].x) / 2;
+        const midY = (pts[0].y + pts[1].y) / 2;
+        const dist = Math.hypot(pts[0].x - pts[1].x, pts[0].y - pts[1].y);
+        const dpr = window.devicePixelRatio || 1;
+
+        // Pan: midpoint delta.
+        const dx = (midX - twoFingerGestureRef.current.midX) * dpr;
+        const dy = (midY - twoFingerGestureRef.current.midY) * dpr;
+        if (dx !== 0 || dy !== 0) {
+          panRef.current = clampPan(panRef.current.x + dx, panRef.current.y + dy);
+        }
+
+        // Pinch: distance ratio → discrete zoom step (same integer zoom
+        // ladder the wheel handler steps through).
+        if (twoFingerGestureRef.current.dist > 0) {
+          const ratio = dist / twoFingerGestureRef.current.dist;
+          const rawZoom = zoom * ratio;
+          const steppedZoom = Math.round(Math.max(ZOOM_MIN, Math.min(ZOOM_MAX, rawZoom)));
+          if (steppedZoom !== zoom) onZoomChange(steppedZoom);
+        }
+
+        twoFingerGestureRef.current = { midX, midY, dist };
+      }
+    },
+    [zoom, onZoomChange, panRef, clampPan, clearLongPress],
+  );
+
+  const handlePointerUpOrCancel = useCallback(
+    (e: React.PointerEvent) => {
+      if (e.pointerType !== 'touch') return;
+      touchPointersRef.current.delete(e.pointerId);
+      if (longPressRef.current && longPressRef.current.pointerId === e.pointerId) clearLongPress();
+      if (touchPointersRef.current.size < 2) twoFingerGestureRef.current = null;
+      if (touchPointersRef.current.size === 0) isEraseDraggingRef.current = false;
+    },
+    [clearLongPress],
+  );
+
   // Prevent default middle-click browser behavior (auto-scroll)
   const handleAuxClick = useCallback((e: React.MouseEvent) => {
     if (e.button === 1) e.preventDefault();
   }, []);
 
   return (
-    <div ref={containerRef} className="w-full h-full relative overflow-hidden bg-bg">
+    <div
+      ref={containerRef}
+      className="w-full h-full relative overflow-hidden bg-bg"
+      style={{ touchAction: 'none' }}
+    >
       <canvas
         ref={canvasRef}
         onMouseMove={handleMouseMove}
@@ -881,7 +1130,12 @@ export function OfficeCanvas({
         onAuxClick={handleAuxClick}
         onMouseLeave={handleMouseLeave}
         onContextMenu={handleContextMenu}
+        onPointerDown={handlePointerDown}
+        onPointerMove={handlePointerMove}
+        onPointerUp={handlePointerUpOrCancel}
+        onPointerCancel={handlePointerUpOrCancel}
         className="block"
+        style={{ touchAction: 'none' }}
       />
     </div>
   );

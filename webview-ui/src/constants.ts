@@ -177,6 +177,19 @@ export const FURNITURE_ANIM_INTERVAL_SEC = 0.2;
 export const WHATS_NEW_AUTO_CLOSE_MS = 20000;
 export const WHATS_NEW_FADE_MS = 1000;
 
+// ── Engine (G0 PixiJS swap-in) ──────────────────────────────
+/** Bisection flag for the renderer.ts/gameLoop.ts → pixiRenderer.ts/
+ *  pixiApp.ts swap (BUILD-PLAN §G0 task 10) — lets a regression be
+ *  isolated by flipping engines without a code change. Temporary: removed
+ *  along with the canvas2d path once the flip is verified clean twice.
+ *  Cast (not a typed `import.meta.env` read) because this file is also
+ *  reachable from webview-ui/test/**\/*.ts, which type-checks under
+ *  tsconfig.node.json — `types: ["node"]`, no `vite/client` — so
+ *  `ImportMeta.env` isn't declared there. */
+const viteEnv = (import.meta as unknown as { env?: Record<string, string | undefined> }).env;
+export const WAR_ROOM_ENGINE: 'canvas2d' | 'pixi' =
+  (viteEnv?.['VITE_WAR_ROOM_ENGINE'] as 'canvas2d' | 'pixi' | undefined) ?? 'pixi';
+
 // ── Game Logic ───────────────────────────────────────────────
 export const MAX_DELTA_TIME_SEC = 0.1;
 export const WAITING_BUBBLE_DURATION_SEC = 2.0;
