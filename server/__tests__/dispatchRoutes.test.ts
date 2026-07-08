@@ -162,6 +162,74 @@ describe('dispatch HTTP routes', () => {
     expect(res.status).toBe(200);
   });
 
+  it('an optional model/effort on dispatchRequest reaches the runner poll item', async () => {
+    const config = await server.start({ embedded: false, store: new AgentStateStore() });
+    const machine = uniqueMachine('MACBOOK');
+    const ws = new WebSocket(`ws://127.0.0.1:${config.port}/ws`);
+    await new Promise((resolve) => ws.addEventListener('open', resolve, { once: true }));
+    ws.send(
+      JSON.stringify({
+        type: 'dispatchRequest',
+        action: 'dispatch',
+        machine,
+        provider: 'claude',
+        cwd: '/tmp',
+        prompt: 'list files',
+        model: 'fable',
+        effort: 'high',
+      }),
+    );
+    await new Promise((resolve) => setTimeout(resolve, 50));
+
+    const pollRes = await pollDispatch(config.port, config.token, machine);
+    const pollBody = (await pollRes.json()) as {
+      pending: Array<{ model?: string; effort?: string }>;
+    };
+    expect(pollBody.pending[0].model).toBe('fable');
+    expect(pollBody.pending[0].effort).toBe('high');
+    ws.close();
+  });
+
+  it('GET /api/dispatch/recent is unauthenticated and reflects a reported resultTail', async () => {
+    const config = await server.start({ embedded: false, store: new AgentStateStore() });
+    const machine = uniqueMachine('MACBOOK');
+
+    const ws = new WebSocket(`ws://127.0.0.1:${config.port}/ws`);
+    await new Promise((resolve) => ws.addEventListener('open', resolve, { once: true }));
+    ws.send(
+      JSON.stringify({
+        type: 'dispatchRequest',
+        action: 'dispatch',
+        machine,
+        provider: 'claude',
+        cwd: '/tmp',
+        prompt: 'list files',
+      }),
+    );
+    await new Promise((resolve) => setTimeout(resolve, 50));
+
+    const pollRes = await pollDispatch(config.port, config.token, machine);
+    const pollBody = (await pollRes.json()) as { pending: Array<{ id: string }> };
+    const id = pollBody.pending[0].id;
+
+    await fetch(`http://127.0.0.1:${config.port}/api/dispatch/${id}/decision`, {
+      method: 'POST',
+      headers: { Authorization: `Bearer ${config.token}`, 'Content-Type': 'application/json' },
+      body: JSON.stringify({ decision: 'accept', pid: 4242 }),
+    });
+    await fetch(`http://127.0.0.1:${config.port}/api/dispatch/${id}/status`, {
+      method: 'POST',
+      headers: { Authorization: `Bearer ${config.token}`, 'Content-Type': 'application/json' },
+      body: JSON.stringify({ event: 'exited', exitCode: 0, resultTail: 'CODEX DISPATCH OK\n' }),
+    });
+
+    const recentRes = await fetch(`http://127.0.0.1:${config.port}/api/dispatch/recent`);
+    expect(recentRes.status).toBe(200);
+    const recent = (await recentRes.json()) as Array<{ id: string; resultTail?: string }>;
+    expect(recent.find((r) => r.id === id)?.resultTail).toBe('CODEX DISPATCH OK\n');
+    ws.close();
+  });
+
   it('a full poll -> decide -> status round trip clears the machine pending queue', async () => {
     // Standalone (embedded: false) — WS is unauthenticated, matching the
     // production deployment that actually exercises the dispatch runner.
@@ -185,7 +253,9 @@ describe('dispatch HTTP routes', () => {
     await new Promise((resolve) => setTimeout(resolve, 50));
 
     const pollRes = await pollDispatch(config.port, config.token, machine);
-    const pollBody = (await pollRes.json()) as { pending: Array<{ id: string; prompt?: string }> };
+    const pollBody = (await pollRes.json()) as {
+      pending: Array<{ id: string; prompt?: string; model?: string; effort?: string }>;
+    };
     expect(pollBody.pending).toHaveLength(1);
     expect(pollBody.pending[0].prompt).toBe('list files');
     const id = pollBody.pending[0].id;

@@ -245,6 +245,12 @@ function registerDispatchRoutes(app: FastifyInstance, options: HttpServerOptions
   // without a runner is honestly absent, never stale-listed.
   app.get('/api/dispatch/machines', async () => dispatchStore.getMachines());
 
+  // GET /api/dispatch/recent -- unauthenticated, same trust level as
+  // /api/dispatch/machines (tailnet-only server). Last ~20 entries (incl.
+  // resultTail) so a page refresh doesn't lose in-flight/just-terminal
+  // dispatch state the way the WS-only non-terminal replay (getActive) would.
+  app.get('/api/dispatch/recent', async () => dispatchStore.getRecent());
+
   // POST /api/dispatch/poll -- runner poll (Bearer + X-Machine). The body advertises
   // this tick's allowlisted providers/roots/focus capability; the response carries
   // this machine's ringing requests WITH the full prompt -- the only place it
@@ -304,7 +310,10 @@ function registerDispatchRoutes(app: FastifyInstance, options: HttpServerOptions
       }
       const pid = typeof body.pid === 'number' ? body.pid : undefined;
       const exitCode = typeof body.exitCode === 'number' ? body.exitCode : undefined;
-      reply.send(dispatchStore.reportStatus(request.params.id, { event, pid, exitCode }));
+      const resultTail = typeof body.resultTail === 'string' ? body.resultTail : undefined;
+      reply.send(
+        dispatchStore.reportStatus(request.params.id, { event, pid, exitCode, resultTail }),
+      );
     },
   );
 }

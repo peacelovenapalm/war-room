@@ -121,6 +121,8 @@ export function handleClientMessage(
         prompt: typeof msg.prompt === 'string' ? msg.prompt : undefined,
         sessionId: typeof msg.sessionId === 'string' ? msg.sessionId : undefined,
         pid: typeof msg.pid === 'number' ? msg.pid : undefined,
+        model: typeof msg.model === 'string' ? msg.model : undefined,
+        effort: typeof msg.effort === 'string' ? msg.effort : undefined,
       });
       break;
     }

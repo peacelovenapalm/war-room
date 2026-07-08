@@ -626,6 +626,12 @@ components:
         exitCode:
           type: integer
           description: Exit code of the spawned process — exited status only.
+        resultTail:
+          type: string
+          description: >-
+            Capped (~8KB) tail of the run's log — dispatch action, exited
+            status only. The only place a run's actual output reaches the
+            dashboard; same trust level as promptPreview (never the full log).
 
     DispatchActionValue:
       description: Dispatch queue entry kind.
@@ -970,6 +976,23 @@ components:
         pid:
           type: integer
           description: Process id to bring to front — action "focus" (sessionId or pid required).
+        model:
+          type: string
+          pattern: '^[a-zA-Z0-9._/-]{1,64}$'
+          description: >-
+            Optional model id/alias for the provider CLI (e.g. 'fable',
+            'claude-fable-5', 'o3') — action "dispatch" only. The runner
+            threads it to argv only for providers with a real --model flag.
+        effort:
+          $ref: '#/components/schemas/DispatchEffortValue'
+
+    DispatchEffortValue:
+      description: >-
+        Optional reasoning-effort level for a dispatch request. Only some
+        providers have an --effort-equivalent flag (currently claude); the
+        runner silently omits it for the rest.
+      type: string
+      enum: [minimal, low, medium, high, xhigh, max]
 
     SaveAgentSeats:
       description: Persist seat assignments for current agents.

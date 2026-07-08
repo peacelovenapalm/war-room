@@ -231,6 +231,7 @@ export interface DispatchUpdate {
   reason?: string;
   pid?: number;
   exitCode?: number;
+  resultTail?: string;
 }
 
 export type DispatchActionValue = 'dispatch' | 'focus';
@@ -413,7 +414,11 @@ export interface DispatchRequest {
   prompt?: string;
   sessionId?: string;
   pid?: number;
+  model?: string;
+  effort?: DispatchEffortValue;
 }
+
+export type DispatchEffortValue = 'minimal' | 'low' | 'medium' | 'high' | 'xhigh' | 'max';
 
 export interface ExportLayout {
   type: 'exportLayout';

@@ -42,9 +42,27 @@ export const DISPATCH_PROMPT_MAX_CHARS = 4000;
 /** promptPreview length on the broadcast plane — the full prompt never
  *  travels here (only on the Bearer-authed runner poll). */
 export const DISPATCH_PROMPT_PREVIEW_MAX_CHARS = 120;
+/** resultTail cap, applied again here even though the runner already caps
+ *  its read (~8KB) — never trust the wire for a size limit twice enforced is
+ *  a limit actually held. Keeps the WS broadcast plane and the persisted
+ *  queue file bounded regardless of what a runner sends. */
+export const DISPATCH_RESULT_TAIL_MAX_CHARS = 8192;
 
 export const DISPATCH_PROVIDERS = ['claude', 'codex', 'gemini'] as const;
 export type DispatchProvider = (typeof DISPATCH_PROVIDERS)[number];
+
+/** Providers a runner actually has an `--effort`-equivalent flag for
+ *  (bin/lib/dispatch-rules.mjs buildArgv is the enforcement point) — the
+ *  enum here is intentionally broader than any one provider supports, since
+ *  effort is validated once at the request level and providers without a
+ *  matching flag simply omit it. */
+export const DISPATCH_EFFORT_VALUES = ['minimal', 'low', 'medium', 'high', 'xhigh', 'max'] as const;
+export type DispatchEffort = (typeof DISPATCH_EFFORT_VALUES)[number];
+
+/** A short model identifier/alias (e.g. 'fable', 'claude-fable-5', 'o3') —
+ *  intentionally permissive (covers every provider's own naming scheme)
+ *  while still rejecting anything that couldn't be a single argv token. */
+const DISPATCH_MODEL_PATTERN = /^[a-zA-Z0-9._/-]{1,64}$/;
 
 export type DispatchAction = 'dispatch' | 'focus';
 export type DispatchStatus = 'ringing' | 'answered' | 'denied' | 'expired' | 'exited';
@@ -61,9 +79,15 @@ interface DispatchRecord {
   prompt?: string;
   sessionId?: string;
   pid?: number;
+  model?: string;
+  effort?: DispatchEffort;
   status: DispatchStatus;
   reason?: string;
   exitCode?: number;
+  /** Tail of the run's log, reported by the runner alongside `exited` — the
+   *  only place a run's actual output reaches the dashboard. Capped at
+   *  DISPATCH_RESULT_TAIL_MAX_CHARS regardless of what the runner sends. */
+  resultTail?: string;
   createdAt: number;
   updatedAt: number;
 }
@@ -77,6 +101,8 @@ export interface DispatchEnqueueInput {
   prompt?: string;
   sessionId?: string;
   pid?: number;
+  model?: string;
+  effort?: string;
 }
 
 export type DispatchEnqueueResult =
@@ -95,6 +121,9 @@ export interface DispatchBroadcast {
   reason?: string;
   pid?: number;
   exitCode?: number;
+  /** Terminal-run output tail (dispatch action, `exited` status only) — the
+   *  same trust level as promptPreview: capped, never the full log. */
+  resultTail?: string;
 }
 
 /** What a runner receives on `POST /api/dispatch/poll` — the ONLY place the
@@ -107,6 +136,8 @@ export interface DispatchRunnerItem {
   prompt?: string;
   sessionId?: string;
   pid?: number;
+  model?: string;
+  effort?: DispatchEffort;
 }
 
 /** A runner's self-advertised capability, refreshed on every poll tick. */
@@ -178,6 +209,15 @@ export class DispatchStore {
       if (input.prompt.length > DISPATCH_PROMPT_MAX_CHARS) {
         return { ok: false, reason: 'prompt-too-long' };
       }
+      if (input.model !== undefined && !DISPATCH_MODEL_PATTERN.test(input.model)) {
+        return { ok: false, reason: 'invalid-model' };
+      }
+      if (
+        input.effort !== undefined &&
+        !(DISPATCH_EFFORT_VALUES as readonly string[]).includes(input.effort)
+      ) {
+        return { ok: false, reason: 'invalid-effort' };
+      }
     } else {
       // action === 'focus'
       if (!input.sessionId && !input.pid) {
@@ -202,6 +242,9 @@ export class DispatchStore {
       prompt: input.action === 'dispatch' ? input.prompt : undefined,
       sessionId: input.sessionId,
       pid: input.action === 'focus' ? input.pid : undefined,
+      model: input.action === 'dispatch' ? input.model : undefined,
+      effort:
+        input.action === 'dispatch' ? (input.effort as DispatchEffort | undefined) : undefined,
       status: 'ringing',
       createdAt: now,
       updatedAt: now,
@@ -250,6 +293,8 @@ export class DispatchStore {
         prompt: r.prompt,
         sessionId: r.sessionId,
         pid: r.pid,
+        model: r.model,
+        effort: r.effort,
       });
     }
     return out;
@@ -292,7 +337,7 @@ export class DispatchStore {
   /** Runner-reported lifecycle event (spawn started / process exited). */
   reportStatus(
     id: string,
-    input: { event: 'started' | 'exited'; pid?: number; exitCode?: number },
+    input: { event: 'started' | 'exited'; pid?: number; exitCode?: number; resultTail?: string },
     now: number = Date.now(),
   ): { ok: true } {
     const records = this.ensureLoaded();
@@ -306,6 +351,9 @@ export class DispatchStore {
     } else {
       record.status = 'exited';
       if (input.exitCode !== undefined) record.exitCode = input.exitCode;
+      if (typeof input.resultTail === 'string') {
+        record.resultTail = input.resultTail.slice(-DISPATCH_RESULT_TAIL_MAX_CHARS);
+      }
     }
     record.updatedAt = now;
     this.persist();
@@ -341,6 +389,19 @@ export class DispatchStore {
       .map((r) => this.toBroadcast(r));
   }
 
+  /** Last `limit` entries regardless of status (oldest first), including
+   *  resultTail — GET /api/dispatch/recent's payload. Same trust level as
+   *  the broadcast plane (no full prompt), so a page refresh doesn't lose
+   *  in-flight or just-completed dispatch state the way a WS-only replay
+   *  (getActive, non-terminal only) would. */
+  getRecent(limit = 20): DispatchBroadcast[] {
+    const records = this.ensureLoaded();
+    return [...records.values()]
+      .sort((a, b) => a.updatedAt - b.updatedAt)
+      .slice(-limit)
+      .map((r) => this.toBroadcast(r));
+  }
+
   private toBroadcast(record: DispatchRecord): DispatchBroadcast {
     return {
       type: 'dispatchUpdate',
@@ -353,6 +414,7 @@ export class DispatchStore {
       reason: record.reason,
       pid: record.pid,
       exitCode: record.exitCode,
+      resultTail: record.resultTail,
     };
   }
 

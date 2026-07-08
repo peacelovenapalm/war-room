@@ -12,7 +12,11 @@ import * as os from 'os';
 import * as path from 'path';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 
-import { DISPATCH_RINGING_CAP, DispatchStore } from '../src/dispatchStore.js';
+import {
+  DISPATCH_RESULT_TAIL_MAX_CHARS,
+  DISPATCH_RINGING_CAP,
+  DispatchStore,
+} from '../src/dispatchStore.js';
 
 let tmpDir: string;
 let statePath: string;
@@ -93,6 +97,53 @@ describe('DispatchStore.enqueue', () => {
       prompt: 'x'.repeat(4001),
     });
     expect(result.ok).toBe(false);
+  });
+
+  it('accepts an optional model/effort and threads them into pendingFor', () => {
+    const s = new DispatchStore(statePath, auditPath);
+    const enq = s.enqueue({
+      action: 'dispatch',
+      machine: 'MACBOOK',
+      provider: 'claude',
+      cwd: '/x',
+      prompt: 'p',
+      model: 'fable',
+      effort: 'high',
+    });
+    expect(enq.ok).toBe(true);
+    const pending = s.pendingFor('MACBOOK');
+    expect(pending[0].model).toBe('fable');
+    expect(pending[0].effort).toBe('high');
+  });
+
+  it('rejects a model string that is not a single safe argv token', () => {
+    const s = new DispatchStore(statePath, auditPath);
+    const result = s.enqueue({
+      action: 'dispatch',
+      machine: 'MACBOOK',
+      provider: 'claude',
+      cwd: '/x',
+      prompt: 'p',
+      model: 'has a space',
+    });
+    expect(result.ok).toBe(false);
+    if (result.ok) throw new Error('unreachable');
+    expect(result.reason).toBe('invalid-model');
+  });
+
+  it('rejects an effort value outside the enum', () => {
+    const s = new DispatchStore(statePath, auditPath);
+    const result = s.enqueue({
+      action: 'dispatch',
+      machine: 'MACBOOK',
+      provider: 'claude',
+      cwd: '/x',
+      prompt: 'p',
+      effort: 'ludicrous',
+    });
+    expect(result.ok).toBe(false);
+    if (result.ok) throw new Error('unreachable');
+    expect(result.reason).toBe('invalid-effort');
   });
 
   it('caps at DISPATCH_RINGING_CAP ringing requests per machine', () => {
@@ -247,6 +298,75 @@ describe('DispatchStore.reportStatus', () => {
   it('status report on an unknown id is still { ok: true }', () => {
     const s = new DispatchStore(statePath, auditPath);
     expect(s.reportStatus('nope', { event: 'exited', exitCode: 1 }).ok).toBe(true);
+  });
+
+  it('exited status carries resultTail through to the broadcast plane', () => {
+    const s = new DispatchStore(statePath, auditPath);
+    const enq = s.enqueue({
+      action: 'dispatch',
+      machine: 'MACBOOK',
+      provider: 'claude',
+      cwd: '/x',
+      prompt: 'p',
+    });
+    if (!enq.ok) throw new Error('unreachable');
+    s.decide(enq.record.id, 'accept', {});
+    s.reportStatus(enq.record.id, {
+      event: 'exited',
+      exitCode: 0,
+      resultTail: 'CODEX DISPATCH OK\n',
+    });
+    const recent = s.getRecent();
+    expect(recent.find((r) => r.id === enq.record.id)?.resultTail).toBe('CODEX DISPATCH OK\n');
+  });
+
+  it('caps resultTail server-side regardless of what the runner sends', () => {
+    const s = new DispatchStore(statePath, auditPath);
+    const enq = s.enqueue({
+      action: 'dispatch',
+      machine: 'MACBOOK',
+      provider: 'claude',
+      cwd: '/x',
+      prompt: 'p',
+    });
+    if (!enq.ok) throw new Error('unreachable');
+    s.decide(enq.record.id, 'accept', {});
+    const huge = 'x'.repeat(DISPATCH_RESULT_TAIL_MAX_CHARS + 500);
+    s.reportStatus(enq.record.id, { event: 'exited', exitCode: 0, resultTail: huge });
+    const recent = s.getRecent();
+    const tail = recent.find((r) => r.id === enq.record.id)?.resultTail;
+    expect(tail?.length).toBe(DISPATCH_RESULT_TAIL_MAX_CHARS);
+    // The TAIL is kept (most recent output), not the head.
+    expect(tail?.endsWith('x')).toBe(true);
+  });
+});
+
+describe('DispatchStore.getRecent', () => {
+  it('returns the last N entries regardless of status, oldest first', () => {
+    const s = new DispatchStore(statePath, auditPath);
+    for (let i = 0; i < 5; i++) {
+      s.enqueue(
+        { action: 'dispatch', machine: 'MACBOOK', provider: 'claude', cwd: '/x', prompt: `p${i}` },
+        1000 + i,
+      );
+    }
+    const recent = s.getRecent(3);
+    expect(recent).toHaveLength(3);
+    expect(recent.map((r) => r.promptPreview)).toEqual(['p2', 'p3', 'p4']);
+  });
+
+  it('never includes the full prompt — same trust level as the broadcast plane', () => {
+    const s = new DispatchStore(statePath, auditPath);
+    s.enqueue({
+      action: 'dispatch',
+      machine: 'MACBOOK',
+      provider: 'claude',
+      cwd: '/x',
+      prompt: 'x'.repeat(500),
+    });
+    const recent = s.getRecent();
+    expect((recent[0] as unknown as Record<string, unknown>).prompt).toBeUndefined();
+    expect(recent[0].promptPreview?.length).toBe(120);
   });
 });
 
