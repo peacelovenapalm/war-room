@@ -15,6 +15,7 @@ import { ShiftPanel } from './components/ShiftPanel.js';
 import { Tooltip } from './components/Tooltip.js';
 import { TriagePanel } from './components/TriagePanel.js';
 import { Modal } from './components/ui/Modal.js';
+import { UnlocksPanel } from './components/UnlocksPanel.js';
 import { VersionIndicator } from './components/VersionIndicator.js';
 import { ZoomControls } from './components/ZoomControls.js';
 import { useEditorActions } from './hooks/useEditorActions.js';
@@ -102,6 +103,7 @@ function App() {
   const [alwaysShowOverlay, setAlwaysShowOverlay] = useState(false);
   const [isBriefingOpen, setIsBriefingOpen] = useState(false);
   const [isShiftOpen, setIsShiftOpen] = useState(false);
+  const [isUnlocksOpen, setIsUnlocksOpen] = useState(false);
   const [isHelpOpen, setIsHelpOpen] = useState(false);
 
   // Help is reachable at all times: `?` toggles, Escape closes. Skip when
@@ -196,6 +198,13 @@ function App() {
   }, []);
 
   const officeState = getOfficeState();
+
+  // Decor unlocks (v1 mechanic #5): re-render whichever cosmetic items the
+  // latest progression snapshot has unlocked. Cosmetic only — never gates
+  // any data view.
+  useEffect(() => {
+    if (progression) officeState.setUnlocks(progression.unlocks);
+  }, [officeState, progression]);
 
   // Force dependency on editorTickForKeyboard to propagate keyboard-triggered re-renders
   void editorTickForKeyboard;
@@ -405,6 +414,8 @@ function App() {
         onToggleBriefing={() => setIsBriefingOpen((v) => !v)}
         isShiftOpen={isShiftOpen}
         onToggleShift={() => setIsShiftOpen((v) => !v)}
+        isUnlocksOpen={isUnlocksOpen}
+        onToggleUnlocks={() => setIsUnlocksOpen((v) => !v)}
         isHelpOpen={isHelpOpen}
         onToggleHelp={() => setIsHelpOpen((v) => !v)}
       />
@@ -412,6 +423,12 @@ function App() {
       <BriefingPanel isOpen={isBriefingOpen} onClose={() => setIsBriefingOpen(false)} />
 
       <ShiftPanel isOpen={isShiftOpen} onClose={() => setIsShiftOpen(false)} />
+
+      <UnlocksPanel
+        isOpen={isUnlocksOpen}
+        onClose={() => setIsUnlocksOpen(false)}
+        progression={progression}
+      />
 
       <HelpModal isOpen={isHelpOpen} onClose={() => setIsHelpOpen(false)} />
 

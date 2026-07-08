@@ -18,6 +18,7 @@ import {
 import { AgentVisualState, deriveVisualState, getFreshPollState } from '../agentState.js';
 import type { DebrisRecord, ExtinguishEffect } from '../crisis.js';
 import { computeCrisisUpdate, debrisKey, EXTINGUISH_DURATION_MS, FIRE_AT_MS } from '../crisis.js';
+import { getUnlockedDecorFurniture } from '../decor.js';
 import { getAnimationFrames, getCatalogEntry, getOnStateType } from '../layout/furnitureCatalog.js';
 import {
   createDefaultLayout,
@@ -111,15 +112,45 @@ export class OfficeState {
   /** Active extinguish (steam + "✓ RESOLVED") effects; pruned each crisis tick. */
   crisisEffects: ExtinguishEffect[] = [];
 
+  // ── Decor unlocks (v1 mechanic #5) ──────────────────────────────
+  /** Cosmetic-only furniture derived from progression unlock flags — never
+   *  part of `this.layout.furniture` (the editor-owned, persisted list). See
+   *  office/decor.ts for why fixed placement was chosen over layout-editor
+   *  persistence. */
+  private decorFurniture: PlacedFurniture[] = [];
+
+  /** The layout's own furniture plus any unlocked decor — the list every
+   *  instance/blocked-tile computation should use. */
+  private combinedFurniture(): PlacedFurniture[] {
+    return this.decorFurniture.length > 0
+      ? [...this.layout.furniture, ...this.decorFurniture]
+      : this.layout.furniture;
+  }
+
   constructor(layout?: OfficeLayout) {
     this.layout = layout || createDefaultLayout();
     this.tileMap = layoutToTileMap(this.layout);
     this.seats = layoutToSeats(this.layout.furniture);
-    this.blockedTiles = getBlockedTiles(this.layout.furniture);
-    this.furniture = layoutToFurnitureInstances(this.layout.furniture);
+    this.blockedTiles = getBlockedTiles(this.combinedFurniture());
+    this.furniture = layoutToFurnitureInstances(this.combinedFurniture());
     this.walkableTiles = getWalkableTiles(this.tileMap, this.blockedTiles);
     // Pets are built last because they need walkableTiles populated for spawn.
     this.rebuildPetsFromLayout(this.layout);
+  }
+
+  /** Apply the latest progression unlock flags — recomputes which decor
+   *  items render and re-blocks their tiles. Cosmetic only: never touches
+   *  `this.layout.furniture`, never gates any data view or mechanic. */
+  setUnlocks(unlocks: Record<string, boolean>): void {
+    const next = getUnlockedDecorFurniture(unlocks);
+    const changed =
+      next.length !== this.decorFurniture.length ||
+      next.some((item, i) => item.uid !== this.decorFurniture[i]?.uid);
+    if (!changed) return;
+    this.decorFurniture = next;
+    this.blockedTiles = getBlockedTiles(this.combinedFurniture());
+    this.walkableTiles = getWalkableTiles(this.tileMap, this.blockedTiles);
+    this.rebuildFurnitureInstances();
   }
 
   /** Rebuild all derived state from a new layout. Reassigns existing characters.
@@ -128,7 +159,7 @@ export class OfficeState {
     this.layout = layout;
     this.tileMap = layoutToTileMap(layout);
     this.seats = layoutToSeats(layout.furniture);
-    this.blockedTiles = getBlockedTiles(layout.furniture);
+    this.blockedTiles = getBlockedTiles(this.combinedFurniture());
     this.rebuildFurnitureInstances();
     this.walkableTiles = getWalkableTiles(this.tileMap, this.blockedTiles);
 
@@ -721,13 +752,13 @@ export class OfficeState {
     }
 
     if (autoOnTiles.size === 0) {
-      this.furniture = layoutToFurnitureInstances(this.layout.furniture);
+      this.furniture = layoutToFurnitureInstances(this.combinedFurniture());
       return;
     }
 
     // Build modified furniture list with auto-state and animation applied
     const animFrame = Math.floor(this.furnitureAnimTimer / FURNITURE_ANIM_INTERVAL_SEC);
-    const modifiedFurniture: PlacedFurniture[] = this.layout.furniture.map((item) => {
+    const modifiedFurniture: PlacedFurniture[] = this.combinedFurniture().map((item) => {
       const entry = getCatalogEntry(item.type);
       if (!entry) return item;
       // Check if any tile of this furniture overlaps an auto-on tile

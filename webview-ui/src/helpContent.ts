@@ -253,6 +253,24 @@ export const HELP_SECTIONS: HelpSection[] = [
     ],
   },
   {
+    id: 'decor',
+    title: 'OFFICE DECOR (UNLOCKS)',
+    intro:
+      'Purely cosmetic — nothing here changes what you can see or do. Streaks, levels, and LEAN shift days from the progression strip permanently unlock office decor; the Unlocks button (bottom toolbar) lists every item and its requirement.',
+    entries: [
+      {
+        glyph: '◆',
+        word: 'DECOR',
+        text: 'Reaching a streak length, a level milestone, or 5 cumulative LEAN-graded shift days permanently unlocks one decor item (a plant, a coffee machine, a clock, a painting) at a fixed spot in the office. Unlocks never revert and are never required to reach — every real dashboard view and function stays reachable at level 1 with no streak.',
+      },
+      {
+        glyph: '✓',
+        word: 'UNLOCKED / LOCKED',
+        text: 'The Unlocks panel marks each item UNLOCKED or LOCKED by shape and word (✓/✗), never by color alone. Locked items simply do not render in the office — there is no grayed-out preview or nag to unlock them.',
+      },
+    ],
+  },
+  {
     id: 'sound',
     title: 'SOUND (AMBIENCE + EVENT CHIRPS)',
     intro:

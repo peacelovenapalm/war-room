@@ -24,6 +24,7 @@ const REQUIRED_SECTION_IDS = [
   'coworkers',
   'emergence',
   'data-sources',
+  'decor',
   'sound',
 ];
 

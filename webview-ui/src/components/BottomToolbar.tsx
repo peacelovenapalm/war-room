@@ -18,6 +18,8 @@ interface BottomToolbarProps {
   onToggleBriefing: () => void;
   isShiftOpen: boolean;
   onToggleShift: () => void;
+  isUnlocksOpen: boolean;
+  onToggleUnlocks: () => void;
   isHelpOpen: boolean;
   onToggleHelp: () => void;
 }
@@ -33,6 +35,8 @@ export function BottomToolbar({
   onToggleBriefing,
   isShiftOpen,
   onToggleShift,
+  isUnlocksOpen,
+  onToggleUnlocks,
   isHelpOpen,
   onToggleHelp,
 }: BottomToolbarProps) {
@@ -153,6 +157,13 @@ export function BottomToolbar({
         title="Today's shift report"
       >
         Shift
+      </Button>
+      <Button
+        variant={isUnlocksOpen ? 'active' : 'default'}
+        onClick={onToggleUnlocks}
+        title="Office decor unlocks"
+      >
+        Unlocks
       </Button>
       <Button
         variant={isSettingsOpen ? 'active' : 'default'}
