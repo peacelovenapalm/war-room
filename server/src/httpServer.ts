@@ -12,6 +12,7 @@ import type { AssetCache, SetHooksEnabledSideEffect } from './clientMessageHandl
 import { handleClientMessage } from './clientMessageHandler.js';
 import { HOOK_API_PREFIX, MAX_HOOK_BODY_SIZE } from './constants.js';
 import { applyPollStates, parsePollBody, startPollStateSweep } from './pollStateHandler.js';
+import { progression } from './progressionStore.js';
 import { shiftStats } from './shiftStats.js';
 import type { AgentState } from './types.js';
 
@@ -110,7 +111,16 @@ function registerHealthRoute(app: FastifyInstance): void {
 function registerBriefingRoute(app: FastifyInstance): void {
   app.get('/api/briefing', async () => getBriefing());
   // Shift report (v1 mechanic #2): today's scorecard — same trust level.
-  app.get('/api/shift', async () => shiftStats.getReport());
+  // Also carries yesterday's closed ledger (deferred nit: previous-day card)
+  // so a checked-out day isn't lost the moment midnight rolls over.
+  app.get('/api/shift', async () => ({
+    today: shiftStats.getReport(),
+    yesterday: shiftStats.getYesterdayReport(),
+  }));
+  // Progression (v1 mechanic #3): XP/level/streak/unlock snapshot — same
+  // trust level. Primarily consumed live over the WS plane
+  // (progressionUpdate); this route mirrors /api/shift for parity/debugging.
+  app.get('/api/progression', async () => progression.getSnapshot());
 }
 
 // ── Hook Events ────────────────────────────────────────────────
@@ -189,6 +199,7 @@ function registerPollRoute(app: FastifyInstance, options: HttpServerOptions): vo
         entries,
         Date.now(),
         shiftStats,
+        progression,
       );
       if (!options.embedded && (result.matched > 0 || result.cleared > 0)) {
         console.log(
@@ -258,6 +269,15 @@ function registerWebSocketRoute(app: FastifyInstance, options: HttpServerOptions
     store.on('agentRemoved', onAgentRemoved);
     store.on('broadcast', onBroadcast);
 
+    // Progression (v1 mechanic #3): rides its own change-notification plane
+    // (not the AgentStateStore) since it isn't tied to any single agent —
+    // broadcast on every XP/streak/unlock mutation, plus an initial snapshot
+    // so a freshly connected client doesn't wait for the next real event.
+    const unsubscribeProgression = progression.onChange((snapshot) => {
+      safeSend(socket, { type: 'progressionUpdate', ...snapshot });
+    });
+    safeSend(socket, { type: 'progressionUpdate', ...progression.getSnapshot() });
+
     // Handle incoming client messages
     socket.on('message', (data: Buffer | string) => {
       try {
@@ -281,6 +301,7 @@ function registerWebSocketRoute(app: FastifyInstance, options: HttpServerOptions
       store.off('agentAdded', onAgentAdded);
       store.off('agentRemoved', onAgentRemoved);
       store.off('broadcast', onBroadcast);
+      unsubscribeProgression();
     });
   });
 }

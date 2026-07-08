@@ -21,6 +21,8 @@ import * as path from 'path';
 
 import type { Briefing } from './briefingProvider.js';
 import { getBriefing } from './briefingProvider.js';
+import { progression } from './progressionStore.js';
+import { pushShiftReport } from './shiftPush.js';
 
 const PERSIST_THROTTLE_MS = 5_000;
 
@@ -104,15 +106,33 @@ export class ShiftStats {
   private day: ShiftDay | null = null;
   /** Open blocked episodes: key → episode start (ms epoch). */
   private openBlocked = new Map<string, number>();
+  /** The last CLOSED day's final scorecard (deferred nit: previous-day card). */
+  private yesterdayReport: ShiftReport | null = null;
   private lastPersistAt = 0;
   private explicitPath: string | undefined;
   private resolvedPath: string | undefined;
   private usingDefaultPath = false;
+  private readonly onDayClose: (report: ShiftReport) => void;
 
-  constructor(persistPath?: string) {
+  /** `onDayClose` fires once per rollover with the just-closed day's final
+   *  report — production wires it to `pushShiftReport` (fire-and-forget,
+   *  env-gated) AND to the progression store's shift-grade XP bonus (v1
+   *  mechanic #3 — LOWER spend grades better and earns MORE, never less);
+   *  tests can inject a spy instead of touching either. */
+  constructor(persistPath?: string, onDayClose?: (report: ShiftReport) => void) {
     // Everything filesystem-touching is lazy — the process-wide singleton is
     // constructed at import time, before test mocks (os.homedir) exist.
     this.explicitPath = persistPath;
+    this.onDayClose =
+      onDayClose ??
+      ((report) => {
+        pushShiftReport(report);
+        progression.recordShiftDayClosed({
+          date: report.date,
+          turnsCompleted: report.turnsCompleted,
+          efficiency: report.efficiency,
+        });
+      });
   }
 
   private persistPath(): string {
@@ -131,6 +151,19 @@ export class ShiftStats {
     }
     const date = localDate(now);
     if (this.day.date !== date) {
+      // The ledger is closing — snapshot its final scorecard BEFORE wiping
+      // it: this is what "yesterday" means (deferred nit: previous-day
+      // card) and what gets pushed to Greg's phone/morning page (feature
+      // #1: shift push). Runs exactly once per rollover — this.day is
+      // reassigned synchronously below, so re-entrant calls in the same
+      // tick never see the stale date again.
+      const closedReport = this.computeReport(this.day, this.openBlocked.size, now);
+      this.yesterdayReport = closedReport;
+      try {
+        this.onDayClose(closedReport);
+      } catch {
+        /* push delivery must never break stat recording */
+      }
       this.day = emptyDay(date);
       // Open episodes carry across midnight — a fire burning at 23:59 is
       // still burning at 00:01; its resolution counts for the new day.
@@ -138,6 +171,46 @@ export class ShiftStats {
       this.persist(now, true);
     }
     return this.day;
+  }
+
+  /** Pure scorecard builder shared by the live report and the rollover
+   *  snapshot pushed/retained as "yesterday". */
+  private computeReport(day: ShiftDay, openCount: number, now: number): ShiftReport {
+    const briefing = getBriefing(now);
+    const counts = briefingCounts(briefing);
+    const hasBriefingSources = briefing.todo !== null || briefing.tracker !== null;
+    const turns = day.turnsCompleted;
+    const perTurn = turns > 0 ? Math.round(day.tokensOut / turns) : null;
+    return {
+      date: day.date,
+      turnsCompleted: turns,
+      tokensIn: day.tokensIn,
+      tokensOut: day.tokensOut,
+      crisesIgnited: day.crisesIgnited,
+      crisesResolved: day.crisesResolved,
+      crisesOpen: openCount,
+      meanTimeToUnblockMs:
+        day.crisesResolved > 0 ? Math.round(day.blockedMsTotal / day.crisesResolved) : null,
+      longestBlockedMs: day.longestBlockedMs,
+      todosClosed:
+        hasBriefingSources && day.baseline
+          ? Math.max(0, day.baseline.openTodos - counts.openTodos)
+          : null,
+      gatesAdvanced:
+        hasBriefingSources && day.baseline
+          ? Math.max(0, counts.gatesDone - day.baseline.gatesDone)
+          : null,
+      outputTokensPerTurn: perTurn,
+      efficiency:
+        perTurn === null
+          ? null
+          : perTurn <= EFFICIENCY_LEAN_MAX
+            ? 'LEAN'
+            : perTurn <= EFFICIENCY_STEADY_MAX
+              ? 'STEADY'
+              : 'HEAVY',
+      generatedAt: new Date(now).toISOString(),
+    };
   }
 
   /** Snapshot briefing counts as the day's delta baseline. Runs once per day
@@ -189,45 +262,19 @@ export class ShiftStats {
   /** Build the scorecard. Captures the day's briefing baseline on first call. */
   getReport(now: number = Date.now()): ShiftReport {
     const day = this.rollDay(now);
-    const briefing = getBriefing(now);
-    const counts = briefingCounts(briefing);
     if (!day.baseline) {
       this.captureBaseline(now);
       this.persist(now, true);
     }
-    const hasBriefingSources = briefing.todo !== null || briefing.tracker !== null;
-    const turns = day.turnsCompleted;
-    const perTurn = turns > 0 ? Math.round(day.tokensOut / turns) : null;
-    return {
-      date: day.date,
-      turnsCompleted: turns,
-      tokensIn: day.tokensIn,
-      tokensOut: day.tokensOut,
-      crisesIgnited: day.crisesIgnited,
-      crisesResolved: day.crisesResolved,
-      crisesOpen: this.openBlocked.size,
-      meanTimeToUnblockMs:
-        day.crisesResolved > 0 ? Math.round(day.blockedMsTotal / day.crisesResolved) : null,
-      longestBlockedMs: day.longestBlockedMs,
-      todosClosed:
-        hasBriefingSources && day.baseline
-          ? Math.max(0, day.baseline.openTodos - counts.openTodos)
-          : null,
-      gatesAdvanced:
-        hasBriefingSources && day.baseline
-          ? Math.max(0, counts.gatesDone - day.baseline.gatesDone)
-          : null,
-      outputTokensPerTurn: perTurn,
-      efficiency:
-        perTurn === null
-          ? null
-          : perTurn <= EFFICIENCY_LEAN_MAX
-            ? 'LEAN'
-            : perTurn <= EFFICIENCY_STEADY_MAX
-              ? 'STEADY'
-              : 'HEAVY',
-      generatedAt: new Date(now).toISOString(),
-    };
+    return this.computeReport(day, this.openBlocked.size, now);
+  }
+
+  /** The last CLOSED day's final scorecard, or null before the first
+   *  rollover has ever happened (deferred nit: previous-day card). Rolls
+   *  the ledger first so a call right after midnight sees the fresh split. */
+  getYesterdayReport(now: number = Date.now()): ShiftReport | null {
+    this.rollDay(now);
+    return this.yesterdayReport;
   }
 
   // ── Persistence (tolerant, throttled) ─────────────────────────
@@ -236,6 +283,7 @@ export class ShiftStats {
     try {
       const raw = JSON.parse(fs.readFileSync(this.persistPath(), 'utf8')) as ShiftDay & {
         openBlocked?: Array<[string, number]>;
+        yesterdayReport?: ShiftReport | null;
       };
       if (raw && typeof raw.date === 'string' && typeof raw.turnsCompleted === 'number') {
         // Open episodes survive restarts — otherwise a still-burning session
@@ -247,7 +295,12 @@ export class ShiftStats {
             }
           }
         }
+        // Previous-day card survives restarts too (deferred nit fix).
+        if (raw.yesterdayReport && typeof raw.yesterdayReport === 'object') {
+          this.yesterdayReport = raw.yesterdayReport;
+        }
         delete raw.openBlocked;
+        delete raw.yesterdayReport;
         return raw;
       }
     } catch {
@@ -268,7 +321,11 @@ export class ShiftStats {
       fs.mkdirSync(path.dirname(target), { recursive: true });
       fs.writeFileSync(
         target,
-        JSON.stringify({ ...this.day, openBlocked: [...this.openBlocked.entries()] }),
+        JSON.stringify({
+          ...this.day,
+          openBlocked: [...this.openBlocked.entries()],
+          yesterdayReport: this.yesterdayReport,
+        }),
         'utf8',
       );
     } catch {

@@ -9,7 +9,7 @@
 import * as fs from 'fs';
 import * as os from 'os';
 import * as path from 'path';
-import { afterEach, beforeEach, describe, expect, it } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 import { clearBriefingCache } from '../src/briefingProvider.js';
 import { EFFICIENCY_LEAN_MAX, EFFICIENCY_STEADY_MAX, ShiftStats } from '../src/shiftStats.js';
@@ -125,5 +125,72 @@ describe('ShiftStats', () => {
     const r = reloaded.getReport(NOON + 3);
     expect(r.turnsCompleted).toBe(1);
     expect(r.tokensOut).toBe(50);
+  });
+
+  describe('rollover retention + push (deferred nit + shift push)', () => {
+    it('has no yesterday report before the first rollover', () => {
+      const s = new ShiftStats(statsPath);
+      s.recordTurnEnd(NOON);
+      expect(s.getYesterdayReport(NOON)).toBeNull();
+    });
+
+    it('retains the closed day as "yesterday" at rollover', () => {
+      const s = new ShiftStats(statsPath);
+      s.recordTurnEnd(NOON);
+      s.recordTokens(100, 300, NOON + 1000);
+      // Rolls over — today's ledger resets, but the final scorecard for
+      // 2026-07-07 must survive as "yesterday".
+      const today = s.getReport(NEXT_DAY);
+      expect(today.date).toBe('2026-07-08');
+      expect(today.turnsCompleted).toBe(0);
+
+      const yesterday = s.getYesterdayReport(NEXT_DAY);
+      expect(yesterday).not.toBeNull();
+      expect(yesterday?.date).toBe('2026-07-07');
+      expect(yesterday?.turnsCompleted).toBe(1);
+      expect(yesterday?.tokensOut).toBe(300);
+    });
+
+    it('the yesterday snapshot survives a restart (persisted)', () => {
+      const s = new ShiftStats(statsPath);
+      s.recordTurnEnd(NOON);
+      s.recordTokens(0, 200, NOON);
+      s.getReport(NEXT_DAY); // triggers rollover + forced persist
+
+      const reloaded = new ShiftStats(statsPath);
+      const yesterday = reloaded.getYesterdayReport(NEXT_DAY);
+      expect(yesterday?.date).toBe('2026-07-07');
+      expect(yesterday?.turnsCompleted).toBe(1);
+    });
+
+    it("fires onDayClose exactly once with the closed day's final report", () => {
+      const onDayClose = vi.fn();
+      const s = new ShiftStats(statsPath, onDayClose);
+      s.recordTurnEnd(NOON);
+      s.recordTokens(0, 300, NOON);
+      s.startBlocked('agent:1', NOON, NOON);
+      s.endBlocked('agent:1', NOON + 30_000);
+
+      // Multiple calls right at/after rollover must still fire onDayClose
+      // only once (rollDay reassigns this.day synchronously on first hit).
+      s.getReport(NEXT_DAY);
+      s.getReport(NEXT_DAY + 100);
+      s.recordTurnEnd(NEXT_DAY + 200);
+
+      expect(onDayClose).toHaveBeenCalledTimes(1);
+      const closed = onDayClose.mock.calls[0][0];
+      expect(closed.date).toBe('2026-07-07');
+      expect(closed.turnsCompleted).toBe(1);
+      expect(closed.crisesResolved).toBe(1);
+    });
+
+    it('a throwing onDayClose never breaks stat recording', () => {
+      const s = new ShiftStats(statsPath, () => {
+        throw new Error('push blew up');
+      });
+      s.recordTurnEnd(NOON);
+      expect(() => s.getReport(NEXT_DAY)).not.toThrow();
+      expect(s.getReport(NEXT_DAY).date).toBe('2026-07-08');
+    });
   });
 });
