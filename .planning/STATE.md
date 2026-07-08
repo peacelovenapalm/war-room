@@ -715,3 +715,39 @@ lists each with TEXT requirement + UNLOCKED/LOCKED word; help section
 added. Gates re-verified by the orchestrator at HEAD: server 279/279,
 webview 102/102, bin 21/21, tsc/lint/build clean. v1 fun layer complete;
 visible after NEXUS redeploy.
+
+### 2026-07-08 (later) — mechanic #6b dispatch vertical ✓ BUILT (`18f73cc`…`b9691c9`)
+
+Greg approved the functionality-gap plan (~/.claude/plans/i-have-ran-all-nifty-zebra.md).
+Two sequential Sonnet-5 waves, one agent per checkout (rule held — zero collisions):
+
+- **Wave 1 (T1–T6, server+runner):** DispatchRequest/DispatchUpdate protocol;
+  file-backed dispatchStore (UUID, 10-min TTL, ≤5 ringing/machine,
+  append-only ~/.pixel-agents/dispatch-audit.jsonl); authed routes
+  /api/dispatch/{poll,:id/decision,:id/status} + unauth /api/dispatch/machines
+  (30s liveness prune); WS lifecycle broadcast + non-terminal connect-replay;
+  bin/lib/dispatch-rules.mjs (realpath containment, argv-only, escape tests);
+  bin/dispatch-runner.mjs daemon (deny-by-default allowlist re-read per tick,
+  handled-set idempotency, focus action pid-only, per-run logs);
+  install-dispatch-runner-launchd.sh (poller-runbook clone incl. fnm/PATH
+  fixes, writes deny-everything allowlist template). Live smoke: full deny
+  round-trip against a real local server; accept→spawn covered by injected-
+  spawn tests (no unauthorized CLI spend).
+- **Wave 2 (T7–T9, webview):** CallModal (machines/providers/roots from live
+  runner advertisements, honest ⚠ NO RUNNERS), DispatchTray (glyph+word
+  chips, DENIED sticky, ⚠ NOT QUEUED on silent-drop timeout), BRIEFING
+  todo→DISPATCH prefill, agent detail drawer (machine/cwd/session/provider/
+  state/permission text/age/tokens + FOCUS pid-gated + COPY ID), help
+  sections registry-enforced. `7d432dd` fixed a real wave-1 contract gap
+  (session id + project dir not reaching the webview).
+
+Gates re-verified by the orchestrator at `b9691c9`: server 314/314,
+webview 134/134, bin 57/57, tsc/lint/build clean.
+
+**Go-live (human, in order):** (1) NEXUS redeploy + set WAR_ROOM_TODO_DIR
+(+ optional WAR_ROOM_TRACKER_STATE, WAR_ROOM_PUSH_URLS) on the container;
+(2) install-dispatch-runner-launchd.sh MACBOOK/MINI; (3) edit each
+~/.war-room/dispatch.json from deny-everything to real roots. Then the
+plan's E2E: dispatch `claude -p` to an allowlisted repo, watch
+◎ ringing → ✓ answered → office render → ■ exited 0; verify deny path;
+click a burning agent → drawer matches reality.
