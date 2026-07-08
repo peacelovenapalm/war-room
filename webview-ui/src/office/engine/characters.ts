@@ -10,6 +10,7 @@ import {
   WANDER_PAUSE_MIN_SEC,
 } from '../../constants.js';
 import { findPath } from '../layout/tileMap.js';
+import { idleStateFor, moodSpeedMultiplier } from '../mood.js';
 import type { CharacterSprites } from '../sprites/spriteData.js';
 import { isReadingToolName } from '../toolUtils.js';
 import type { Character, Seat, SpriteData, TileType as TileTypeVal } from '../types.js';
@@ -118,7 +119,7 @@ export function updateCharacter(
           break;
         }
         ch.seatTimer = 0; // clear sentinel
-        ch.state = CharacterState.IDLE;
+        ch.state = idleStateFor(ch);
         ch.frame = 0;
         ch.frameTimer = 0;
         ch.wanderTimer = randomRange(WANDER_PAUSE_MIN_SEC, WANDER_PAUSE_MAX_SEC);
@@ -128,8 +129,11 @@ export function updateCharacter(
       break;
     }
 
-    case CharacterState.IDLE: {
-      // No idle animation — static pose
+    case CharacterState.IDLE:
+    case CharacterState.BURNED_OUT: {
+      // No idle animation — static pose (BURNED_OUT renders a distinct
+      // droop frame in getCharacterSprite; behavior here is identical to
+      // IDLE — pathing, seat logic, wander timers all shared).
       ch.frame = 0;
       if (ch.seatTimer < 0) ch.seatTimer = 0; // clear turn-end sentinel
       // If became active, pathfind to seat
@@ -250,7 +254,7 @@ export function updateCharacter(
               ch.state = CharacterState.TYPE;
               ch.dir = seat.facingDir;
             } else {
-              ch.state = CharacterState.IDLE;
+              ch.state = idleStateFor(ch);
             }
           }
         } else {
@@ -277,7 +281,7 @@ export function updateCharacter(
               break;
             }
           }
-          ch.state = CharacterState.IDLE;
+          ch.state = idleStateFor(ch);
           ch.wanderTimer = randomRange(WANDER_PAUSE_MIN_SEC, WANDER_PAUSE_MAX_SEC);
         }
         ch.frame = 0;
@@ -289,7 +293,8 @@ export function updateCharacter(
       const nextTile = ch.path[0];
       ch.dir = directionBetween(ch.tileCol, ch.tileRow, nextTile.col, nextTile.row);
 
-      ch.moveProgress += (WALK_SPEED_PX_PER_SEC / TILE_SIZE) * dt;
+      ch.moveProgress +=
+        ((WALK_SPEED_PX_PER_SEC * moodSpeedMultiplier(ch.moodBand)) / TILE_SIZE) * dt;
 
       const fromCenter = tileCenter(ch.tileCol, ch.tileRow);
       const toCenter = tileCenter(nextTile.col, nextTile.row);
@@ -345,6 +350,10 @@ export function getCharacterSprite(ch: Character, sprites: CharacterSprites): Sp
       return sprites.walk[ch.dir][ch.frame % 4];
     case CharacterState.IDLE:
       return sprites.walk[ch.dir][1];
+    case CharacterState.BURNED_OUT:
+      // Droop pose: reuses an existing walk-cycle frame distinct from the
+      // normal idle stance (index 1) — no new art exists yet (G5).
+      return sprites.walk[ch.dir][0];
     default:
       return sprites.walk[ch.dir][1];
   }

@@ -30,6 +30,10 @@ export const CharacterState = {
   IDLE: 'idle',
   WALK: 'walk',
   TYPE: 'type',
+  /** Low-mood idle variant (G1, GAME-DESIGN §4.5) — same behavior/pathing
+   *  as IDLE in the update loop, distinct only for rendering (droop pose)
+   *  and the walk-speed multiplier. See office/mood.ts. */
+  BURNED_OUT: 'burned_out',
 } as const;
 export type CharacterState = (typeof CharacterState)[keyof typeof CharacterState];
 
@@ -222,6 +226,16 @@ export interface Character {
   /** Real project directory (mechanic #6b detail drawer's "project dir" field),
    *  distinct from folderName (the short multi-root workspace label). */
   cwd?: string;
+  /** Employee identity FK (G1, GAME-DESIGN §4.1) — computed from
+   *  (machine, cwd) via the same core/src/employeeId.ts function the server
+   *  uses, so the SAME sprite/costume persists across an employee's
+   *  sessions. Absent when cwd is unknown (e.g. a coworker session with no
+   *  real project dir yet). */
+  employeeId?: string;
+  /** Mood band (G1, GAME-DESIGN §4.5) — low/neutral/high, derived from the
+   *  employee's live mood. Undefined = no mood data yet (never slows a
+   *  character down or applies the droop pose). See office/mood.ts. */
+  moodBand?: 'low' | 'neutral' | 'high';
   /** OS process id of the session (mechanic #6b FOCUS dispatch target),
    *  captured server-side from the hook forwarder's X-Pid header. Absent
    *  until the first hook event with pid telemetry arrives — drawer shows
