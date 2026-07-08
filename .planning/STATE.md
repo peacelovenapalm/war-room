@@ -751,3 +751,16 @@ webview 134/134, bin 57/57, tsc/lint/build clean.
 plan's E2E: dispatch `claude -p` to an allowlisted repo, watch
 ◎ ringing → ✓ answered → office render → ■ exited 0; verify deny path;
 click a burning agent → drawer matches reality.
+
+### 2026-07-08 (final) — FOCUS pid wiring ✓ (`81f0a0d`…`d3e56e0`)
+
+Wave-2 finding closed: no pid existed anywhere in telemetry, so FOCUS was
+permanently disabled-honest. Fix: hook.sh (runbook heredoc) now sends
+`X-Pid: $PPID` (hooks run as children of the claude process) → server tags
+pid onto AgentState → AgentCreated/ExistingAgents/AgentPidUpdate broadcast
+→ drawer enables FOCUS when pid present AND machine advertises focus:true.
+Pid legitimately absent for coworker (codex/gemini adapter) sessions and
+until the refreshed forwarder is installed. Gates verified by orchestrator:
+server 320/320, webview 139/139, bin 57/57, tsc/lint/build clean.
+**Go-live addition: re-run macbook-hooks-install.sh on BOTH Macs** (idempotent,
+token kept) so the forwarder gains the X-Pid header.
