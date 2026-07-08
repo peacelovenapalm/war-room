@@ -666,3 +666,41 @@ adapter). Gated installs stay human-run; this session shipped the tooling:
 then the three printed MINI installers, then
 `install-poller-launchd.sh MACBOOK` + `install-coworker-adapter-launchd.sh
 MACBOOK` locally. NEXUS v1 redeploy still pending separately.
+
+### 2026-07-08 — wave 1 fun layer, Sonnet-5 delegated (`11ac623`…`74d74e8`)
+
+Greg answered the three GAMIFICATION-BRIEF questions: shift push → morning
+page + Bark; progression → server-side; sound → FULL ambience, ON by
+default. Three Sonnet 5 build agents ran; all gates green at `24d3286`
+(server 279/279, webview 96/96, bin 21/21, tsc/lint/build clean — verified
+independently by two agents at that HEAD).
+
+- **Shift push + report usability** (`11ac623`, `bbfdf39`): closed-day
+  summary POSTs to `WAR_ROOM_PUSH_URLS` (comma-sep, unset=off, 1 retry,
+  masked logging); `/api/shift` → `{today, yesterday}`; YESTERDAY card;
+  `⚠ STALE — last updated HH:MM` marker on failed refresh.
+- **Mechanic #3 progression** (`c39f94b`, `24d3286`): file-backed
+  server-side store (`~/.pixel-agents/progression.json`), XP from completed
+  Claude turns + OBSERVED resolutions + shift grade (LEAN +50 / STEADY +20 /
+  HEAVY +0 — lower spend earns more; token volume never read); daily-use
+  streak; `progressionUpdate` WS message; always-visible ProgressionHUD.
+  Unlock flags for #5: streakBronze/Silver/Gold (3/7/30d), leanGrade5,
+  level5, level10 — permanent, data-only.
+- **Sound layer** (content inside `c39f94b` — see ownership note):
+  procedural WebAudio ambience ON by default with honest
+  `SOUND: ON (click to start)` until a gesture arms it; FIRE/ALARM chirp,
+  resolved ding, all-clear chime, arrival blip, night duck; text-labeled
+  toggle, localStorage-persisted. Every sound mirrors a visible shape+text
+  signal.
+
+**Incidents (shared-checkout — worktree isolation did not take):** all three
+agents ran in the live checkout. (1) `bbfdf39` swallowed progression's
+in-flight edits to shiftStats/httpServer/helpContent; (2) sound's staged
+files were swept into `c39f94b` by a concurrent commit (commit message
+under-describes it; content correct); (3) lint-staged's stash cycle DROPPED
+an asyncapi.yaml hunk from `c39f94b` (no yaml glob → invisible) — restored
+in `24d3286`, glob added + file prettier-formatted in `74d74e8`. Rule going
+forward: one agent per checkout, or verified worktrees.
+
+**Wave 2 queued:** mechanic #5 expression (decor unlocks consuming the
+flags). NEXUS still runs v0 — none of this is visible until redeploy.
