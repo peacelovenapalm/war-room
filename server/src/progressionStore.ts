@@ -32,8 +32,15 @@ import * as fs from 'fs';
 import * as os from 'os';
 import * as path from 'path';
 
+import {
+  computeLevel as computeLevelCurve,
+  xpForLevel as xpForLevelCurve,
+} from '../../core/src/leveling.js';
 import { LAYOUT_FILE_DIR } from './constants.js';
 import type { ShiftReport } from './shiftStats.js';
+
+/** Account-wide progression curve (flatter per-employee curves live in employeeStore.ts). */
+const PROGRESSION_CURVE = { base: 100, step: 50 };
 
 const PERSIST_THROTTLE_MS = 5_000;
 const PROGRESSION_FILE_NAME = 'progression.json';
@@ -57,23 +64,13 @@ export const XP_SHIFT_GRADE_BONUS: Record<NonNullable<ShiftReport['efficiency']>
 
 /** XP required to REACH a given level from 0 (level 1 = the starting level). */
 export function xpForLevel(level: number): number {
-  let total = 0;
-  for (let l = 1; l < level; l++) total += 100 + 50 * (l - 1);
-  return total;
+  return xpForLevelCurve(level, PROGRESSION_CURVE);
 }
 
-export interface LevelInfo {
-  level: number;
-  xpIntoLevel: number;
-  xpForNextLevel: number;
-}
+export type { LevelInfo } from '../../core/src/leveling.js';
 
-export function computeLevel(xp: number): LevelInfo {
-  let level = 1;
-  while (xp >= xpForLevel(level + 1)) level++;
-  const floor = xpForLevel(level);
-  const ceil = xpForLevel(level + 1);
-  return { level, xpIntoLevel: xp - floor, xpForNextLevel: ceil - floor };
+export function computeLevel(xp: number) {
+  return computeLevelCurve(xp, PROGRESSION_CURVE);
 }
 
 interface StreakState {
