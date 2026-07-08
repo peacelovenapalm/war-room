@@ -41,6 +41,10 @@ export interface AgentState {
   machine?: string;
   /** Provider that created this agent (defaults to 'claude') */
   providerId?: string;
+  /** OS process id of the session, captured from the hook forwarder's X-Pid
+   *  header (mechanic #6b FOCUS target). Absent until the first hook event
+   *  carrying pid telemetry arrives for this session. */
+  pid?: number;
   /** Latest state from the per-machine needs-input poller (`claude agents --json`).
    *  `at` = receipt time (ms epoch) for staleness sweeps. `since` = when the
    *  CURRENT state value was first reported (preserved across refresh ticks) —

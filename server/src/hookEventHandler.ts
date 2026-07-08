@@ -42,6 +42,7 @@ interface SessionLifecycleCallbacks {
     cwd: string,
     machine?: string,
     providerId?: string,
+    pid?: number,
   ) => void;
   /** Called when /clear is detected via hooks (SessionEnd reason=clear + SessionStart source=clear). */
   onSessionClear?: (
@@ -111,6 +112,20 @@ export class HookEventHandler {
     this.lifecycleCallbacks = callbacks;
   }
 
+  /**
+   * Record newly-arrived pid telemetry on an already-known agent and tell the
+   * webview live (mechanic #6b FOCUS). Agents created directly from a pending
+   * external session get their pid at creation time (onExternalSessionDetected);
+   * this covers agents that existed BEFORE the forwarder's X-Pid header started
+   * arriving (e.g. locally-discovered sessions, or forwarder installed mid-session).
+   * No-op when pid is absent or unchanged -- avoids a broadcast storm on every event.
+   */
+  private updateAgentPid(agent: AgentState, agentId: number, pid: number | undefined): void {
+    if (pid === undefined || agent.pid === pid) return;
+    agent.pid = pid;
+    this.agents.broadcast({ type: 'agentPidUpdate', id: agentId, pid });
+  }
+
   /** Register an agent for hook event routing. Flushes any buffered events for this session. */
   registerAgent(sessionId: string, agentId: number): void {
     const flushed = this.sessionRouter.register(sessionId, agentId);
@@ -152,6 +167,11 @@ export class HookEventHandler {
     // authenticated remote hook events. Present => this event came from another
     // machine; its transcript_path was already stripped (hooks-only adoption).
     const machine = typeof event.__machine === 'string' ? event.__machine : undefined;
+    // OS pid injected at the HTTP boundary (httpServer.ts) from the hook
+    // forwarder's X-Pid header. Present for both local and remote sessions --
+    // it flows through the same authenticated route regardless of machine.
+    // Drives the agent-drawer FOCUS button (mechanic #6b).
+    const pid = typeof event.__pid === 'number' ? event.__pid : undefined;
     // CI / e2e diagnostic: see agentStateStore.ts debugLogBroadcast comment.
     if (process.env['PIXEL_AGENTS_DEBUG_LOG']) {
       try {
@@ -190,6 +210,7 @@ export class HookEventHandler {
         const agent = this.agents.get(existingAgentId);
         if (agent) {
           agent.hookDelivered = true;
+          this.updateAgentPid(agent, existingAgentId, pid);
         }
         if (debug)
           console.log(
@@ -202,6 +223,7 @@ export class HookEventHandler {
         if (agent.sessionId === event.session_id) {
           this.registerAgent(agent.sessionId, id);
           agent.hookDelivered = true;
+          this.updateAgentPid(agent, id, pid);
           if (debug)
             console.log(
               `[Pixel Agents] Hook: Agent ${id} - SessionStart(source=${source}) auto-discovered`,
@@ -253,6 +275,7 @@ export class HookEventHandler {
           cwd: cwd ?? '',
           machine,
           providerId: _providerId,
+          pid,
         });
       } else {
         if (debug && tracked)
@@ -293,6 +316,7 @@ export class HookEventHandler {
         cwd: typeof event.cwd === 'string' ? event.cwd : '',
         machine,
         providerId: _providerId,
+        pid,
       });
     }
 
@@ -309,6 +333,7 @@ export class HookEventHandler {
         pending.cwd,
         pending.machine,
         pending.providerId,
+        pending.pid,
       );
       // Re-process this event now that the agent exists
       this.handleEvent(_providerId, event);
@@ -350,6 +375,7 @@ export class HookEventHandler {
     if (!agent) return;
 
     agent.hookDelivered = true;
+    this.updateAgentPid(agent, agentId, pid);
     if (debug)
       console.log(
         `[Pixel Agents] Hook: Agent ${agentId} - ${eventName} (session=${event.session_id.slice(0, 8)}...)`,

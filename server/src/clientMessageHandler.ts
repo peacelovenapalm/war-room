@@ -230,6 +230,7 @@ function handleWebviewReady(send: WsSend, ctx: ClientMessageContext): void {
   const providers: Record<number, string> = {};
   const sessionIds: Record<number, string> = {};
   const cwds: Record<number, string> = {};
+  const pids: Record<number, number> = {};
   for (const [id, agent] of store) {
     agentIds.push(id);
     if (agent.folderName) {
@@ -253,6 +254,10 @@ function handleWebviewReady(send: WsSend, ctx: ClientMessageContext): void {
     if (agent.projectDir) {
       cwds[id] = agent.projectDir;
     }
+    // FOCUS dispatch target (mechanic #6b) — see AgentCreated.pid above.
+    if (agent.pid !== undefined) {
+      pids[id] = agent.pid;
+    }
   }
   const seats = adapter?.loadSeats() ?? {};
   send({
@@ -265,6 +270,7 @@ function handleWebviewReady(send: WsSend, ctx: ClientMessageContext): void {
     providers,
     sessionIds,
     cwds,
+    pids,
   });
 
   // 7. Replay live poll states (M4) so a page refresh keeps NEEDS INPUT badges

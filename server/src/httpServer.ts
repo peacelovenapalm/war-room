@@ -161,6 +161,15 @@ function registerHookRoute(app: FastifyInstance, options: HttpServerOptions): vo
         event.__machine = machine;
       }
 
+      // PID telemetry (mechanic #6b FOCUS): the command-hook forwarder sends
+      // X-Pid (Claude Code runs the hook as a direct child, so $PPID there is
+      // the session's own OS pid). Tagged regardless of machine — local
+      // sessions carry it too, since it flows through this same route.
+      const pid = sanitizeHookPid(request.headers['x-pid']);
+      if (pid !== undefined) {
+        event.__pid = pid;
+      }
+
       if (event.session_id && event.hook_event_name) {
         options.onHookEvent?.(providerId, event);
       }
@@ -308,6 +317,14 @@ export function sanitizeMachineLabel(raw: unknown): string | undefined {
   return /^[A-Z0-9_-]{1,32}$/.test(label) ? label : undefined;
 }
 
+/** Normalize an X-Pid header value to a positive integer OS pid, or undefined if invalid/absent. */
+export function sanitizeHookPid(raw: unknown): number | undefined {
+  const value = Array.isArray(raw) ? raw[0] : raw;
+  if (typeof value !== 'string' || value.trim() === '') return undefined;
+  const pid = Number(value);
+  return Number.isInteger(pid) && pid > 0 ? pid : undefined;
+}
+
 // ── WebSocket ──────────────────────────────────────────────────
 
 function registerWebSocketRoute(app: FastifyInstance, options: HttpServerOptions): void {
@@ -347,6 +364,10 @@ function registerWebSocketRoute(app: FastifyInstance, options: HttpServerOptions
         // dir, carried through so FOCUS/COPY ID have something real to act on.
         sessionId: agent.sessionId,
         cwd: agent.projectDir,
+        // FOCUS dispatch target (mechanic #6b): OS pid from the hook
+        // forwarder's X-Pid header. Absent until the first hook event with
+        // pid telemetry arrives — drawer shows "NO PID" until then.
+        pid: agent.pid,
       });
     };
 

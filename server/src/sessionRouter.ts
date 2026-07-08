@@ -12,6 +12,8 @@ export interface PendingExternalSession {
    *  :providerId of the authed ingest URL. Non-claude agents render as
    *  coworkers (distinct silhouette + TEXT label) in the office. */
   providerId?: string;
+  /** OS process id captured from the hook forwarder's X-Pid header, if present. */
+  pid?: number;
 }
 
 /** An event waiting to be dispatched once its agent registers. */

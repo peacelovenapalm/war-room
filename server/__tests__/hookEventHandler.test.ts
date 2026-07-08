@@ -578,10 +578,102 @@ describe('HookEventHandler', () => {
       '/projects/test',
       undefined, // machine: local session, no machine label
       'claude', // providerId from the ingest route
+      undefined, // pid: no X-Pid header on this event
     );
     // Stop was re-processed after agent creation
     const agent = agents.get(2);
     expect(agent?.isWaiting).toBe(true);
+  });
+
+  // ── PID telemetry (mechanic #6b FOCUS) ───────────────────────
+
+  it('__pid on the confirmation event is threaded to onExternalSessionDetected', () => {
+    const onExternalSessionDetected = vi.fn();
+    handler.setLifecycleCallbacks({ onExternalSessionDetected });
+
+    handler.handleEvent('claude', {
+      hook_event_name: 'SessionStart',
+      session_id: 'pid-sess',
+      source: 'startup',
+      transcript_path: '/projects/test/pid-sess.jsonl',
+      cwd: '/projects/test',
+      __pid: 4242,
+    });
+
+    onExternalSessionDetected.mockImplementation((sessionId: string) => {
+      const agent = createTestAgent({
+        id: 3,
+        sessionId,
+        projectDir: '/projects/test',
+      } as Partial<AgentState>);
+      agents.set(3, agent);
+      handler.registerAgent(sessionId, 3);
+    });
+
+    handler.handleEvent('claude', {
+      hook_event_name: 'Stop',
+      session_id: 'pid-sess',
+      __pid: 4242,
+    });
+
+    expect(onExternalSessionDetected).toHaveBeenCalledWith(
+      'pid-sess',
+      '/projects/test/pid-sess.jsonl',
+      '/projects/test',
+      undefined,
+      'claude',
+      4242,
+    );
+  });
+
+  it('a hook event carrying __pid updates an already-known agent and broadcasts agentPidUpdate', () => {
+    const agent = createTestAgent({ id: 1 });
+    agents.set(1, agent);
+    handler.registerAgent('sess-1', 1);
+
+    handler.handleEvent('claude', {
+      hook_event_name: 'PreToolUse',
+      session_id: 'sess-1',
+      tool_name: 'Read',
+      tool_input: {},
+      __pid: 5150,
+    });
+
+    expect(agent.pid).toBe(5150);
+    const msg = mockWebview.messages.find((m) => m.type === 'agentPidUpdate');
+    expect(msg).toEqual({ type: 'agentPidUpdate', id: 1, pid: 5150 });
+  });
+
+  it('does not re-broadcast agentPidUpdate when the pid is unchanged', () => {
+    const agent = createTestAgent({ id: 1, pid: 5150 });
+    agents.set(1, agent);
+    handler.registerAgent('sess-1', 1);
+
+    handler.handleEvent('claude', {
+      hook_event_name: 'PreToolUse',
+      session_id: 'sess-1',
+      tool_name: 'Read',
+      tool_input: {},
+      __pid: 5150,
+    });
+
+    const msgs = mockWebview.messages.filter((m) => m.type === 'agentPidUpdate');
+    expect(msgs).toHaveLength(0);
+  });
+
+  it('an event with no __pid leaves agent.pid untouched (honest "no telemetry yet")', () => {
+    const agent = createTestAgent({ id: 1 });
+    agents.set(1, agent);
+    handler.registerAgent('sess-1', 1);
+
+    handler.handleEvent('claude', {
+      hook_event_name: 'Stop',
+      session_id: 'sess-1',
+    });
+
+    expect(agent.pid).toBeUndefined();
+    const msg = mockWebview.messages.find((m) => m.type === 'agentPidUpdate');
+    expect(msg).toBeUndefined();
   });
 
   // ── Resume ──────────────────────────────────────────────────
@@ -725,6 +817,7 @@ describe('HookEventHandler', () => {
       '/projects/test',
       undefined, // machine: local session, no machine label
       'claude', // providerId from the ingest route
+      undefined, // pid: no X-Pid header on this event
     );
   });
 

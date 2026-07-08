@@ -814,6 +814,7 @@ export function adoptExternalSessionFromHook(
   onAgentCreated?: (agent: AgentState) => void,
   machine?: string,
   providerId?: string,
+  pid?: number,
 ): void {
   if (transcriptPath) {
     // File-based provider (Claude, Codex): adopt with JSONL file watching
@@ -854,6 +855,7 @@ export function adoptExternalSessionFromHook(
       adoptedAgent.hookDelivered = true;
       if (machine) adoptedAgent.machine = machine;
       if (providerId) adoptedAgent.providerId = providerId;
+      if (pid !== undefined) adoptedAgent.pid = pid;
       onAgentCreated?.(adoptedAgent);
     }
   } else {
@@ -882,6 +884,7 @@ export function adoptExternalSessionFromHook(
       hooksOnly: true,
       machine,
       providerId,
+      pid,
       lastDataAt: Date.now(),
       linesProcessed: 0,
       seenUnknownRecordTypes: new Set(),

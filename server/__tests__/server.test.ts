@@ -113,6 +113,56 @@ describe('PixelAgentsServer', () => {
     expect(received[0].event.hook_event_name).toBe('Stop');
   });
 
+  // 5b. X-Pid header tags the event with __pid (mechanic #6b FOCUS telemetry)
+  it('X-Pid header tags the hook event with __pid', async () => {
+    const config = await server.start();
+    const received: Array<Record<string, unknown>> = [];
+    server.onHookEvent((_providerId: string, event: Record<string, unknown>) => {
+      received.push(event);
+    });
+
+    await fetch(`http://127.0.0.1:${config.port}/api/hooks/claude`, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        Authorization: `Bearer ${config.token}`,
+        'X-Pid': '4242',
+      },
+      body: JSON.stringify({ session_id: 'abc', hook_event_name: 'Stop' }),
+    });
+
+    expect(received).toHaveLength(1);
+    expect(received[0].__pid).toBe(4242);
+  });
+
+  // 5c. Invalid/absent X-Pid never sets __pid (honest "no telemetry" case)
+  it('missing or invalid X-Pid leaves __pid unset', async () => {
+    const config = await server.start();
+    const received: Array<Record<string, unknown>> = [];
+    server.onHookEvent((_providerId: string, event: Record<string, unknown>) => {
+      received.push(event);
+    });
+
+    await postHook(
+      config.port,
+      config.token,
+      JSON.stringify({ session_id: 'no-pid', hook_event_name: 'Stop' }),
+    );
+    await fetch(`http://127.0.0.1:${config.port}/api/hooks/claude`, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        Authorization: `Bearer ${config.token}`,
+        'X-Pid': 'not-a-number',
+      },
+      body: JSON.stringify({ session_id: 'bad-pid', hook_event_name: 'Stop' }),
+    });
+
+    expect(received).toHaveLength(2);
+    expect(received[0].__pid).toBeUndefined();
+    expect(received[1].__pid).toBeUndefined();
+  });
+
   // 6. Hook endpoint rejects oversized body
   it('hook endpoint returns 413 for oversized body', async () => {
     const config = await server.start();
