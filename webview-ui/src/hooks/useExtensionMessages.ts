@@ -13,6 +13,7 @@ import type { OfficeState } from '../office/engine/officeState.js';
 import { setFloorSprites } from '../office/floorTiles.js';
 import { buildDynamicCatalog } from '../office/layout/furnitureCatalog.js';
 import { migrateLayoutColors } from '../office/layout/layoutSerializer.js';
+import { moodBand } from '../office/mood.js';
 import { disposeSpriteTextureCache } from '../office/sprites/manifestToPixiSpritesheet.js';
 import { setPetTemplates } from '../office/sprites/petSpriteData.js';
 import { setCharacterTemplates } from '../office/sprites/spriteData.js';
@@ -74,6 +75,33 @@ export interface ProgressionSnapshot {
   unlocks: Record<string, boolean>;
 }
 
+/** Employee roster snapshot (G1) — mirrors core/src/messages.ts's
+ *  EmployeeSnapshot without importing the server-facing generated types
+ *  (same convention ProgressionSnapshot/ShiftReport use). */
+export interface EmployeeSnapshotClient {
+  id: string;
+  machine: string;
+  projectDir: string;
+  projectLabel: string;
+  name: string;
+  spriteIndex: number;
+  defaultProvider: string;
+  defaultModel?: string;
+  status: string;
+  rank: string;
+  xp: number;
+  mood: number;
+  moodBoost: number;
+  scores: { speed: number; accuracy: number; nightOwl: number; tokenEfficiency: number };
+  trainingBonus: { speed: number; accuracy: number; nightOwl: number; tokenEfficiency: number };
+  sampleCount: number;
+  assignedRoomId?: string;
+  createdAt: number;
+  lastActiveAt: number;
+  lowMoodStreakDays: number;
+  breakUntil?: number;
+}
+
 interface ExtensionMessageState {
   agents: number[];
   selectedAgent: number | null;
@@ -97,6 +125,7 @@ interface ExtensionMessageState {
   progression: ProgressionSnapshot | null;
   dispatchEntries: DispatchEntry[];
   dismissDispatch: (id: string) => void;
+  employees: Record<string, EmployeeSnapshotClient>;
 }
 
 function saveAgentSeats(os: OfficeState): void {
@@ -136,6 +165,7 @@ export function useExtensionMessages(
   const [hooksInfoShown, setHooksInfoShown] = useState(true);
   const [progression, setProgression] = useState<ProgressionSnapshot | null>(null);
   const [dispatchEntries, setDispatchEntries] = useState<DispatchEntry[]>([]);
+  const [employees, setEmployees] = useState<Record<string, EmployeeSnapshotClient>>({});
 
   // Hydrate from GET /api/dispatch/recent once on mount — a page refresh
   // otherwise only gets the WS replay of NON-terminal entries (getActive),
@@ -727,6 +757,39 @@ export function useExtensionMessages(
           streakLongest: msg.streakLongest as number,
           unlocks: (msg.unlocks as Record<string, boolean>) ?? {},
         });
+      } else if (msg.type === 'employeeSnapshot') {
+        const snapshot: EmployeeSnapshotClient = {
+          id: msg.id as string,
+          machine: msg.machine as string,
+          projectDir: msg.projectDir as string,
+          projectLabel: msg.projectLabel as string,
+          name: msg.name as string,
+          spriteIndex: msg.spriteIndex as number,
+          defaultProvider: msg.defaultProvider as string,
+          defaultModel: msg.defaultModel as string | undefined,
+          status: msg.status as string,
+          rank: msg.rank as string,
+          xp: msg.xp as number,
+          mood: msg.mood as number,
+          moodBoost: msg.moodBoost as number,
+          scores: msg.scores as EmployeeSnapshotClient['scores'],
+          trainingBonus: msg.trainingBonus as EmployeeSnapshotClient['trainingBonus'],
+          sampleCount: msg.sampleCount as number,
+          assignedRoomId: msg.assignedRoomId as string | undefined,
+          createdAt: msg.createdAt as number,
+          lastActiveAt: msg.lastActiveAt as number,
+          lowMoodStreakDays: msg.lowMoodStreakDays as number,
+          breakUntil: msg.breakUntil as number | undefined,
+        };
+        setEmployees((prev) => ({ ...prev, [snapshot.id]: snapshot }));
+        // Office sprite feedback (G1 task 12): any character whose
+        // employeeId FK matches this snapshot picks up the derived mood
+        // band, which characters.ts's movement/render code reads directly
+        // off the Character — no separate mood store on the render side.
+        const band = moodBand(snapshot.mood + snapshot.moodBoost);
+        for (const ch of os.characters.values()) {
+          if (ch.employeeId === snapshot.id) ch.moodBand = band;
+        }
       } else if (msg.type === 'dispatchUpdate') {
         setDispatchEntries((prev) =>
           upsertDispatchEntry(prev, {
@@ -777,5 +840,6 @@ export function useExtensionMessages(
     progression,
     dispatchEntries,
     dismissDispatch,
+    employees,
   };
 }

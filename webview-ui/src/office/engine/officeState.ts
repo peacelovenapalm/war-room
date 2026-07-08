@@ -1,3 +1,4 @@
+import { employeeId } from '../../../../core/src/employeeId.js';
 import {
   AUTO_ON_FACING_DEPTH,
   AUTO_ON_SIDE_DEPTH,
@@ -460,6 +461,10 @@ export class OfficeState {
     }
     if (cwd) {
       ch.cwd = cwd;
+      // Employee identity FK (G1, GAME-DESIGN §4.1) — same (machine, project)
+      // key the server's employeeStore resolves, computed client-side via
+      // the identical shared function so the two never drift.
+      ch.employeeId = employeeId(machine, cwd);
     }
     if (pid !== undefined) {
       ch.pid = pid;
