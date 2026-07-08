@@ -150,7 +150,7 @@ does not change any existing dispatch behavior or test):
    `{{stepK.result}}` with `steps[K].resultTail` (already ≤8192 chars,
    the existing `DISPATCH_RESULT_TAIL_MAX_CHARS` cap) and every
    `{{stepK.exitCode}}` with `steps[K].exitCode`. `K` must be `<
-   chainStep+1` (a step may only reference an earlier step, never
+chainStep+1` (a step may only reference an earlier step, never
    itself/later — reject unresolvable refs at `saveChainDef` time via
    static validation, not at render time).
    b. **Budget gate here** (§5) — if the target machine+provider is
@@ -160,7 +160,7 @@ does not change any existing dispatch behavior or test):
    scheduler tick as §3) re-checks budget and calls step 4 again when
    clear.
    c. Otherwise call `dispatchStore.enqueue({ ...resolved step fields,
-   chainRunId, chainStep: chainStep+1 })` — this is the ONLY call site
+chainRunId, chainStep: chainStep+1 })` — this is the ONLY call site
    that starts a chain step. It goes through the exact same `enqueue()`
    the CallModal uses, which means the runner's per-machine allowlist
    check applies to EVERY step independently. A chain step targeting a
