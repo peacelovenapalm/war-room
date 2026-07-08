@@ -1,9 +1,22 @@
 # War Room v2 — Autonomous Sonnet Ultracode Build Plan
 
-Status: EXECUTION-READY. Supersedes `.planning/v2/sections/08-milestones-build-plan.md`
-wherever they disagree — this document has incorporated every fix from
-`GAME-DESIGN.md` §9 (Conflict resolutions). Read `GAME-DESIGN.md` in full
-before starting G0; it is the design authority this plan implements.
+Status: REV 2, EXECUTION-READY (2026-07-08). Revised against Greg's
+32-question interrogation (see GAME-DESIGN.md's "Greg interrogation
+deltas" appendix — those answers are locked). The 8 section drafts are
+ARCHIVED at `.planning/v2/archive/sections/` and are NOT authoritative.
+Read `GAME-DESIGN.md` in full before starting G0; it is the design
+authority this plan implements.
+
+**Execution model (rev 2):** ONE continuous `/goal` ultracode dynamic run
+executes G0→G6 to completion — milestone boundaries are internal gates,
+not session boundaries. The run self-paces around Greg's real Claude
+5h/weekly limits (pause near caps, resume on reset — never compete with
+his active work hours), may delegate suitable tasks to Codex/GPT-5.5, and
+finishes with a Bark push + (usage permitting) a Fable medium review
+pass. Deploys are batched (3 gates: after G2, G4, G6) and pre-authorized
+in KICKOFF.md — see each milestone's deploy cadence. Design-feel problems
+are note-and-continue: log to `.planning/v2/TUNING.md`, never stall the
+line.
 
 Grounded at repo HEAD `50f9ef2` (2026-07-08), branch `war-room/v1`:
 server 329/329, webview 158/158, bin 63/63, tsc/lint/build clean, dispatch
@@ -39,12 +52,16 @@ re-verifying worktree isolation first.
    not optional. The one documented exception is the capped
    `flavor_bonus` world event (GAME-DESIGN.md §6.3) — every other hit
    must trace to a real event.
-3. **Tailnet-only / gated actions:** no milestone SSHes into NEXUS or
-   runs `docker`/`tailscale serve` itself. Every milestone needing a
-   NEXUS change updates `.planning/runbooks/nexus-war-room-deploy.sh` and
-   stops — Greg runs it. A fresh autonomous session's "Greg authorized
-   deploys" from a PRIOR session does not carry over — re-confirm
-   explicitly, every milestone, every session.
+3. **Tailnet-only / gated actions:** no new external scopes/funnels,
+   ever. **Rev-2 amendment for THIS run only:** KICKOFF.md rev 2 carries
+   Greg's written pre-authorization for the 3 batched deploys (after G2,
+   G4, G6) — running `.planning/runbooks/nexus-war-room-deploy.sh` at
+   those 3 gates does not require a fresh ask. The pre-authorization
+   covers ONLY that runbook. Everything else stays gated on a fresh
+   explicit ask: any other SSH/docker/tailscale action on NEXUS, any
+   tool install (`rembg`/`sharp`/`pip`/system packages), any edit to
+   Greg-owned files outside this repo (e.g. `~/.claude/statusline.js`),
+   any NEXUS backup-config change. When in doubt, it is gated.
 4. **Git:** atomic commits, conventional-commit + em-dash subject,
    explicit-path staging (never `git add -A`), one commit per file-level
    task group.
@@ -187,10 +204,13 @@ node scripts/run-e2e.mjs
 ### Acceptance criteria
 
 - `grep -r "engine/renderer\|engine/gameLoop" webview-ui/dist` → empty.
-- Screenshot diff vs `.planning/evidence/v1-crisis-stages.png` +
-  `-grayscale.png` (same fire/smoke/alarm shapes, same sprites, same
-  sound-toggle glyph) — new pair `.planning/evidence/g0-pixi-parity.png`
-  / `-grayscale.png`.
+- Screenshot pair `.planning/evidence/g0-pixi.png` / `-grayscale.png`
+  compared against `.planning/evidence/v1-crisis-stages.png`: same scene
+  CONTENT and legibility (fire/smoke/alarm shapes present and
+  distinguishable, sprites render, sound-toggle glyph visible) —
+  **pixel-perfect parity NOT required** (GAME-DESIGN §8.1 rev 2: "better
+  is welcome"; do not burn time diff-chasing rendering differences that
+  don't hurt legibility).
 - Two distinct hue-shifted character variants visually confirmed distinct
   (recolor pipeline task 6 didn't silently degrade to "always the same
   hue").
@@ -198,9 +218,10 @@ node scripts/run-e2e.mjs
   crisis effects (manual check, record in STATE.md).
 - FPS at the full 4096-tile (64×64) floor with viewport culling active,
   recorded (informs whether chunking is ever needed later).
-- All 4 test suites green at counts ≥ pre-migration (server 329,
-  webview 158, bin 63) — a deleted test needs an explicit justification
-  in the commit message, never a silent drop.
+- All 4 existing test suites green; every ported renderer concern keeps
+  equivalent assertions (GAME-DESIGN §10 rev 2 test bar: definition-of-
+  done coverage, no count-ratcheting — a deleted test needs a stated
+  justification in the commit message, never a silent drop).
 
 ### Ultracode workflow shape
 
@@ -230,10 +251,12 @@ Task 6 (colorize.ts Pixi-native recolor) is a GATE — do not proceed to
 task 10 (deleting renderer.ts/gameLoop.ts) until it's verified working,
 because Employees (G1) and Art (G5) depend on it. Do not delete
 renderer.ts/gameLoop.ts until the WAR_ROOM_ENGINE flag has flipped cleanly
-both directions twice. Capture the g0-pixi-parity screenshot pair (color +
-grayscale) via the playwright-skill before your final commit. Do not
-deploy — stop and report at §G0's acceptance criteria, verbatim, including
-the two recorded FPS numbers.
+both directions twice. Pixel-perfect parity with the old canvas renderer
+is NOT required — same content + legibility is the bar, improvements
+welcome. Capture the g0-pixi screenshot pair (color + grayscale) via the
+playwright-skill before your final commit. Do not deploy — report §G0's
+acceptance criteria, including the two recorded FPS numbers, then proceed
+to G1.
 ```
 
 ---
@@ -241,10 +264,11 @@ the two recorded FPS numbers.
 ## G1 — Employees (persistent named characters)
 
 **Goal:** every distinct real work identity (machine + project) becomes a
-persistent Employee — traits derived from real behavior, level/mood/needs,
-verbs hire/assign/train/promote/break/fire/retire/rehire. Implements
-GAME-DESIGN.md §4 exactly — that section is the canonical schema/math,
-superseding any earlier draft.
+persistent Employee — traits derived from real behavior, level + mood
+(mood-only, needs CUT per interrogation delta #2), template one-liner
+personalities, verbs hire/assign/train/promote/break/fire/retire/rehire,
+retire ceremony + Hall of Fame. Implements GAME-DESIGN.md §4 exactly —
+that section is the canonical schema/math, superseding any earlier draft.
 
 ### File-level tasks
 
@@ -265,13 +289,22 @@ superseding any earlier draft.
 spriteData.ts:51`, falls back to `PALETTE_COUNT = 6`). Never hardcode
    `% 6` on the server.
 4. `server/src/employeeStore.ts` **(NEW)** — full store per
-   GAME-DESIGN.md §4: `employeeId(machine, projectDir)` (no provider
-   component — §9.4), `Employee` record, score formulas (§4.3),
-   `computeLevel(xp, {base:60, step:30})` (§4.4), mood/needs tick
-   function (§4.5), quit mechanic (mulberry32-seeded, halves XP not
-   resets to 1 — §4.5/§9.18), ledger writer at
+   GAME-DESIGN.md §4 rev 2: `employeeId(machine, projectDir)` (no
+   provider component — §9.4), `Employee` record (mood-only — NO
+   `needs` field, mood is a STORED base + transient `moodBoost`), score
+   formulas (§4.3), `computeLevel(xp, {base:60, step:30})` (§4.4),
+   mood decay/restore per §4.5 constants (idle-only decay, break
+   restores +30, HEAVY moodBoost hit only when day error rate ≥ 20%),
+   vacation-mode awareness (decay/quit rolls suspended while the §4.5
+   flag is on), quit mechanic (mulberry32-seeded, halves XP not resets
+   to 1 — §4.5/§9.18), ledger writer at
    `~/.pixel-agents/employee-history/<id>.jsonl` (tail-keep at 5000→2500
    lines).
+   4b. `core/src/quips.ts` **(NEW)** — deterministic template one-liner
+   pools keyed off (trait badge, mood band, event type), seeded by
+   `hash(id|date|event)` per GAME-DESIGN §4.5. Pure functions, unit
+   tested (same inputs → same line; every pool non-empty; no real
+   glyphs used).
 5. `server/__tests__/employeeStore.test.ts` **(NEW)** — minimum coverage:
    key determinism (same machine+project → same id, regardless of
    provider), score formula boundaries (0/50/100 cases, `MIN_SAMPLES=5`
@@ -300,8 +333,10 @@ spriteData.ts:51`, falls back to `PALETTE_COUNT = 6`). Never hardcode
    earlier draft said; `crisis.ts` owns `CRISIS_STAGES`).
 10. `webview-ui/src/components/EmployeeRoster.tsx` **(NEW)** — clones
     `AgentDrawer.tsx`'s layout conventions: name, sprite, rank, level,
-    mood (bar as TEXT number + bar, never color-only), badges, verb
-    buttons wired to the §7 routes.
+    mood (bar as TEXT number + bar, never color-only), badges, quip
+    line, verb buttons wired to the §7 routes, plus a retired tab
+    (Hall of Fame — name, rank, level, badge history, tenure) per
+    GAME-DESIGN §4.6's retire ceremony.
 11. `webview-ui/src/office/engine/officeState.ts` — characters gain a
     stable `employeeId` FK so the SAME sprite/costume persists across an
     employee's sessions.
@@ -353,27 +388,26 @@ project's proven worktree-failure precedent.
 
 ### Deploy cadence
 
-Deployable after Wave B. **Re-confirm deploy authorization explicitly**
-— a prior session's yes does not carry over. Kickoff prompt must ask
-"deploy G1 now? (y/n)" as a literal gate.
+**No standalone deploy** (rev 2 batching) — G1 ships to NEXUS as part of
+the pre-authorized batch-1 deploy at the end of G2.
 
 ### Kickoff prompt
 
 ```
-Read GAME-DESIGN.md §4 and BUILD-PLAN.md §G1 in full. Wave A first: tasks
-1-8 (leveling.ts extraction + employeeNames + spriteIndex-as-raw-hash per
-task 3's struck note (do NOT touch server/src/assetLoader.ts)
-+ employeeStore.ts + its test suite + asyncapi messages + httpServer
-routes + wiring into the real turn/crisis call sites), server-only, commit
-each file group separately. Run cd server && npx vitest run
-employeeStore progressionStore. Then Wave B: tasks 9-12
-(personaBadges.ts, EmployeeRoster.tsx, officeState.ts employeeId FK,
-mood.ts), webview-only. Run cd webview-ui && npm test. Full root npm test +
-check-types + lint before declaring done. Verify the break-never-blocks-
-dispatch hard rule with an explicit test. Capture g1-employee-roster
-screenshot pair. STOP before running nexus-war-room-deploy.sh — ask Greg
-explicitly, do not assume the standing deploy authorization carries over
-to this session.
+Read GAME-DESIGN.md §4 (rev 2 — mood-only, needs CUT) and BUILD-PLAN.md
+§G1 in full. Wave A first: tasks 1-8 (leveling.ts extraction +
+employeeNames + spriteIndex-as-raw-hash per task 3's struck note (do NOT
+touch server/src/assetLoader.ts) + employeeStore.ts (NO needs field —
+stored mood base + moodBoost, vacation-aware decay) + quips.ts + test
+suites + asyncapi messages + httpServer routes + wiring into the real
+turn/crisis call sites), server-only, commit each file group separately.
+Run cd server && npx vitest run employeeStore progressionStore. Then
+Wave B: tasks 9-12 (personaBadges.ts, EmployeeRoster.tsx with Hall of
+Fame tab, officeState.ts employeeId FK, mood.ts), webview-only. Run cd
+webview-ui && npm test. Full root npm test + check-types + lint before
+declaring done. Verify the break-never-blocks-dispatch hard rule with an
+explicit test. Capture g1-employee-roster screenshot pair. No deploy at
+G1 — proceed to G2; the batch-1 deploy gate is at the end of G2.
 ```
 
 ---
@@ -395,7 +429,9 @@ zone-tier/roomAdjacency design in the old 08 draft entirely** (§9.7).
    `CASH_SHIFT_GRADE={LEAN:100,STEADY:40,HEAVY:0}`,
    `REP_SHIFT_GRADE={LEAN:3,STEADY:1,HEAVY:0}`,
    `REP_STREAK_MILESTONE={d3:10,d7:30,d30:120}`,
-   `REP_DECAY_DARK_DAY=1`, `CASH_PER_DISPATCH_EXIT_0=5`,
+   `REP_DECAY_DARK_DAY=1`, `REP_DECAY_GRACE_DAYS=1` (rev 2: first
+   consecutive zero-activity day is free — GAME-DESIGN §3.2),
+   `CASH_PER_DISPATCH_EXIT_0=5`,
    `DISPATCH_CASH_DAILY_CAP=50` (anti-farming cap, GAME-DESIGN §3.1 —
    dispatching burns real tokens, so uncapped it would pay for volume),
    etc.) — every other file imports from here, never retypes a number.
@@ -408,7 +444,12 @@ zone-tier/roomAdjacency design in the old 08 draft entirely** (§9.7).
    — compute-on-demand per GAME-DESIGN.md §2 (real-event award +
    WS-connect catch-up + 5-min live-only interval, reusing
    `httpServer.ts`'s existing `onClose`-cleared-timer pattern at
-   `httpServer.ts:191-193`/`239-241`).
+   `httpServer.ts:191-193`/`239-241`). Includes the studio-wide
+   **vacation flag** + `POST /api/economy/vacation` toggle route per
+   GAME-DESIGN §4.5 rev 2 (freezes Rep decay/grime here; employeeStore
+   reads the same flag for mood/quit suspension) and the
+   `REP_DECAY_GRACE_DAYS` logic (decay starts on the SECOND consecutive
+   zero-activity day — boundary-test it).
 3. Wire `economyStore.addCash/addReputation` into the EXACT same call
    sites `progression.recordTurnEnd/recordCrisisResolved/
 recordShiftDayClosed` already use — do not create parallel event
@@ -509,26 +550,30 @@ precedent, default to sequential. Wave C depends on both route contracts.
 
 ### Deploy cadence
 
-Re-confirm deploy authorization explicitly. **Flag to Greg specifically**
-that this milestone changes what "spending" means (real Cash-earning
-rates go live) — he should review the rate table in
-`economyConstants.ts` before it deploys, not just rubber-stamp yes.
+**BATCH-1 DEPLOY GATE (pre-authorized in KICKOFF.md rev 2).** After G2's
+full gate list is green, run `.planning/runbooks/nexus-war-room-deploy.sh`
+under the standing pre-authorization. Log a `REVIEW-ON-RETURN` note in
+`.planning/v2/TUNING.md` pointing Greg at the `economyConstants.ts` rate
+table (he confirmed numbers are tune-from-telemetry provisional — the
+review is a retune checkpoint, not a deploy blocker).
 
 ### Kickoff prompt
 
 ```
-Read GAME-DESIGN.md §3 and §5, and BUILD-PLAN.md §G2, in full. Wave A:
-economyConstants.ts + economyStore.ts wired to the existing
-shiftStats/progressionStore real-event callbacks, server-only. Wave B:
-furnitureBuffs.ts + buildingBuffs.ts (computeActiveBuffs with BOTH
-buffsForDesk and globalBuffs paths, ONE shared 40% cap) + the
+Read GAME-DESIGN.md §3 and §5 (rev 2), and BUILD-PLAN.md §G2, in full.
+Wave A: economyConstants.ts (including REP_DECAY_GRACE_DAYS=1) +
+economyStore.ts (including the vacation toggle route) wired to the
+existing shiftStats/progressionStore real-event callbacks, server-only.
+Wave B: furnitureBuffs.ts + buildingBuffs.ts (computeActiveBuffs with
+BOTH buffsForDesk and globalBuffs paths, ONE shared 40% cap) + the
 /api/building/expand route, server-only, no file overlap with Wave A.
 Wave C: EconomyHUD + EditorToolbar room-tagging/sell tools, webview,
 depends on A+B routes. Grep every new award call site for the word
 "token" before your final commit — zero hits allowed outside comments.
-Capture g2-build-mode screenshot pair. STOP and explicitly ask Greg to
-re-confirm deploy authorization, naming that this milestone changes real
-Cash-earning rates and he should review economyConstants.ts first.
+Capture g2-build-mode screenshot pair. Then run the BATCH-1 deploy under
+the KICKOFF pre-authorization and verify the deployed instance serves
+/api/economy before starting G3; add the economyConstants REVIEW-ON-RETURN
+note to TUNING.md.
 ```
 
 ---
@@ -607,17 +652,25 @@ always win over the employee default. 9. `server/__tests__/standingOrderStore.te
 dedupe guard fires exactly once per local date across repeated 60s
 ticks within the same day. 10. `webview-ui/src/components/StandingOrdersPanel.tsx` **(NEW)**.
 
-**Wave C — Budget guardrail:** 11. `~/.claude/statusline.js` — **Greg's own file, outside this repo.**
-Flag as a SEPARATE, explicitly-approved edit — never silently
-bundled into a repo commit. Add the ~10-line snapshot write to
-`~/.pixel-agents/rate-limit-snapshot.json` per GAME-DESIGN.md §7.4.
-The script's parse sites are verified real this session:
-`data.rate_limits` at statusline.js:353, windows `five_hour` /
-`seven_day` each read as `{used_percentage, resets_at}`
-(statusline.js:357-366, `resets_at` in Unix SECONDS per the comment
-at :174). **Still dump one real stdin payload before writing the
-snapshot code** — the parse sites prove the script's expectations,
-not what the CLI currently sends. 12. `bin/needs-input-poller.mjs` — read+forward the snapshot file,
+**Wave C — Budget guardrail:** 11. Rate-limit snapshot source — **Greg
+flagged this decision OPEN ("unsure", interrogation delta #13). Default
+to GAME-DESIGN §7.4 Option B (decoupled):** write a standalone
+repo-versioned script `bin/rate-limit-snapshot-hook.mjs` that receives
+the statusline stdin payload and writes ONLY
+`~/.pixel-agents/rate-limit-snapshot.json`; document the one-line hook
+registration in the runbook for Greg to wire (registering it in
+`~/.claude/settings.json` is a Greg-owned-file change → gated, present
+it as a ready-to-run instruction, do not apply it yourself). Do NOT
+edit `~/.claude/statusline.js` (Option A) unless Greg explicitly picks
+it. The payload's expected shape is verified against statusline.js's
+parse sites: `data.rate_limits` (statusline.js:353), windows
+`five_hour`/`seven_day` each `{used_percentage, resets_at}`
+(statusline.js:357-366, `resets_at` in Unix SECONDS per the comment at
+:174). **Still dump one real stdin payload before finalizing the
+parser** — the parse sites prove the script's expectations, not what
+the CLI currently sends. Until Greg wires the hook, the budget store
+sees no snapshot → fail-safe pause with `⚠ STALE` badge (by design,
+automation stays dark until the signal exists). 12. `bin/needs-input-poller.mjs` — read+forward the snapshot file,
 tolerant of absence, to `POST /api/budget/report`. 13. `server/src/budgetStore.ts` **(NEW)** — `BudgetSnapshot`,
 `BUDGET_STALE_MS=900_000`, `BUDGET_PAUSE_5H_PCT_BASE=70`,
 `BUDGET_PAUSE_7D_PCT_BASE=80`, hard ceilings 95/95 (never raised by
@@ -630,9 +683,10 @@ value, never auto-changed); the store keeps a separate
 `codexWeeklyUsed` COUNTER incremented on every codex `exited`
 dispatch (the draft's "cap incremented per dispatch" wording was
 backwards), reset Monday 00:00 local, rendered with `~`/`est.`
-prefix — never the bare `%` the Claude meter gets. 14. `server/src/economyStore.ts` (from G2) — add the 4-perk table
-(Second Shift 500, Chain Gang 800, Night Shift Foreman 1500,
-Autopilot 2500) as `perkFlags`, read-only-consumed by
+prefix — never the bare `%` the Claude meter gets. 14. `server/src/economyStore.ts` (from G2) — add the **3-perk** table
+(Second Shift 500, Chain Gang 800, Night Shift Foreman 1500 — the
+Autopilot perk is CUT per interrogation delta #6; first-fire confirm
+is unconditional forever) as `perkFlags`, read-only-consumed by
 `standingOrderStore`/`budgetStore`/`chainStore` — none of those three
 talk to the economy store directly, one-way layering. 15. `server/__tests__/budgetStore.test.ts` **(NEW)** — `isAutomationPaused`
 returns `paused:true, reason:'stale-snapshot'` when `receivedAt` is
@@ -641,7 +695,18 @@ pauses). 16. Wire the budget gate into BOTH `chainOrchestrator.ts`'s step-4b log
 AND `standingOrderTick`'s step-3 logic — **never** into a manual
 CallModal send (hard rule: manual dispatch is never budget-gated,
 only shown the meter as information next to Send). 17. `webview-ui/src/components/CallModal.tsx` — budget meter chip next to
-Send (glyph+word, e.g. `5H ~72% fair`), never a disabled state.
+Send (glyph+word, e.g. `5H ~72% fair`), never a disabled state. 18. **STOP ALL kill switch (rev 2, GAME-DESIGN §7.5):**
+`POST /api/automation/stop-all` + `POST /api/automation/resume` in
+`httpServer.ts`, transactional semantics per §7.5 (disable orders
+with `stoppedByKillSwitch` flag, halt chain advancement to `halted`,
+cancel queued fires, broadcast `automationStopped` — asyncapi first);
+`webview-ui/src/components/StopAllControl.tsx` — always-visible
+`■ STOP ALL` (shape+word), confirm-click RESUME, mounted in the main
+HUD (G6 re-mounts it in the phone check-in view). 19.
+`server/__tests__/stopAll.test.ts` **(NEW)** — stop-all mid-chain
+never enqueues the next step; resume restores exactly the
+previously-enabled order set; manual CallModal dispatch still
+succeeds while stopped.
 
 ### Verification commands
 
@@ -686,30 +751,37 @@ cross-wave collision. Run A, B, C strictly in that order.
 
 ### Deploy cadence
 
-Highest-stakes deploy in the whole plan — it can spend real API budget
-autonomously. Kickoff prompt must require Greg to explicitly review and
-approve the 4 perk costs and the base pause thresholds (70%/80%, hard
-ceiling 95%/95%) before first deploy — not a rubber-stamp yes.
+**No standalone deploy** (rev 2 batching) — G3 ships in the batch-2
+deploy at the end of G4. This remains the highest-stakes code in the
+plan (it can spend real API budget autonomously), but three unconditional
+guards mean nothing fires while Greg is away even once deployed: (1)
+every new standing order requires a first-fire human confirm click, (2)
+no budget snapshot yet → fail-safe pause (`stale-snapshot`), (3) STOP ALL
+exists. Log the perk costs + pause thresholds (70%/80%, ceilings 95/95)
+as a `REVIEW-ON-RETURN` entry in TUNING.md for Greg's explicit sign-off
+on the numbers.
 
 ### Kickoff prompt
 
 ```
-Read GAME-DESIGN.md §7 and BUILD-PLAN.md §G3 in full. Wave order: A
-chainStore + chainOrchestrator (subscribe via ONE singleton call at
-process startup, NOT per-WS-connection — this is a named bug fix, verify
-by grepping every dispatchStore.onUpdate call site; treat 'expired'
+Read GAME-DESIGN.md §7 (rev 2 — Autopilot CUT, STOP ALL added, snapshot
+source = Option B decoupled hook) and BUILD-PLAN.md §G3 in full. Wave
+order: A chainStore + chainOrchestrator (subscribe via ONE singleton call
+at process startup, NOT per-WS-connection — this is a named bug fix,
+verify by grepping every dispatchStore.onUpdate call site; treat 'expired'
 identically to 'denied' in the fail path; CHAIN_STEP_TIMEOUT_MS=500_000,
-strictly less than DISPATCH_TTL_MS=600_000). B standingOrderStore +
-dispatchTemplateStore + resolveEmployeeDefaults wiring. C budgetStore —
-FIRST dump one real ~/.claude/statusline.js stdin payload to verify the
-rate_limits shape before writing the parser; the statusline.js edit itself
-is Greg's own file outside this repo, flag it as a separate approval, do
-not bundle into a repo commit. Write the two named regression tests (bug
-#1: double-subscription doesn't double-enqueue; bug #2: expired status
-fails the chain, no stall) explicitly — do not skip them. Sequential, one
-checkout. Before requesting deploy, print the perk costs and pause
-thresholds and require an explicit "approved" from Greg on those numbers
-specifically, separate from the general deploy confirmation.
+strictly less than DISPATCH_TTL_MS=600_000). B standingOrderStore (first-
+fire confirm is UNCONDITIONAL — no perk removes it) +
+dispatchTemplateStore + resolveEmployeeDefaults wiring. C budgetStore +
+bin/rate-limit-snapshot-hook.mjs (do NOT edit ~/.claude/statusline.js —
+Greg-owned, decision flagged open, Option B is the default; document the
+hook registration as a runbook instruction for Greg) + the 3-perk table +
+STOP ALL (route + StopAllControl.tsx + stopAll tests). Write the two
+named regression tests (bug #1: double-subscription doesn't
+double-enqueue; bug #2: expired status fails the chain, no stall)
+explicitly — do not skip them. Sequential, one checkout. No deploy at G3
+— log perk costs + pause thresholds to TUNING.md as REVIEW-ON-RETURN and
+proceed to G4.
 ```
 
 ---
@@ -775,7 +847,20 @@ milestone. 11. `webview-ui/src/components/ContractsPanel.tsx` **(NEW)** — mirr
 `getSeason()`, pure functions of `Date.now()`. Wire `ambience.ts`'s
 existing "night duck" to `getDayPhase()` instead of any ad hoc check. 13. `server/__tests__/worldEventStore.test.ts` **(NEW)** — weight/gap/cap
 enforcement, especially the `+5/day` flavor-Cash ceiling and the
-online-only skip for `power_surge`/`power_outage_scare`.
+online-only skip for `power_surge`/`power_outage_scare`; vacation-mode
+suppression (only pure-ambient events fire while the flag is on). 14.
+**Digest assembler (rev 2, GAME-DESIGN §6.5):** `server/src/digest.ts` —
+`renderDigest(events, narrator = templateNarrator)` building the
+"while you were out" story from template strings + `core/src/quips.ts`
+lines; the `narrator` parameter IS the post-v1.0 LLM seam — templates
+only in v1.0, no token spend. Feeds `GET /api/economy/summary`. Unit
+test: deterministic output for fixed inputs. 15. **Bark emitter (rev 2,
+GAME-DESIGN §6.5):** `server/src/notifyBark.ts` — thin POST to the NEXUS
+Bark wrapper (URL from env `WAR_ROOM_BARK_URL`; absent = disabled, log
+once, never crash). Morning-digest push (≤1/day) + big-moment pushes
+ONLY (contract completed, employee quit, budget pause, STOP ALL, chain
+failed) — never per-turn/per-world-event; unit test the class filter and
+the daily digest dedupe.
 
 ### Verification commands
 
@@ -808,26 +893,31 @@ npm run check-types && npm run lint && npm test && npm run build
 
 ### Deploy cadence
 
-Re-confirm deploy authorization. Flag that contracts read real vault todo
-files — confirm the todo directory path/env var is correctly scoped to
-Greg's real vault before first deploy, not a test fixture path.
+**BATCH-2 DEPLOY GATE (pre-authorized in KICKOFF.md rev 2)** — ships
+G3+G4 together. Before running the runbook: verify the contracts todo
+directory path/env var is scoped to Greg's REAL vault, not a test
+fixture path (grep the deployed env, don't assume), and confirm
+`WAR_ROOM_BARK_URL` handling degrades silently when unset.
 
 ### Kickoff prompt
 
 ```
-Read GAME-DESIGN.md §6 and BUILD-PLAN.md §G4 in full. Wave A:
+Read GAME-DESIGN.md §6 (rev 2 — world-event table now inlined at §6.3,
+digest + Bark at §6.5) and BUILD-PLAN.md §G4 in full. Wave A:
 contractStore.ts (extends briefingProvider, don't build a second todo
 reader) + the explicit contractId field on DispatchRequest (not string-
 matching) + MAX_MANUAL_CLAIMS_PER_DAY=3 + 7-day backlog dedupe. Wave B:
 realGlyphs.ts (derive the real glyph set from crisis.ts + dispatch.ts,
-never hand-type it) + worldEventStore.ts with the corrected SIM glyphs
-(coffee_run/client_call/mail_delivery moved off ○) + SignalChip.tsx +
-signalChip.test.ts (disjointness enforcement — verify it actually fails
-if you deliberately introduce a collision, then revert) + ContractsPanel +
-dayNight.ts. Sequential, one checkout. Capture g4-missions-world
-screenshot pair. STOP and re-confirm deploy authorization, noting
-contracts read real vault todo files — verify the path is Greg's actual
-vault, not a fixture.
+never hand-type it) + worldEventStore.ts per the §6.3 table (SIM glyphs
+already corrected there) + SignalChip.tsx + signalChip.test.ts
+(disjointness enforcement — verify it actually fails if you deliberately
+introduce a collision, then revert) + ContractsPanel + dayNight.ts +
+digest.ts (template narrator, LLM seam) + notifyBark.ts (capped
+big-moment pushes only). Sequential, one checkout. Capture
+g4-missions-world screenshot pair. Then run the BATCH-2 deploy under the
+KICKOFF pre-authorization — first verify the contracts todo path is
+Greg's actual vault, not a fixture — and confirm the deployed instance
+mints a contract from real briefing data before starting G5.
 ```
 
 ---
@@ -839,6 +929,19 @@ sprites, weather particles, mood badges, ambient wander. Implements
 GAME-DESIGN.md §8.3 exactly — **corrects the old 08 draft's incompatible
 72-generation asset-directory scheme in favor of Section 07's spec**
 (§9.15).
+
+**Rev-2 art strategy — building first, assets trail (interrogation
+locked):** all G5 CODE tasks ship against hue-shift recolors of existing
+sprites as the default; generated art is an OPPORTUNISTIC track that
+never blocks G5 or G6. Generation batches are sized to the Codex 5h
+reset window (Greg: "credits reset every 5 hours... batch the sprites
+around my reset and use /loop on a 6-hour timer until all of the images
+are done") — one wave of 6-9 jobs per window, then wait for the next
+reset; stop-and-Bark on any rate-limit message. If the gated
+`rembg`/`sharp` installs are still unauthorized when everything else is
+done, ship v1.0 on hue-shift recolors and leave the generation batch as
+a documented post-run `/loop` job in TUNING.md — do not stall the run
+waiting on an install authorization.
 
 ### File-level tasks
 
@@ -874,9 +977,11 @@ SESSION-HANDOFF-2026-07-06.md` §7.3, treat as law). It burns the
   (verified this session). Installing them is a **gated action** —
   ask Greg explicitly before any `pip install`/`npm install`; do not
   bury it in a dependency bump.
-  4b. **Read `sections/07-art-pipeline.md` in full — canonical spec for
-  Track 2, not a re-derivation — as amended by GAME-DESIGN.md §8.3
-  (transport + celebrate/break corrections).** Confirm existing sheet
+  4b. **Read `archive/sections/07-art-pipeline.md` in full (archived
+  location — the ONE archived draft still used as reference detail, and
+  ONLY for its asset tables/prompt templates) — as amended by
+  GAME-DESIGN.md §8.3 (transport + celebrate/break corrections); where
+  07 and GAME-DESIGN disagree on any repo fact, GAME-DESIGN wins.** Confirm existing sheet
   frame usage first: the slicing is in
   `webview-ui/src/office/sprites/spriteData.ts:136-152`
   (`getCharacterSprites()`: walk renders `[d[0],d[1],d[2],d[1]]`,
@@ -954,24 +1059,32 @@ one logged silent failure.
 
 ### Deploy cadence
 
-Re-confirm deploy authorization. Flag the asset-size increase — run
-`du -sh webview-ui/dist` before deploying, confirm the NEXUS container's
-static-asset serving handles it.
+**No standalone deploy** (rev 2 batching) — G5 ships in the batch-3
+deploy at the end of G6. Record `du -sh webview-ui/dist` in STATE.md now
+so the G6 deploy can confirm the NEXUS container's static-asset serving
+handles the asset-size increase.
 
 ### Kickoff prompt
 
 ```
-Read GAME-DESIGN.md §8.3 and sections/07-art-pipeline.md (canonical art
-spec) and BUILD-PLAN.md §G5 in full. Track 1 (code, this checkout):
-ambientEvents.ts, WorldEventBanner.tsx, calendarStore.ts. Track 2 (art,
+Read GAME-DESIGN.md §8.3 (rev 2) and archive/sections/07-art-pipeline.md
+(archived reference — asset tables/prompt templates only, GAME-DESIGN
+wins on any repo fact) and BUILD-PLAN.md §G5 in full, including the rev-2
+"building first, assets trail" strategy. Track 1 (code, this checkout):
+ambientEvents.ts, WorldEventBanner.tsx, calendarStore.ts — all code ships
+against hue-shift recolors, never blocked on generated art. Track 2 (art,
 worktree): FIRST run the 2-minute worktree canary described in §G5 before
 trusting isolation; if it fails, do Track 2 sequentially in the main
 checkout after Track 1 instead. Track 2 itself: run the task-4a PREFLIGHT
 first — transport is Codex $imagegen on the ChatGPT subscription per
 /Users/greg/code/Diablito/SESSION-HANDOFF-2026-07-06.md §7.3 (burns real
-Codex plan limits 3-5x/turn: confirm headroom with Greg before each wave;
-FAL fallback has NO key provisioned; rembg/sharp are NOT installed and
-installing them is a gated ask). Then read spriteData.ts:136-152 to
+Codex plan limits 3-5x/turn: batch waves of 6-9 jobs sized to the 5h
+reset window, /loop-style ~6h cadence until the sheet set is done;
+stop-and-Bark on any rate-limit message; FAL fallback has NO key
+provisioned; rembg/sharp are NOT installed and installing them is a
+gated ask — if unauthorized, ship on hue-shift recolors and log the
+generation batch as a post-run /loop job in TUNING.md). Then read
+spriteData.ts:136-152 to
 reconfirm the wired frame slots (walk [0,1,2,1]/typing 3-4/reading 5-6,
 verified 2026-07-08) — desk-work gets its OWN new sheet, never overwrite
 an existing wired slot. QA-gate every asset (dimension/alpha/
@@ -979,8 +1092,9 @@ grayscale-distinctness/decoder-smoke-test) before accepting, fall back to
 hue-shift-recolor after 2 failed regens, log fallbacks explicitly. Gate
 BIG_MAP_TABLE (2x2 footprint) on confirming tileMap.ts support first.
 Grep the full diff for economyStore/employeeStore touches from world-event
-code. Capture g5-living-world screenshot pair. Confirm dist bundle size
-before requesting deploy re-confirmation.
+code. Capture g5-living-world screenshot pair. Record dist bundle size in
+STATE.md (the batch-3 deploy at G6 checks it) — no deploy at G5, proceed
+to G6.
 ```
 
 ---
@@ -988,14 +1102,25 @@ before requesting deploy re-confirmation.
 ## G6 — Phone / PWA
 
 **Goal:** the tailnet-only web dashboard becomes installable and playable
-on phone, for the idle check-in loop.
+on phone, for the idle check-in loop. **Rev-2 target: iPhone / iOS Safari
+specifically** (Greg's actual device) — write against iOS PWA reality:
+add-to-home-screen standalone mode, NO web push (Bark covers
+notifications, §6.5), storage-eviction-safe (all real state is
+server-side anyway — the client must tolerate a cold cache without data
+loss by construction), `apple-touch-icon` + `apple-mobile-web-app-*`
+meta tags alongside the standard manifest.
 
 ### File-level tasks
 
 1. `webview-ui/vite.config.ts` — add `vite-plugin-pwa`, manifest
    (`name: "War Room"`, icons 192/512 from G5's art set, `display:
 'standalone'`), `NetworkOnly` runtime-caching strategy explicitly for
-   `/api/*` and the WS upgrade path — **never cache real data**.
+   `/api/*` and the WS upgrade path — **never cache real data**. Include
+   the iOS meta/icon set (task 0 above) — Lighthouse "installable" alone
+   does not prove iOS Safari behavior.
+   1b. Mount `StopAllControl.tsx` (from G3) in the phone check-in view —
+   the kill switch must be reachable from the phone per GAME-DESIGN
+   §7.5; verify tap target ≥44×44px.
 2. `webview-ui/src/index.css` + `App.tsx` — responsive breakpoint pass
    below 640px: side panels (`AgentDrawer`, `EmployeeRoster`,
    `ChainBuilderPanel`, HUDs) collapse into bottom-sheet/tab-bar via
@@ -1038,22 +1163,27 @@ to justify wave-splitting overhead.
 
 ### Deploy cadence
 
-Re-confirm deploy authorization (lowest-risk deploy in the plan — no new
-gameplay/economy logic — but still requires the explicit ask, no
-milestone is exempt).
+**BATCH-3 DEPLOY GATE (pre-authorized in KICKOFF.md rev 2)** — the final
+deploy, ships G5+G6. Check the STATE.md-recorded dist size against the
+NEXUS container's static serving, verify the manifest curl step, then
+run the runbook. After this deploy: send the completion Bark push and
+write the final handoff (see Overall sequencing).
 
 ### Kickoff prompt
 
 ```
-Read BUILD-PLAN.md §G6 in full. Sequential, one checkout. Add
-vite-plugin-pwa + manifest config (icons from G5's art set if it landed,
-otherwise placeholder squares labeled TEMP), NetworkOnly for /api/ and WS
+Read BUILD-PLAN.md §G6 (rev 2 — iPhone/iOS Safari target) in full.
+Sequential, one checkout. Add vite-plugin-pwa + manifest config (icons
+from G5's art set if it landed, otherwise placeholder squares labeled
+TEMP) + the iOS meta/apple-touch-icon set, NetworkOnly for /api/ and WS
 explicitly configured — verify with a DevTools Network tab check showing
 empty "from ServiceWorker" for those requests before considering the task
 done. Responsive pass: touchCamera.ts, bottom-sheet panels via Modal.tsx,
-44px touch targets. Run a device-emulated Lighthouse PWA check. Capture
-g6-mobile screenshot pair. Confirm deploy re-authorization with Greg
-before running the runbook.
+44px touch targets, StopAllControl mounted in the phone check-in view.
+Run a device-emulated Lighthouse PWA check (iPhone viewport). Capture
+g6-mobile screenshot pair. Then run the BATCH-3 deploy under the KICKOFF
+pre-authorization, verify the manifest + a live WS connect on the
+deployed instance, send the completion Bark, and write the final handoff.
 ```
 
 ---
@@ -1061,8 +1191,10 @@ before running the runbook.
 ## Overall sequencing
 
 ```
-G0 (seq, 1 agent) → G1 (2 waves, seq) → G2 (3 waves, seq) → G3 (3 waves, seq)
-  → G4 (2 waves, seq) → G5 (2 tracks, worktree-canary-gated) → G6 (seq, 1 agent)
+G0 (seq, 1 agent) → G1 (2 waves, seq) → G2 (3 waves, seq) [DEPLOY 1]
+  → G3 (3 waves, seq) → G4 (2 waves, seq) [DEPLOY 2]
+  → G5 (2 tracks, worktree-canary-gated) → G6 (seq, 1 agent) [DEPLOY 3]
+  → completion Bark + final handoff (+ Fable medium review, usage permitting)
 ```
 
 Strictly linear — no milestone starts before the previous milestone's full
@@ -1071,6 +1203,30 @@ The only place this plan risks parallelism is G5's art track, gated on a
 canary re-verifying worktree isolation. Every other "multiple waves"
 mention is a file-ownership partition run sequentially in one checkout,
 never concurrent agents.
+
+**Rev-2 run-level obligations (the /goal run owns these):**
+
+- **Pre-G1 backup note:** game state accrues under `~/.pixel-agents/` on
+  whichever machine runs the prod server (NEXUS). Adding that path to the
+  NEXUS backup v2 config is a **gated, human-run action** — write the
+  exact one-line instruction into
+  `.planning/runbooks/nexus-war-room-deploy.sh`'s preflight output and
+  into TUNING.md as the FIRST `REVIEW-ON-RETURN` item. Do not SSH to
+  NEXUS to do it yourself.
+- **Self-pacing:** monitor the same 5h/weekly rate-limit signals the game
+  itself will read; pause the run near caps and resume on reset. Never
+  compete with Greg's own active sessions — if his telemetry shows live
+  activity, prefer waiting.
+- **Delegation:** suitable mechanical tasks may go to Codex/GPT-5.5
+  (Greg's explicit allowance) — but never a task that touches award-site
+  logic, budget guardrails, or the deny-by-default dispatch boundary;
+  those stay with Claude agents under this plan's named constraints.
+- **TUNING.md:** every feel-bad observation, provisional number, and
+  REVIEW-ON-RETURN item goes here — note-and-continue, never stall.
+- **Completion:** Bark push ("War Room v2 build complete — 3 deploys
+  live, TUNING.md has N review items"), final handoff via the
+  nexus-handoff skill conventions, then (usage permitting) a Fable
+  medium review pass over the full diff.
 
 ## Top risks carried into execution
 
@@ -1096,10 +1252,19 @@ never concurrent agents.
    weekly window. The Fal fallback has no key provisioned, and
    rembg/sharp are not installed (gated installs). G5's task-4a
    preflight exists because of this — do not skip it.
-6. **Every milestone's deploy gate depends on a human re-confirming
-   authorization fresh, every session** — a fresh autonomous session must
-   not treat a prior session's "yes" as standing consent. This is
-   deliberately repeated at every G to prevent silent drift.
+6. **Deploy authorization (rev 2):** the 3 batched deploys are
+   pre-authorized in writing in KICKOFF.md rev 2 — for THIS run only,
+   covering ONLY `nexus-war-room-deploy.sh`. Every other gated action
+   (installs, statusline/settings edits, NEXUS config, backup changes)
+   still requires a fresh explicit ask; Greg being away means those
+   land in TUNING.md as REVIEW-ON-RETURN items instead of being done.
+   A future session must NOT treat this run's pre-authorization as
+   standing consent.
+7. **Unattended-run safety net:** nothing automation-side can spend real
+   tokens before Greg returns even after deploy — first-fire confirm is
+   unconditional, the budget store fail-safe-pauses with no snapshot,
+   and STOP ALL exists. If any of those three guards is weakened during
+   implementation, that is a stop-the-line bug, not a tuning note.
 
 ---
 
