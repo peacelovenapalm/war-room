@@ -100,6 +100,8 @@ components:
         # Agent Teams
         - $ref: '#/components/schemas/AgentTeamInfo'
         - $ref: '#/components/schemas/AgentTokenUsage'
+        # Progression (v1 mechanic #3)
+        - $ref: '#/components/schemas/ProgressionUpdate'
         # Layout
         - $ref: '#/components/schemas/LayoutLoaded'
         # Assets
@@ -477,6 +479,57 @@ components:
           type: integer
         outputTokens:
           type: integer
+
+    ProgressionUpdate:
+      description: >-
+        Progression snapshot (v1 mechanic #3): server-side XP/level/streak/
+        unlock state, one per user (not per agent). Broadcast whenever it
+        changes and sent again to every client on WebSocket connect. XP comes
+        ONLY from real, observed events — completed turns, observed crisis
+        resolutions (never stale/TTL poller clears), and shift-report grades
+        — never from token volume (hard guardrail: no dark patterns on real
+        money; nothing here ever rewards spending more).
+      type: object
+      additionalProperties: false
+      required:
+        [
+          type,
+          xp,
+          level,
+          xpIntoLevel,
+          xpForNextLevel,
+          streakCurrent,
+          streakLongest,
+          unlocks,
+        ]
+      properties:
+        type:
+          const: progressionUpdate
+        xp:
+          type: integer
+        level:
+          type: integer
+        xpIntoLevel:
+          type: integer
+          description: XP earned since reaching the current level.
+        xpForNextLevel:
+          type: integer
+          description: Total XP required to go from the current level to the next.
+        streakCurrent:
+          type: integer
+          description: >-
+            Consecutive local-calendar days with at least one observed real
+            completed turn — the M5 soak made literal.
+        streakLongest:
+          type: integer
+        unlocks:
+          type: object
+          description: >-
+            DATA ONLY for now — permanent achievement flags (never revert
+            once true). Mechanic #5 (expression pass) will consume these to
+            render decor in a later wave; nothing renders from them yet.
+          additionalProperties:
+            type: boolean
 
     LayoutLoaded:
       description: |
