@@ -16,6 +16,7 @@ import {
   DISPATCH_SEND_TIMEOUT_MS,
   DISPATCH_STATUS_CHIPS,
   DISPATCH_STATUSES,
+  DISPATCH_UI_PROVIDERS,
   dispatchChipLabel,
   type DispatchEntry,
   hasViewableResult,
@@ -311,6 +312,13 @@ describe('pruneSendFailures', () => {
 describe('sendFailureChipLabel', () => {
   it('names the machine that never got queued', () => {
     expect(sendFailureChipLabel({ machine: 'MACBOOK' })).toBe('⚠ NOT QUEUED — MACBOOK');
+  });
+});
+
+describe('DISPATCH_UI_PROVIDERS (scope change 2026-07-08: gemini dropped from dispatch)', () => {
+  it('offers only claude and codex — gemini is excluded (IneligibleTierError, no free tier)', () => {
+    expect(DISPATCH_UI_PROVIDERS).toEqual(['claude', 'codex']);
+    expect(DISPATCH_UI_PROVIDERS).not.toContain('gemini');
   });
 });
 

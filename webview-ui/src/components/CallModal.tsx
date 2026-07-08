@@ -5,6 +5,7 @@ import {
   DISPATCH_EFFORT_VALUES,
   DISPATCH_MODEL_PATTERN,
   DISPATCH_PROMPT_MAX_CHARS,
+  DISPATCH_UI_PROVIDERS,
   type DispatchEffort,
   type DispatchMachine,
   type DispatchProvider,
@@ -191,11 +192,13 @@ export function CallModal({ isOpen, onClose, prefill, onSend }: CallModalProps) 
                     onChange={(e) => setProvider(e.target.value as DispatchProvider)}
                   >
                     <option value="">— choose a provider —</option>
-                    {selectedMachine.providers.map((p) => (
-                      <option key={p} value={p}>
-                        {p}
-                      </option>
-                    ))}
+                    {selectedMachine.providers
+                      .filter((p) => DISPATCH_UI_PROVIDERS.includes(p as DispatchProvider))
+                      .map((p) => (
+                        <option key={p} value={p}>
+                          {p}
+                        </option>
+                      ))}
                   </select>
                 </label>
 

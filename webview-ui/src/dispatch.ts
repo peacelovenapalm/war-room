@@ -14,6 +14,14 @@
 export const DISPATCH_PROVIDERS = ['claude', 'codex', 'gemini'] as const;
 export type DispatchProvider = (typeof DISPATCH_PROVIDERS)[number];
 
+/** Providers offered in the CALL modal's picker (scope change 2026-07-08):
+ *  gemini dropped from dispatch — Google killed the CLI's free tier
+ *  (IneligibleTierError, confirmed live even on an upgraded gemini-cli).
+ *  'gemini' stays valid on DISPATCH_PROVIDERS/the wire protocol/runner argv
+ *  so nothing ripples through generated types or wave-1 tests; this is a
+ *  UI-level filter only, applied against whatever a runner advertises. */
+export const DISPATCH_UI_PROVIDERS: readonly DispatchProvider[] = ['claude', 'codex'];
+
 export const DISPATCH_STATUSES = ['ringing', 'answered', 'denied', 'expired', 'exited'] as const;
 export type DispatchStatusValue = (typeof DISPATCH_STATUSES)[number];
 

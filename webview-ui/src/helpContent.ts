@@ -302,7 +302,7 @@ export const HELP_SECTIONS: HelpSection[] = [
       {
         glyph: '☎',
         word: 'CALL',
-        text: 'The Call button (bottom toolbar) opens a modal to pick a machine, provider, project, and prompt — options only ever come from machines with a LIVE runner (GET /api/dispatch/machines); a machine with no runner installed is honestly absent, not a dead choice.',
+        text: 'The Call button (bottom toolbar) opens a modal to pick a machine, provider, project, and prompt — options only ever come from machines with a LIVE runner (GET /api/dispatch/machines); a machine with no runner installed is honestly absent, not a dead choice. Dispatchable providers are claude and codex only (Gemini CLI dropped its free tier, so it never appears here — it still renders on the office floor as a coworker if you run it yourself, see AI COWORKERS below).',
       },
       {
         glyph: '▤',
