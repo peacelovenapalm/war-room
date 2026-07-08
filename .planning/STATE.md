@@ -635,3 +635,34 @@ fires (no poll state) reset to SMOKE on refresh (documented behavior).
 
 Gates after fixes: server 246/246, webview 68/68, bin 21/21, lint + tsc
 clean, `npm run build` clean.
+
+### 2026-07-07 (evening) — telemetry wiring runbooks (`00bea1c`, `a25c327`)
+
+Greg asked to wire the remaining telemetry (MINI hooks, pollers, coworker
+adapter). Gated installs stay human-run; this session shipped the tooling:
+
+- **fix `install-poller-launchd.sh`:** two launchd-only defects found by
+  probing both Macs — (1) `command -v node` under fnm returns an ephemeral
+  `~/.local/state/fnm_multishells/<pid>` path that dies with the installing
+  shell (now `realpath`-resolved + hard-fail guard); (2) plist PATH lacked
+  `~/.local/bin`, where `claude` lives on BOTH Macs, so `claude agents
+--json` would never resolve under launchd. Neither Mac had the poller
+  installed yet — fixed before first use.
+- **new `install-coworker-adapter-launchd.sh`:** poller-runbook pattern
+  (backup → 0600 plist → bootstrap → log smoke test); documents that
+  `/api/hooks/{codex,gemini}` 404s until NEXUS runs v1 (adapter logs ⚠ and
+  keeps going; no reinstall needed after redeploy).
+- **new `ship-to-mini.sh`:** repo is unpushed, so MINI gets bin/ + runbooks
+  rsynced to `~/code/war-room` (mirrored layout → relative paths hold) and
+  `~/.war-room/env` seeded from MACBOOK's with the machine label rewritten
+  to MINI. Targets `greg@100.121.189.6` (Tailscale) — the `mini` ssh alias
+  points at a stale LAN IP. MINI probed live: node v22 (fnm), jq, codex,
+  gemini, `~/.claude/settings.json` present, no war-room files yet.
+- **Verified (live, non-persistent):** `needs-input-poller --once` → ✓ tick,
+  7 agents, POST accepted by NEXUS v0; `coworker-adapter --once` → clean
+  start. Hooks already installed on MACBOOK (env + hook.sh present).
+
+**BLOCKED on Greg (in order):** `bash .planning/runbooks/ship-to-mini.sh`,
+then the three printed MINI installers, then
+`install-poller-launchd.sh MACBOOK` + `install-coworker-adapter-launchd.sh
+MACBOOK` locally. NEXUS v1 redeploy still pending separately.
