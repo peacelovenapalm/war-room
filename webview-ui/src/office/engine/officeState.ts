@@ -399,6 +399,8 @@ export class OfficeState {
     folderName?: string,
     machine?: string,
     provider?: string,
+    sessionId?: string,
+    cwd?: string,
   ): void {
     if (this.characters.has(id)) return;
 
@@ -451,6 +453,12 @@ export class OfficeState {
     }
     if (provider) {
       ch.provider = provider;
+    }
+    if (sessionId) {
+      ch.sessionId = sessionId;
+    }
+    if (cwd) {
+      ch.cwd = cwd;
     }
     if (!skipSpawnEffect) {
       ch.matrixEffect = 'spawn';

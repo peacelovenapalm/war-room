@@ -228,6 +228,8 @@ function handleWebviewReady(send: WsSend, ctx: ClientMessageContext): void {
   const externalAgents: Record<number, boolean> = {};
   const machines: Record<number, string> = {};
   const providers: Record<number, string> = {};
+  const sessionIds: Record<number, string> = {};
+  const cwds: Record<number, string> = {};
   for (const [id, agent] of store) {
     agentIds.push(id);
     if (agent.folderName) {
@@ -244,6 +246,13 @@ function handleWebviewReady(send: WsSend, ctx: ClientMessageContext): void {
     if (agent.providerId && agent.providerId !== 'claude') {
       providers[id] = agent.providerId;
     }
+    // Dispatch drawer identity (mechanic #6b) — see AgentCreated above.
+    if (agent.sessionId) {
+      sessionIds[id] = agent.sessionId;
+    }
+    if (agent.projectDir) {
+      cwds[id] = agent.projectDir;
+    }
   }
   const seats = adapter?.loadSeats() ?? {};
   send({
@@ -254,6 +263,8 @@ function handleWebviewReady(send: WsSend, ctx: ClientMessageContext): void {
     externalAgents,
     machines,
     providers,
+    sessionIds,
+    cwds,
   });
 
   // 7. Replay live poll states (M4) so a page refresh keeps NEEDS INPUT badges

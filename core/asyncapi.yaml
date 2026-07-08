@@ -190,6 +190,19 @@ components:
             Coworker provider id ('codex', 'gemini', …) when the agent is NOT a
             Claude Code session. Rendered as a distinct silhouette + TEXT label
             (e.g. "[CODEX]") — never color-only. Absent for Claude sessions.
+        sessionId:
+          type: string
+          description: >-
+            The real session/transcript id (server AgentState.sessionId).
+            Carried through so the detail drawer (mechanic #6b) can target a
+            FOCUS dispatch and show a copy-able identity line; never rendered
+            as a chip/badge on its own.
+        cwd:
+          type: string
+          description: >-
+            Real project directory (server AgentState.projectDir) — the
+            detail drawer's "project dir" field. Distinct from folderName,
+            which is only the short label used for multi-root workspaces.
 
     AgentClosed:
       description: An agent has been removed from the office.
@@ -252,6 +265,16 @@ components:
           description: >-
             Map of agent ID (string) to coworker provider id ('codex',
             'gemini', …). Claude sessions are omitted (house default).
+          additionalProperties:
+            type: string
+        sessionIds:
+          type: object
+          description: Map of agent ID (string) to real session/transcript id.
+          additionalProperties:
+            type: string
+        cwds:
+          type: object
+          description: Map of agent ID (string) to real project directory.
           additionalProperties:
             type: string
 

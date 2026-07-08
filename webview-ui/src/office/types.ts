@@ -216,6 +216,12 @@ export interface Character {
    *  Claude Code session. Renders a distinct badge silhouette + TEXT label
    *  (e.g. "[CODEX]"); absent for Claude sessions. */
   provider?: string;
+  /** Real session/transcript id (mechanic #6b detail drawer + FOCUS dispatch
+   *  target) — never rendered as its own badge, only in the drawer/copy-id line. */
+  sessionId?: string;
+  /** Real project directory (mechanic #6b detail drawer's "project dir" field),
+   *  distinct from folderName (the short multi-root workspace label). */
+  cwd?: string;
   /** Latest state from the per-machine needs-input poller (`claude agents --json`,
    *  arriving via the server's agentPollState broadcast). `at` = client receipt
    *  time (ms) so the value expires visually if the poller/server goes silent.

@@ -73,6 +73,8 @@ export interface AgentCreated {
   isExternal?: boolean;
   machine?: string;
   provider?: string;
+  sessionId?: string;
+  cwd?: string;
 }
 
 export interface AgentClosed {
@@ -93,6 +95,8 @@ export interface ExistingAgents {
   externalAgents: Record<string, boolean>;
   machines?: Record<string, string>;
   providers?: Record<string, string>;
+  sessionIds?: Record<string, string>;
+  cwds?: Record<string, string>;
 }
 
 export interface AgentSeatMeta {

@@ -343,6 +343,10 @@ function registerWebSocketRoute(app: FastifyInstance, options: HttpServerOptions
         machine: agent.machine ?? options.machineLabel,
         // Coworker providers only (claude is the house default — no label).
         provider: agent.providerId && agent.providerId !== 'claude' ? agent.providerId : undefined,
+        // Dispatch drawer identity (mechanic #6b): real session id + project
+        // dir, carried through so FOCUS/COPY ID have something real to act on.
+        sessionId: agent.sessionId,
+        cwd: agent.projectDir,
       });
     };
 
