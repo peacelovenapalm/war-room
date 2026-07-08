@@ -143,3 +143,74 @@ export function machineSupportsFocus(
   if (!machine) return false;
   return machines.some((m) => m.machine === machine && m.focus);
 }
+
+// ── Send-failure detection ──────────────────────────────────────────
+//
+// dispatchRequest has NO ack on the wire: an invalid send (bad provider,
+// missing field, >5-ringing-per-machine cap) is silently dropped — no
+// dispatchUpdate ever arrives, and enqueue() never hands the sender the
+// server-generated id to correlate against. The only honest signal
+// available client-side is absence: if no entry for the same
+// machine+action shows up within DISPATCH_SEND_TIMEOUT_MS of the send,
+// treat it as never queued (colorblind rule still applies — GLYPH+WORD,
+// not silence).
+
+/** A send this client made, tracked locally until either a matching
+ *  DispatchEntry appears (resolved silently — the real chip is now in the
+ *  tray) or the timeout elapses (failed — see detectSendFailures). */
+export interface PendingSend {
+  id: string;
+  machine: string;
+  action: DispatchActionValue;
+  sentAt: number;
+}
+
+/** How long to wait for a ringing dispatchUpdate before assuming the send
+ *  was silently dropped server-side. */
+export const DISPATCH_SEND_TIMEOUT_MS = 1_500;
+
+/** A send confirmed never queued — client-local only, never sent by the
+ *  server (so it is NOT one of DISPATCH_STATUSES/DISPATCH_STATUS_CHIPS). */
+export interface SendFailure {
+  id: string;
+  machine: string;
+  action: DispatchActionValue;
+  detectedAt: number;
+}
+
+/** Splits pending sends into those still waiting and those that just timed
+ *  out with no matching entry received since they were sent — pure so the
+ *  timeout math is directly testable. */
+export function detectSendFailures(
+  pending: PendingSend[],
+  entries: DispatchEntry[],
+  now: number,
+): { stillPending: PendingSend[]; failed: PendingSend[] } {
+  const stillPending: PendingSend[] = [];
+  const failed: PendingSend[] = [];
+  for (const p of pending) {
+    const matched = entries.some(
+      (e) => e.machine === p.machine && e.action === p.action && e.receivedAt >= p.sentAt,
+    );
+    if (matched) continue; // resolved silently — the real entry is now in the tray
+    if (now - p.sentAt >= DISPATCH_SEND_TIMEOUT_MS) {
+      failed.push(p);
+    } else {
+      stillPending.push(p);
+    }
+  }
+  return { stillPending, failed };
+}
+
+/** Send-failure chips auto-clear on the same schedule as terminal dispatch
+ *  entries — they're informational, not sticky like DENIED. */
+export const SEND_FAILURE_AUTOCLEAR_MS = DISPATCH_AUTOCLEAR_MS;
+
+export function pruneSendFailures(failures: SendFailure[], now: number): SendFailure[] {
+  return failures.filter((f) => now - f.detectedAt < SEND_FAILURE_AUTOCLEAR_MS);
+}
+
+/** One line of tray chip text for a send failure, e.g. "⚠ NOT QUEUED — MACBOOK". */
+export function sendFailureChipLabel(failure: Pick<SendFailure, 'machine'>): string {
+  return `⚠ NOT QUEUED — ${failure.machine}`;
+}

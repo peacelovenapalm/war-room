@@ -310,6 +310,11 @@ export const HELP_SECTIONS: HelpSection[] = [
         word: 'DISPATCH (TODO BRIDGE)',
         text: "Every BRIEFING todo line has its own Dispatch button that pre-fills the Call modal's prompt with that line's text — pick the machine/project/provider and send it.",
       },
+      {
+        glyph: '⚠',
+        word: 'NOT QUEUED',
+        text: "Sending a request has no server acknowledgement — if nothing appears in this tray within about 1.5 seconds, the dashboard assumes it was silently dropped (bad provider, missing field, or that machine's 5-ringing cap) and shows this chip instead of staying silent.",
+      },
     ],
   },
   {
@@ -325,7 +330,7 @@ export const HELP_SECTIONS: HelpSection[] = [
       {
         glyph: '▶',
         word: 'FOCUS',
-        text: 'Best-effort: dispatches a focus request to that machine\'s runner, which fronts the session\'s real terminal window. Disabled with "⚠ NO RUNNER" when that machine has no live runner — answering a permission prompt from the browser itself is never possible, by design.',
+        text: 'Best-effort: dispatches a focus request (by OS process id) to that machine\'s runner, which fronts the real terminal window. Disabled with "⚠ NO PID — use COPY ID" until process-id telemetry exists for that session, or "⚠ NO RUNNER" when the machine has no live runner — answering a permission prompt from the browser itself is never possible, by design.',
       },
       {
         glyph: '⧉',

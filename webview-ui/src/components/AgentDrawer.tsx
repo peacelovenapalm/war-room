@@ -18,6 +18,9 @@ interface AgentDrawerProps {
   officeState: OfficeState;
   agentTools: Record<number, ToolActivity[]>;
   onClose: () => void;
+  /** Registers a send so the tray can flag it "⚠ NOT QUEUED" if no
+   *  dispatchUpdate arrives — dispatchRequest has no ack on the wire. */
+  onSend: (machine: string, action: 'focus') => void;
 }
 
 function Row({ label, value }: { label: string; value: string }) {
@@ -35,7 +38,13 @@ function Row({ label, value }: { label: string; value: string }) {
  *  burning but which window is it?" problem. FOCUS best-effort fronts the
  *  session's real terminal on that machine (deny-by-default runner side);
  *  COPY ID always works as the honest fallback. */
-export function AgentDrawer({ agentId, officeState, agentTools, onClose }: AgentDrawerProps) {
+export function AgentDrawer({
+  agentId,
+  officeState,
+  agentTools,
+  onClose,
+  onSend,
+}: AgentDrawerProps) {
   const [machines, setMachines] = useState<DispatchMachine[]>([]);
   const [copied, setCopied] = useState(false);
   // Ticks the blocked-age display while the drawer is open (Date.now() must
@@ -84,17 +93,26 @@ export function AgentDrawer({ agentId, officeState, agentTools, onClose }: Agent
   const chip = STATE_CHIPS[visualState];
   const since = ch.crisis?.since ?? ch.pollState?.since;
   const blockedAge = since !== undefined ? formatAge(now - since) : null;
-  const canFocus = machineSupportsFocus(machines, ch.machine);
+  // The runner's focus action fronts a terminal by OS pid — it ignores
+  // sessionId entirely and denies with reason "missing-pid" without one.
+  // No pid is captured anywhere in this system today (JSONL transcripts and
+  // hook events carry no OS pid), so FOCUS is honestly unavailable until
+  // that telemetry exists — never send a request we know the runner will
+  // reject.
+  const pid: number | undefined = undefined;
+  const hasRunner = machineSupportsFocus(machines, ch.machine);
+  const canFocus = pid !== undefined && hasRunner;
   const copyLine = buildCopyIdLine(ch.machine, ch.cwd, ch.sessionId);
 
   const handleFocus = () => {
-    if (!canFocus || !ch.machine) return;
+    if (!canFocus || !ch.machine || pid === undefined) return;
     transport.send({
       type: 'dispatchRequest',
       action: 'focus',
       machine: ch.machine,
-      sessionId: ch.sessionId,
+      pid,
     });
+    onSend(ch.machine, 'focus');
   };
 
   const handleCopy = () => {
@@ -125,7 +143,9 @@ export function AgentDrawer({ agentId, officeState, agentTools, onClose }: Agent
 
         {!canFocus && (
           <div className="text-sm text-warning mb-8">
-            ⚠ NO RUNNER on {ch.machine ?? 'this machine'}
+            {pid === undefined
+              ? '⚠ NO PID — use COPY ID'
+              : `⚠ NO RUNNER on ${ch.machine ?? 'this machine'}`}
           </div>
         )}
 
@@ -137,6 +157,7 @@ export function AgentDrawer({ agentId, officeState, agentTools, onClose }: Agent
             variant={canFocus ? 'accent' : 'disabled'}
             onClick={handleFocus}
             disabled={!canFocus}
+            title={pid === undefined ? 'No PID available — use Copy ID instead' : undefined}
           >
             Focus
           </Button>

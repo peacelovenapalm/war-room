@@ -26,13 +26,16 @@ interface CallModalProps {
   isOpen: boolean;
   onClose: () => void;
   prefill?: CallModalPrefill | null;
+  /** Registers a send so the tray can flag it "⚠ NOT QUEUED" if no
+   *  dispatchUpdate arrives — dispatchRequest has no ack on the wire. */
+  onSend: (machine: string, action: 'dispatch') => void;
 }
 
 /** CALL modal (v1 mechanic #6b): pick a live machine + provider + project +
  *  prompt → enqueue a real dispatch. Machine/provider/root choices come ONLY
  *  from GET /api/dispatch/machines (live runner advertisements) — a machine
  *  without a runner is honestly absent, never a dead dropdown entry. */
-export function CallModal({ isOpen, onClose, prefill }: CallModalProps) {
+export function CallModal({ isOpen, onClose, prefill, onSend }: CallModalProps) {
   const [machines, setMachines] = useState<DispatchMachine[]>([]);
   const [fetchFailed, setFetchFailed] = useState(false);
   const [machine, setMachine] = useState('');
@@ -94,6 +97,7 @@ export function CallModal({ isOpen, onClose, prefill }: CallModalProps) {
       cwd,
       prompt,
     });
+    onSend(machine, 'dispatch');
     onClose();
   };
 

@@ -10,14 +10,20 @@ import { describe, expect, it } from 'vitest';
 
 import {
   buildCopyIdLine,
+  detectSendFailures,
   dismissDispatchEntry,
+  DISPATCH_SEND_TIMEOUT_MS,
   DISPATCH_STATUS_CHIPS,
   DISPATCH_STATUSES,
   dispatchChipLabel,
   type DispatchEntry,
   machineSupportsFocus,
+  type PendingSend,
   promptRemaining,
   pruneDispatchEntries,
+  pruneSendFailures,
+  type SendFailure,
+  sendFailureChipLabel,
   shouldAutoClear,
   upsertDispatchEntry,
 } from '../src/dispatch.js';
@@ -198,5 +204,81 @@ describe('machineSupportsFocus', () => {
 
   it('is false when no machine is given', () => {
     expect(machineSupportsFocus(machines, undefined)).toBe(false);
+  });
+});
+
+describe('detectSendFailures (dispatchRequest has no ack)', () => {
+  it('keeps a fresh send pending before the timeout', () => {
+    const pending: PendingSend[] = [
+      { id: 'p1', machine: 'MACBOOK', action: 'dispatch', sentAt: 0 },
+    ];
+    const result = detectSendFailures(pending, [], DISPATCH_SEND_TIMEOUT_MS - 1);
+    expect(result.stillPending).toHaveLength(1);
+    expect(result.failed).toHaveLength(0);
+  });
+
+  it('fails a send with no matching entry past the timeout', () => {
+    const pending: PendingSend[] = [
+      { id: 'p1', machine: 'MACBOOK', action: 'dispatch', sentAt: 0 },
+    ];
+    const result = detectSendFailures(pending, [], DISPATCH_SEND_TIMEOUT_MS);
+    expect(result.stillPending).toHaveLength(0);
+    expect(result.failed).toHaveLength(1);
+    expect(result.failed[0].id).toBe('p1');
+  });
+
+  it('resolves silently once a matching entry for the same machine+action arrives', () => {
+    const pending: PendingSend[] = [
+      { id: 'p1', machine: 'MACBOOK', action: 'dispatch', sentAt: 0 },
+    ];
+    const entries: DispatchEntry[] = [
+      {
+        id: 'server-id',
+        action: 'dispatch',
+        status: 'ringing',
+        machine: 'MACBOOK',
+        receivedAt: 100,
+      },
+    ];
+    const result = detectSendFailures(pending, entries, DISPATCH_SEND_TIMEOUT_MS);
+    expect(result.stillPending).toHaveLength(0);
+    expect(result.failed).toHaveLength(0);
+  });
+
+  it('does not resolve against an entry received before the send (a stale/unrelated one)', () => {
+    const pending: PendingSend[] = [
+      { id: 'p1', machine: 'MACBOOK', action: 'dispatch', sentAt: 1000 },
+    ];
+    const entries: DispatchEntry[] = [
+      { id: 'old', action: 'dispatch', status: 'exited', machine: 'MACBOOK', receivedAt: 500 },
+    ];
+    const result = detectSendFailures(pending, entries, 1000 + DISPATCH_SEND_TIMEOUT_MS);
+    expect(result.failed).toHaveLength(1);
+  });
+
+  it('does not resolve against a different action on the same machine', () => {
+    const pending: PendingSend[] = [{ id: 'p1', machine: 'MACBOOK', action: 'focus', sentAt: 0 }];
+    const entries: DispatchEntry[] = [
+      { id: 'other', action: 'dispatch', status: 'ringing', machine: 'MACBOOK', receivedAt: 10 },
+    ];
+    const result = detectSendFailures(pending, entries, DISPATCH_SEND_TIMEOUT_MS);
+    expect(result.failed).toHaveLength(1);
+  });
+});
+
+describe('pruneSendFailures', () => {
+  it('drops failures past the auto-clear age', () => {
+    const failures: SendFailure[] = [
+      { id: 'a', machine: 'M', action: 'dispatch', detectedAt: 0 },
+      { id: 'b', machine: 'M', action: 'dispatch', detectedAt: 59_000 },
+    ];
+    const result = pruneSendFailures(failures, 60_000);
+    expect(result.map((f) => f.id)).toEqual(['b']);
+  });
+});
+
+describe('sendFailureChipLabel', () => {
+  it('names the machine that never got queued', () => {
+    expect(sendFailureChipLabel({ machine: 'MACBOOK' })).toBe('⚠ NOT QUEUED — MACBOOK');
   });
 });

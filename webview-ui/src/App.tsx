@@ -21,6 +21,13 @@ import { Modal } from './components/ui/Modal.js';
 import { UnlocksPanel } from './components/UnlocksPanel.js';
 import { VersionIndicator } from './components/VersionIndicator.js';
 import { ZoomControls } from './components/ZoomControls.js';
+import {
+  detectSendFailures,
+  type DispatchActionValue,
+  type PendingSend,
+  pruneSendFailures,
+  type SendFailure,
+} from './dispatch.js';
 import { useEditorActions } from './hooks/useEditorActions.js';
 import { useEditorKeyboard } from './hooks/useEditorKeyboard.js';
 import { useExtensionMessages } from './hooks/useExtensionMessages.js';
@@ -113,6 +120,8 @@ function App() {
   const [isCallOpen, setIsCallOpen] = useState(false);
   const [callPrefill, setCallPrefill] = useState<CallModalPrefill | null>(null);
   const [drawerAgentId, setDrawerAgentId] = useState<number | null>(null);
+  const [pendingSends, setPendingSends] = useState<PendingSend[]>([]);
+  const [sendFailures, setSendFailures] = useState<SendFailure[]>([]);
 
   // Help is reachable at all times: `?` toggles, Escape closes. Skip when
   // typing in an input/textarea (none today, but cheap insurance).
@@ -215,6 +224,39 @@ function App() {
     setIsCallOpen(true);
     setIsBriefingOpen(false);
   }, []);
+
+  // dispatchRequest has no ack on the wire (see dispatch.ts) — track our own
+  // sends and, while any are outstanding (or a failure chip is still
+  // waiting to auto-clear), poll for whether a matching dispatchUpdate ever
+  // arrived. No matching entry within DISPATCH_SEND_TIMEOUT_MS means the
+  // send was silently dropped server-side (bad provider, ringing cap, ...).
+  const registerSend = useCallback((machine: string, action: DispatchActionValue) => {
+    setPendingSends((prev) => [
+      ...prev,
+      { id: crypto.randomUUID(), machine, action, sentAt: Date.now() },
+    ]);
+  }, []);
+
+  useEffect(() => {
+    if (pendingSends.length === 0 && sendFailures.length === 0) return;
+    const interval = setInterval(() => {
+      const now = Date.now();
+      setPendingSends((prev) => {
+        const { stillPending, failed } = detectSendFailures(prev, dispatchEntries, now);
+        const newFailures = failed.map((f) => ({
+          id: f.id,
+          machine: f.machine,
+          action: f.action,
+          detectedAt: now,
+        }));
+        setSendFailures((prevFailures) =>
+          pruneSendFailures([...prevFailures, ...newFailures], now),
+        );
+        return stillPending;
+      });
+    }, 300);
+    return () => clearInterval(interval);
+  }, [pendingSends.length, sendFailures.length, dispatchEntries]);
 
   const officeState = getOfficeState();
 
@@ -506,15 +548,21 @@ function App() {
           setCallPrefill(null);
         }}
         prefill={callPrefill}
+        onSend={registerSend}
       />
 
-      <DispatchTray entries={dispatchEntries} onDismiss={dismissDispatch} />
+      <DispatchTray
+        entries={dispatchEntries}
+        onDismiss={dismissDispatch}
+        sendFailures={sendFailures}
+      />
 
       <AgentDrawer
         agentId={drawerAgentId}
         officeState={officeState}
         agentTools={agentTools}
         onClose={() => setDrawerAgentId(null)}
+        onSend={registerSend}
       />
     </div>
   );
