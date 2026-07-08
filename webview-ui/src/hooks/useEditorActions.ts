@@ -5,8 +5,12 @@ import { LAYOUT_SAVE_DEBOUNCE_MS, ZOOM_MAX, ZOOM_MIN } from '../constants.js';
 import type { ExpandDirection } from '../office/editor/editorActions.js';
 import {
   canPlaceFurniture,
+  commitExpandOffice,
+  commitRoomTag,
+  commitSell,
   expandLayout,
   getWallPlacementRow,
+  isValidRoomRect,
   moveFurniture,
   paintTile,
   placeFurniture,
@@ -27,11 +31,17 @@ import type {
   OfficeLayout,
   PlacedFurniture,
   PlacedPet,
+  RoomType,
   TileType as TileTypeVal,
 } from '../office/types.js';
 import { EditTool } from '../office/types.js';
 import { TileType } from '../office/types.js';
 import { transport } from '../transport/index.js';
+
+/** How long a build-action reason banner ("insufficient-cash", etc.) stays
+ *  visible — a lightweight stand-in for a full toast system (none exists
+ *  in this codebase yet). */
+const BUILD_MESSAGE_DISPLAY_MS = 3000;
 
 interface EditorActions {
   isEditMode: boolean;
@@ -63,6 +73,17 @@ interface EditorActions {
   handleEditorSelectionChange: () => void;
   handleDragMove: (uid: string, newCol: number, newRow: number) => void;
   handlePetToggle: (petType: number, active: boolean) => void;
+  /** G2, GAME-DESIGN §5.7 — server-authoritative build actions. */
+  buildActionMessage: string | null;
+  handleRoomTypeChange: (type: RoomType) => void;
+  handleRoomTagCommit: (
+    colStart: number,
+    rowStart: number,
+    colEnd: number,
+    rowEnd: number,
+  ) => Promise<void>;
+  handleSellCommit: (uid: string) => Promise<void>;
+  handleExpandOffice: () => Promise<void>;
 }
 
 export function useEditorActions(
@@ -632,6 +653,90 @@ export function useEditorActions(
     [getOfficeState, applyEdit],
   );
 
+  // ── Server-authoritative build actions (G2, GAME-DESIGN §5.7) ─────────
+  // Cash is server-authoritative — never a local optimistic mutation. Each
+  // handler POSTs, then applies the SERVER's returned layout on {ok:true}
+  // (rebuildFromLayout only — no saveLayout round-trip, the server already
+  // persisted it) or shows `reason` on {ok:false}. Not pushed onto the
+  // undo stack: undoing a Cash spend without a matching server-side refund
+  // would silently desync Cash from the layout (documented scope decision).
+  const [buildActionMessage, setBuildActionMessage] = useState<string | null>(null);
+  const buildMessageTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+
+  const showBuildMessage = useCallback((message: string) => {
+    if (buildMessageTimerRef.current) clearTimeout(buildMessageTimerRef.current);
+    setBuildActionMessage(message);
+    buildMessageTimerRef.current = setTimeout(
+      () => setBuildActionMessage(null),
+      BUILD_MESSAGE_DISPLAY_MS,
+    );
+  }, []);
+
+  const applyServerLayout = useCallback(
+    (layout: OfficeLayout) => {
+      const os = getOfficeState();
+      os.rebuildFromLayout(layout);
+      setLastSavedLayout(layout);
+      setEditorTick((n) => n + 1);
+    },
+    [getOfficeState, setLastSavedLayout],
+  );
+
+  const handleRoomTypeChange = useCallback(
+    (type: RoomType) => {
+      editorState.selectedRoomType = type;
+      setEditorTick((n) => n + 1);
+    },
+    [editorState],
+  );
+
+  const handleRoomTagCommit = useCallback(
+    async (colStart: number, rowStart: number, colEnd: number, rowEnd: number) => {
+      const os = getOfficeState();
+      const layout = os.getLayout();
+      if (!isValidRoomRect(layout, colStart, rowStart, colEnd, rowEnd)) {
+        showBuildMessage('room-footprint-invalid');
+        return;
+      }
+      const result = await commitRoomTag(
+        colStart,
+        rowStart,
+        colEnd,
+        rowEnd,
+        editorState.selectedRoomType,
+      );
+      if (result.ok) {
+        applyServerLayout(result.layout);
+      } else {
+        showBuildMessage(result.reason);
+      }
+    },
+    [getOfficeState, editorState, applyServerLayout, showBuildMessage],
+  );
+
+  const handleSellCommit = useCallback(
+    async (uid: string) => {
+      const result = await commitSell(uid);
+      if (result.ok) {
+        applyServerLayout(result.layout);
+      } else {
+        // Bays are never sellable (§5.2) — surfaced as a no-op-with-toast,
+        // same shape as any other decline reason.
+        showBuildMessage(result.reason);
+      }
+    },
+    [applyServerLayout, showBuildMessage],
+  );
+
+  const handleExpandOffice = useCallback(async () => {
+    const result = await commitExpandOffice();
+    if (result.ok) {
+      applyServerLayout(result.layout);
+    } else {
+      showBuildMessage(result.reason);
+    }
+  }, [applyServerLayout, showBuildMessage]);
+
   return {
     isEditMode,
     editorTick,
@@ -662,5 +767,10 @@ export function useEditorActions(
     handleEditorSelectionChange,
     handleDragMove,
     handlePetToggle,
+    buildActionMessage,
+    handleRoomTypeChange,
+    handleRoomTagCommit,
+    handleSellCommit,
+    handleExpandOffice,
   };
 }

@@ -10,6 +10,7 @@ import { ChangelogModal } from './components/ChangelogModal.js';
 import { DebugView } from './components/DebugView.js';
 import { DispatchResultModal } from './components/DispatchResultModal.js';
 import { DispatchTray } from './components/DispatchTray.js';
+import { EconomyHUD } from './components/EconomyHUD.js';
 import { EditActionBar } from './components/EditActionBar.js';
 import { EmployeeRoster } from './components/EmployeeRoster.js';
 import { HelpModal } from './components/HelpModal.js';
@@ -104,6 +105,7 @@ function App() {
     dispatchEntries,
     dismissDispatch,
     employees,
+    economy,
   } = useExtensionMessages(getOfficeState, editor.setLastSavedLayout, isEditDirty);
 
   // Show migration notice once layout reset is detected
@@ -315,6 +317,9 @@ function App() {
         zoom={editor.zoom}
         onZoomChange={editor.handleZoomChange}
         panRef={editor.panRef}
+        onRoomTagCommit={editor.handleRoomTagCommit}
+        onSellCommit={editor.handleSellCommit}
+        bayCount={economy?.bayCount ?? 0}
       />
 
       {!isDebugMode ? (
@@ -367,6 +372,10 @@ function App() {
                   activePetTypes={officeState.getActivePetTypes()}
                   petCount={getPetCount()}
                   onPetToggle={editor.handlePetToggle}
+                  selectedRoomType={editorState.selectedRoomType}
+                  onRoomTypeChange={editor.handleRoomTypeChange}
+                  bayCount={economy?.bayCount ?? 0}
+                  onExpandOffice={editor.handleExpandOffice}
                 />
               );
             })()}
@@ -388,6 +397,18 @@ function App() {
 
           {/* PROGRESSION HUD (v1 mechanic #3): level + streak + XP bar, always visible */}
           <ProgressionHUD progression={progression} />
+
+          {/* ECONOMY HUD (v2 mechanic G2): Cash + Reputation, always visible */}
+          <EconomyHUD economy={economy} />
+
+          {editor.buildActionMessage && (
+            <div
+              className="absolute top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2 z-20 pixel-panel py-4 px-8 text-sm pointer-events-none whitespace-nowrap"
+              data-testid="build-action-message"
+            >
+              ⚠ {editor.buildActionMessage}
+            </div>
+          )}
 
           {/* Night shift (v1 #4): empty office → dimmed canvas + TEXT label */}
           {agents.length === 0 && subagentCharacters.length === 0 && (

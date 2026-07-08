@@ -99,6 +99,16 @@ export const ZOOM_LEVEL_FADE_DURATION_SEC = 0.5;
 export const ZOOM_SCROLL_THRESHOLD = 50;
 export const PAN_MARGIN_FRACTION = 0.25;
 
+// ── Building (G2, GAME-DESIGN §5.2) — mirrors server/src/economyConstants.ts;
+// duplicated (never imported) since the webview cannot import server files. ──
+export const BAY_BASE_COST = 500;
+export const BAY_COST_GROWTH = 1.55;
+export const BAY_MAX_COUNT = 11;
+export const BAY_COLS_WIDTH = 4;
+export function bayCost(n: number): number {
+  return Math.round(BAY_BASE_COST * Math.pow(BAY_COST_GROWTH, n));
+}
+
 // ── Editor ───────────────────────────────────────────────────
 export const UNDO_STACK_MAX_SIZE = 50;
 export const LAYOUT_SAVE_DEBOUNCE_MS = 500;

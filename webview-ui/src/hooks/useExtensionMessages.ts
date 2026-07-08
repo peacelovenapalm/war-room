@@ -102,6 +102,18 @@ export interface EmployeeSnapshotClient {
   breakUntil?: number;
 }
 
+/** Economy snapshot (G2) — mirrors core/src/messages.ts's EconomyUpdate
+ *  without importing the server-facing generated types (same convention
+ *  ProgressionSnapshot/EmployeeSnapshotClient use). */
+export interface EconomySnapshotClient {
+  cash: number;
+  reputation: number;
+  grime: number;
+  vacationMode: boolean;
+  bayCount: number;
+  ledger: Array<{ ts: number; delta: number; currency: 'cash' | 'reputation'; reason: string }>;
+}
+
 interface ExtensionMessageState {
   agents: number[];
   selectedAgent: number | null;
@@ -126,6 +138,7 @@ interface ExtensionMessageState {
   dispatchEntries: DispatchEntry[];
   dismissDispatch: (id: string) => void;
   employees: Record<string, EmployeeSnapshotClient>;
+  economy: EconomySnapshotClient | null;
 }
 
 function saveAgentSeats(os: OfficeState): void {
@@ -166,6 +179,7 @@ export function useExtensionMessages(
   const [progression, setProgression] = useState<ProgressionSnapshot | null>(null);
   const [dispatchEntries, setDispatchEntries] = useState<DispatchEntry[]>([]);
   const [employees, setEmployees] = useState<Record<string, EmployeeSnapshotClient>>({});
+  const [economy, setEconomy] = useState<EconomySnapshotClient | null>(null);
 
   // Hydrate from GET /api/dispatch/recent once on mount — a page refresh
   // otherwise only gets the WS replay of NON-terminal entries (getActive),
@@ -805,6 +819,29 @@ export function useExtensionMessages(
             resultTail: msg.resultTail as string | undefined,
           }),
         );
+      } else if (msg.type === 'economyUpdate') {
+        setEconomy({
+          cash: msg.cash as number,
+          reputation: msg.reputation as number,
+          grime: msg.grime as number,
+          vacationMode: msg.vacationMode as boolean,
+          bayCount: msg.bayCount as number,
+          ledger: (msg.ledger as EconomySnapshotClient['ledger']) ?? [],
+        });
+      } else if (msg.type === 'officeExpanded' || msg.type === 'officeLayoutUpdated') {
+        // Server-authoritative building mutation (G2, §5.7) — the acting
+        // client already applied this locally on the route's {ok:true};
+        // this keeps every OTHER connected screen in sync ("one user, many
+        // screens"). Same unsaved-edit guard as layoutLoaded.
+        if (layoutReadyRef.current && isEditDirty?.()) {
+          return;
+        }
+        const rawLayout = msg.layout as OfficeLayout | null;
+        const layout = rawLayout && rawLayout.version === 1 ? migrateLayoutColors(rawLayout) : null;
+        if (layout) {
+          os.rebuildFromLayout(layout);
+          onLayoutLoaded?.(layout);
+        }
       }
     };
     const unsubscribe = transport.onMessage(handler);
@@ -841,5 +878,6 @@ export function useExtensionMessages(
     dispatchEntries,
     dismissDispatch,
     employees,
+    economy,
   };
 }

@@ -15,8 +15,8 @@ import { test } from 'vitest';
 
 import type { ColorValue } from '../src/components/ui/types.js';
 import { migrateLayoutColors } from '../src/office/layout/layoutSerializer.js';
-import type { OfficeLayout, PlacedFurniture, PlacedPet } from '../src/office/types.js';
-import { TileType } from '../src/office/types.js';
+import type { OfficeLayout, PlacedFurniture, PlacedPet, PlacedRoom } from '../src/office/types.js';
+import { RoomType, TileType } from '../src/office/types.js';
 
 // ── Helpers ────────────────────────────────────────────────────
 
@@ -135,6 +135,32 @@ test('migrateLayoutColors preserves furniture and other fields untouched', () =>
   assert.equal(migrated.cols, 4);
   assert.equal(migrated.rows, 3);
   assert.equal(migrated.version, 1);
+});
+
+// ── Migration: rooms field (G2, same backward-compat shape as pets) ──
+
+test('migrateLayoutColors injects rooms:[] when missing on a fresh layout', () => {
+  const layout = baseLayout();
+  assert.equal(layout.rooms, undefined);
+  const migrated = migrateLayoutColors(layout);
+  assert.deepEqual(migrated.rooms, []);
+});
+
+test('migrateLayoutColors preserves an existing non-empty rooms array', () => {
+  const rooms: PlacedRoom[] = [
+    {
+      uid: 'room-1',
+      type: RoomType.DEV_PIT,
+      colStart: 0,
+      rowStart: 0,
+      colEnd: 4,
+      rowEnd: 3,
+      createdAt: 0,
+    },
+  ];
+  const layout = baseLayout({ rooms });
+  const migrated = migrateLayoutColors(layout);
+  assert.deepEqual(migrated.rooms, rooms);
 });
 
 // ── Migration: idempotency ────────────────────────────────────

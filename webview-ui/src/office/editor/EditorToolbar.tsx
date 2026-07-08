@@ -5,6 +5,8 @@ import { ColorPicker } from '../../components/ui/ColorPicker.js';
 import { ItemSelect } from '../../components/ui/ItemSelect.js';
 import type { ColorValue } from '../../components/ui/types.js';
 import {
+  BAY_MAX_COUNT,
+  bayCost,
   CANVAS_FALLBACK_TILE_COLOR,
   EMPTY_SPRITE_THUMBNAIL_BG,
   PET_THUMB_SCALE_MARGIN,
@@ -20,9 +22,21 @@ import {
 } from '../layout/furnitureCatalog.js';
 import { getPetName, getPetSprites } from '../sprites/petSpriteData.js';
 import { getCachedSprite } from '../sprites/spriteCache.js';
-import type { TileType as TileTypeVal } from '../types.js';
-import { EditTool } from '../types.js';
+import type { RoomType, TileType as TileTypeVal } from '../types.js';
+import { EditTool, RoomType as RoomTypeValues } from '../types.js';
 import { getWallSetCount, getWallSetPreviewSprite } from '../wallTiles.js';
+
+/** Shape+text room palette (colorblind rule: no color-only signal) —
+ *  glyph, label, and the ROOM_COST table's numbers (mirrored from
+ *  server/src/economyConstants.ts's ROOM_COST for display only; the
+ *  server is the authority on the actual charge). */
+const ROOM_PALETTE: Array<{ type: RoomType; glyph: string; label: string; cost: number }> = [
+  { type: RoomTypeValues.DEV_PIT, glyph: '⌨', label: 'Dev Pit', cost: 300 },
+  { type: RoomTypeValues.SERVER_ROOM, glyph: '▣', label: 'Server Room', cost: 800 },
+  { type: RoomTypeValues.BREAK_ROOM, glyph: '☕', label: 'Break Room', cost: 400 },
+  { type: RoomTypeValues.WAR_ROOM, glyph: '▲', label: 'War Room', cost: 1200 },
+  { type: RoomTypeValues.KITCHEN, glyph: '🍳', label: 'Kitchen', cost: 250 },
+];
 
 interface EditorToolbarProps {
   activeTool: EditTool;
@@ -44,6 +58,11 @@ interface EditorToolbarProps {
   activePetTypes: number[];
   petCount: number;
   onPetToggle: (petType: number, active: boolean) => void;
+  /** G2, GAME-DESIGN §5.7 — room tagging + sell + office expansion. */
+  selectedRoomType: RoomType;
+  onRoomTypeChange: (type: RoomType) => void;
+  bayCount: number;
+  onExpandOffice: () => void;
 }
 
 const THUMB_ZOOM = 2;
@@ -70,6 +89,10 @@ export function EditorToolbar({
   activePetTypes,
   petCount,
   onPetToggle,
+  selectedRoomType,
+  onRoomTypeChange,
+  bayCount,
+  onExpandOffice,
 }: EditorToolbarProps) {
   const [activeCategory, setActiveCategory] = useState<FurnitureCategory>('desks');
   const [showColor, setShowColor] = useState(false);
@@ -118,6 +141,9 @@ export function EditorToolbar({
   const isFurnitureActive =
     activeTool === EditTool.FURNITURE_PLACE || activeTool === EditTool.FURNITURE_PICK;
   const isPetsActive = activeTool === EditTool.PETS;
+  const isRoomTagActive = activeTool === EditTool.ROOM_TAG;
+  const isSellActive = activeTool === EditTool.SELL;
+  const nextBayCost = bayCost(bayCount);
 
   return (
     <div className="absolute bottom-76 left-10 z-10 pixel-panel p-4 flex flex-col-reverse gap-4 max-w-[calc(100vw-20px)]">
@@ -163,7 +189,53 @@ export function EditorToolbar({
         >
           Pets
         </Button>
+        <Button
+          variant={isRoomTagActive ? 'active' : 'default'}
+          size="md"
+          onClick={() => onToolChange(EditTool.ROOM_TAG)}
+          title="Tag a typed room over owned floor (drag a rectangle)"
+        >
+          ⌂ Rooms
+        </Button>
+        <Button
+          variant={isSellActive ? 'active' : 'default'}
+          size="md"
+          onClick={() => onToolChange(EditTool.SELL)}
+          title="Sell furniture or a room for a 50% refund"
+        >
+          ✕ Sell
+        </Button>
+        <Button
+          variant={bayCount >= BAY_MAX_COUNT ? 'disabled' : 'default'}
+          size="md"
+          onClick={onExpandOffice}
+          disabled={bayCount >= BAY_MAX_COUNT}
+          title={
+            bayCount >= BAY_MAX_COUNT
+              ? 'Max bays reached'
+              : `Expand office: +4 columns of floor for $${nextBayCost}`
+          }
+        >
+          ▭ Expand ${bayCount >= BAY_MAX_COUNT ? 'MAX' : nextBayCost}
+        </Button>
       </div>
+
+      {/* Sub-panel: Room type palette — shown while the Rooms tool is active */}
+      {isRoomTagActive && (
+        <div className="flex gap-4 flex-wrap">
+          {ROOM_PALETTE.map((room) => (
+            <Button
+              key={room.type}
+              variant={selectedRoomType === room.type ? 'active' : 'default'}
+              size="sm"
+              onClick={() => onRoomTypeChange(room.type)}
+              title={`${room.label} — $${room.cost} — drag a rectangle to tag it`}
+            >
+              {room.glyph} {room.label}
+            </Button>
+          ))}
+        </div>
+      )}
 
       {/* Sub-panel: Floor tiles — stacked bottom-to-top via column-reverse */}
       {isFloorActive && (

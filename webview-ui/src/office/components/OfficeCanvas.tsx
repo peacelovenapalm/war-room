@@ -4,6 +4,9 @@ import { useCallback, useEffect, useRef } from 'react';
 
 import { ambience } from '../../ambience.js';
 import {
+  BAY_COLS_WIDTH,
+  BAY_MAX_COUNT,
+  bayCost,
   CAMERA_FOLLOW_LERP,
   CAMERA_FOLLOW_SNAP_THRESHOLD,
   PAN_MARGIN_FRACTION,
@@ -51,6 +54,12 @@ interface OfficeCanvasProps {
   zoom: number;
   onZoomChange: (zoom: number) => void;
   panRef: React.MutableRefObject<{ x: number; y: number }>;
+  /** G2, GAME-DESIGN §5.7 — server-authoritative build actions. */
+  onRoomTagCommit: (colStart: number, rowStart: number, colEnd: number, rowEnd: number) => void;
+  onSellCommit: (uid: string) => void;
+  /** G2, GAME-DESIGN §5.2 — bays already purchased, for the next-bay LOCKED
+   *  ghost preview's cost label. */
+  bayCount: number;
 }
 
 /** Touch pointers currently down on the canvas, keyed by Pixi pointerId —
@@ -78,6 +87,9 @@ export function OfficeCanvas({
   zoom,
   onZoomChange,
   panRef,
+  onRoomTagCommit,
+  onSellCommit,
+  bayCount,
 }: OfficeCanvasProps) {
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const containerRef = useRef<HTMLDivElement>(null);
@@ -240,6 +252,27 @@ export function OfficeCanvas({
       showGhostBorder,
       ghostBorderHoverCol: showGhostBorder ? editorState.ghostCol : -999,
       ghostBorderHoverRow: showGhostBorder ? editorState.ghostRow : -999,
+      roomTagRect:
+        editorState.activeTool === EditTool.ROOM_TAG &&
+        editorState.isRoomTagging &&
+        editorState.ghostCol >= 0
+          ? {
+              colStart: Math.min(editorState.roomTagStartCol, editorState.ghostCol),
+              rowStart: Math.min(editorState.roomTagStartRow, editorState.ghostRow),
+              colEnd: Math.max(editorState.roomTagStartCol, editorState.ghostCol) + 1,
+              rowEnd: Math.max(editorState.roomTagStartRow, editorState.ghostRow) + 1,
+            }
+          : null,
+      bayGhost:
+        bayCount < BAY_MAX_COUNT
+          ? {
+              col: officeState.getLayout().cols,
+              row: 0,
+              w: BAY_COLS_WIDTH,
+              h: officeState.getLayout().rows,
+              cost: bayCost(bayCount),
+            }
+          : null,
     };
 
     if (editorState.activeTool === EditTool.FURNITURE_PLACE && editorState.ghostCol >= 0) {
@@ -304,7 +337,7 @@ export function OfficeCanvas({
     }
 
     return editorRender;
-  }, [isEditMode, editorState, officeState]);
+  }, [isEditMode, editorState, officeState, bayCount]);
 
   const buildSelectionRenderState = useCallback(
     (): PixiSelectionState => ({
@@ -663,6 +696,43 @@ export function OfficeCanvas({
 
       const tile = screenToTile(e.clientX, e.clientY);
 
+      // ROOM_TAG (G2, §5.7): start a drag-rectangle at the clicked tile.
+      if (editorState.activeTool === EditTool.ROOM_TAG && tile) {
+        editorState.startRoomTag(tile.col, tile.row);
+        return;
+      }
+
+      // SELL (G2, §5.7): click a furniture piece or room to sell it —
+      // no drag, immediate server round-trip.
+      if (editorState.activeTool === EditTool.SELL && tile) {
+        const layout = officeState.getLayout();
+        const hitFurniture = layout.furniture.find((f) => {
+          const entry = getCatalogEntry(f.type);
+          if (!entry) return false;
+          return (
+            tile.col >= f.col &&
+            tile.col < f.col + entry.footprintW &&
+            tile.row >= f.row &&
+            tile.row < f.row + entry.footprintH
+          );
+        });
+        if (hitFurniture) {
+          onSellCommit(hitFurniture.uid);
+          return;
+        }
+        const hitRoom = (layout.rooms ?? []).find(
+          (r) =>
+            tile.col >= r.colStart &&
+            tile.col < r.colEnd &&
+            tile.row >= r.rowStart &&
+            tile.row < r.rowEnd,
+        );
+        if (hitRoom) {
+          onSellCommit(hitRoom.uid);
+        }
+        return;
+      }
+
       // SELECT tool (or furniture tool with nothing selected): check for furniture hit to start drag
       const actAsSelect =
         editorState.activeTool === EditTool.SELECT ||
@@ -721,6 +791,7 @@ export function OfficeCanvas({
       hitTestDeleteButton,
       hitTestRotateButton,
       panRef,
+      onSellCommit,
     ],
   );
 
@@ -774,10 +845,21 @@ export function OfficeCanvas({
         return;
       }
 
+      // ROOM_TAG (G2, §5.7): commit the drag rectangle on release.
+      if (editorState.isRoomTagging) {
+        const colStart = Math.min(editorState.roomTagStartCol, editorState.ghostCol);
+        const rowStart = Math.min(editorState.roomTagStartRow, editorState.ghostRow);
+        const colEnd = Math.max(editorState.roomTagStartCol, editorState.ghostCol) + 1;
+        const rowEnd = Math.max(editorState.roomTagStartRow, editorState.ghostRow) + 1;
+        editorState.clearRoomTag();
+        onRoomTagCommit(colStart, rowStart, colEnd, rowEnd);
+        return;
+      }
+
       editorState.isDragging = false;
       editorState.wallDragAdding = null;
     },
-    [editorState, isEditMode, officeState, onDragMove, onEditorSelectionChange],
+    [editorState, isEditMode, officeState, onDragMove, onEditorSelectionChange, onRoomTagCommit],
   );
 
   const handleClick = useCallback(

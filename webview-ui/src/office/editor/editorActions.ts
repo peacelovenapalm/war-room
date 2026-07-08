@@ -2,7 +2,7 @@ import type { ColorValue } from '../../components/ui/types.js';
 import { DEFAULT_NEUTRAL_COLOR } from '../../constants.js';
 import { getCatalogEntry, getRotatedType, getToggledType } from '../layout/furnitureCatalog.js';
 import { getPlacementBlockedTiles } from '../layout/layoutSerializer.js';
-import type { OfficeLayout, PlacedFurniture, TileType as TileTypeVal } from '../types.js';
+import type { OfficeLayout, PlacedFurniture, RoomType, TileType as TileTypeVal } from '../types.js';
 import { MAX_COLS, MAX_ROWS, TileType } from '../types.js';
 
 /** Paint a single tile with pattern and color. Returns new layout (immutable). */
@@ -261,4 +261,78 @@ export function expandLayout(
     },
     shift: { col: shiftCol, row: shiftRow },
   };
+}
+
+// ── Server-authoritative build actions (G2, GAME-DESIGN §5.7) ──────────
+//
+// Cash is server-authoritative — the client never debits. These are the
+// ONLY async actions in this file: each POSTs to the check-debit-persist
+// route and returns the server's decision; the caller applies the
+// returned layout locally only on `{ok:true}` and shows `reason` on
+// `{ok:false}` (never a local optimistic mutation).
+
+export type BuildActionResult = { ok: true; layout: OfficeLayout } | { ok: false; reason: string };
+
+async function postBuild(path: string, body: Record<string, unknown>): Promise<BuildActionResult> {
+  try {
+    const res = await fetch(path, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(body),
+    });
+    const data = (await res.json()) as
+      | { ok: true; layout: OfficeLayout }
+      | { ok: false; reason?: string };
+    if (data.ok) return { ok: true, layout: data.layout };
+    return { ok: false, reason: data.reason ?? 'request-failed' };
+  } catch {
+    return { ok: false, reason: 'network-error' };
+  }
+}
+
+/** Validate a room rectangle's footprint client-side for instant feedback
+ *  (the server re-validates authoritatively — this is UX only, never
+ *  trust-boundary enforcement). */
+export function isValidRoomRect(
+  layout: OfficeLayout,
+  colStart: number,
+  rowStart: number,
+  colEnd: number,
+  rowEnd: number,
+): boolean {
+  if (colEnd <= colStart || rowEnd <= rowStart) return false;
+  if (colStart < 0 || rowStart < 0 || colEnd > layout.cols || rowEnd > layout.rows) return false;
+  for (let r = rowStart; r < rowEnd; r++) {
+    for (let c = colStart; c < colEnd; c++) {
+      const tile = layout.tiles[r * layout.cols + c];
+      if (tile === TileType.WALL || tile === TileType.VOID) return false;
+    }
+  }
+  return true;
+}
+
+export function commitRoomTag(
+  colStart: number,
+  rowStart: number,
+  colEnd: number,
+  rowEnd: number,
+  type: RoomType,
+): Promise<BuildActionResult> {
+  return postBuild('/api/building/room', { type, colStart, rowStart, colEnd, rowEnd });
+}
+
+export function commitSell(uid: string): Promise<BuildActionResult> {
+  return postBuild('/api/building/sell', { uid });
+}
+
+export function commitExpandOffice(): Promise<BuildActionResult> {
+  return postBuild('/api/building/expand', {});
+}
+
+export function commitBuyFurniture(
+  type: string,
+  col: number,
+  row: number,
+): Promise<BuildActionResult> {
+  return postBuild('/api/building/furniture', { type, col, row });
 }

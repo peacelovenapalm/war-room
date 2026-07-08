@@ -1,7 +1,7 @@
 import type { ColorValue } from '../../components/ui/types.js';
 import { DEFAULT_FLOOR_COLOR, DEFAULT_WALL_COLOR, UNDO_STACK_MAX_SIZE } from '../../constants.js';
-import type { OfficeLayout, TileType as TileTypeVal } from '../types.js';
-import { EditTool, TileType } from '../types.js';
+import type { OfficeLayout, RoomType, TileType as TileTypeVal } from '../types.js';
+import { EditTool, RoomType as RoomTypeValues, TileType } from '../types.js';
 
 export class EditorState {
   isEditMode = false;
@@ -49,6 +49,24 @@ export class EditorState {
   dragOffsetCol = 0;
   dragOffsetRow = 0;
   isDragMoving = false;
+
+  // Room tagging (G2, GAME-DESIGN §5.7) — drag-rectangle selection.
+  selectedRoomType: RoomType = RoomTypeValues.DEV_PIT;
+  roomTagStartCol = -1;
+  roomTagStartRow = -1;
+  isRoomTagging = false;
+
+  startRoomTag(col: number, row: number): void {
+    this.roomTagStartCol = col;
+    this.roomTagStartRow = row;
+    this.isRoomTagging = true;
+  }
+
+  clearRoomTag(): void {
+    this.roomTagStartCol = -1;
+    this.roomTagStartRow = -1;
+    this.isRoomTagging = false;
+  }
 
   pushUndo(layout: OfficeLayout): void {
     this.undoStack.push(layout);
@@ -120,5 +138,6 @@ export class EditorState {
     this.isDirty = false;
     this.dragUid = null;
     this.isDragMoving = false;
+    this.clearRoomTag();
   }
 }

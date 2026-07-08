@@ -125,6 +125,10 @@ export interface PixiSpritePools {
   deleteButton: { bg: Graphics; mark: Graphics } | null;
   rotateButton: { bg: Graphics; mark: Graphics } | null;
   crisisItems: Map<string, Sprite>;
+  /** G2, GAME-DESIGN §5.7 — room-tag drag-rectangle preview. */
+  roomTagPreview: Graphics | null;
+  /** G2, GAME-DESIGN §5.2 — next-bay LOCKED ghost preview. */
+  bayGhost: { border: Graphics; label: Text } | null;
 }
 
 export function createSpritePools(): PixiSpritePools {
@@ -141,6 +145,8 @@ export function createSpritePools(): PixiSpritePools {
     deleteButton: null,
     rotateButton: null,
     crisisItems: new Map(),
+    roomTagPreview: null,
+    bayGhost: null,
   };
 }
 
@@ -627,6 +633,76 @@ export function renderGhostBorder(
   }
 }
 
+/** Room-tag drag-rectangle preview (G2, GAME-DESIGN §5.7) — a single
+ *  dashed rectangle spanning the in-progress drag selection, shape+text
+ *  only (colorblind rule: the stroke color is reinforcement, the dashed
+ *  pattern + explicit boundary are the primary signal). */
+export function renderRoomTagPreview(
+  editorOverlayLayer: Container,
+  pool: PixiSpritePools,
+  rect: { colStart: number; rowStart: number; colEnd: number; rowEnd: number } | null,
+): void {
+  if (!rect) {
+    if (pool.roomTagPreview) pool.roomTagPreview.visible = false;
+    return;
+  }
+  if (!pool.roomTagPreview) {
+    pool.roomTagPreview = new Graphics();
+    editorOverlayLayer.addChild(pool.roomTagPreview);
+  }
+  const gfx = pool.roomTagPreview;
+  gfx.clear();
+  gfx.visible = true;
+  const x = rect.colStart * TILE_SIZE;
+  const y = rect.rowStart * TILE_SIZE;
+  const w = (rect.colEnd - rect.colStart) * TILE_SIZE;
+  const h = (rect.rowEnd - rect.rowStart) * TILE_SIZE;
+  gfx.rect(x, y, w, h).fill(GHOST_BORDER_HOVER_FILL);
+  dashedRect(gfx, x, y, w, h, 3, 2, GHOST_BORDER_HOVER_STROKE);
+}
+
+/** Next-bay LOCKED ghost preview (G2, GAME-DESIGN §5.2) — dashed outline +
+ *  "LOCKED $cost" text over the 4-col rectangle immediately right of the
+ *  currently owned floor. `null` bounds (max bays reached) hides it.
+ *  Reuses the same VOID-tile dashed-outline visual language the renderer
+ *  already applies to unowned space (colorblind rule: shape+text, never
+ *  color alone). */
+export function renderBayGhost(
+  editorOverlayLayer: Container,
+  pool: PixiSpritePools,
+  bounds: { col: number; row: number; w: number; h: number; cost: number } | null,
+): void {
+  if (!bounds) {
+    if (pool.bayGhost) {
+      pool.bayGhost.border.visible = false;
+      pool.bayGhost.label.visible = false;
+    }
+    return;
+  }
+  if (!pool.bayGhost) {
+    const border = new Graphics();
+    const label = new Text({
+      text: '',
+      style: { fontSize: 10, fill: OVERLAY_GLYPH_COLOR, fontWeight: 'bold', align: 'center' },
+    });
+    label.anchor.set(0.5, 0.5);
+    editorOverlayLayer.addChild(border, label);
+    pool.bayGhost = { border, label };
+  }
+  const { border, label } = pool.bayGhost;
+  const x = bounds.col * TILE_SIZE;
+  const y = bounds.row * TILE_SIZE;
+  const w = bounds.w * TILE_SIZE;
+  const h = bounds.h * TILE_SIZE;
+  border.clear();
+  border.visible = true;
+  dashedRect(border, x, y, w, h, 2, 2, VOID_TILE_OUTLINE_COLOR);
+  label.text = `LOCKED\n$${bounds.cost}`;
+  label.style.stroke = { color: OVERLAY_GLYPH_OUTLINE_COLOR, width: 2 };
+  label.position.set(x + w / 2, y + h / 2);
+  label.visible = true;
+}
+
 /** @internal */
 export function renderGhostPreview(
   editorOverlayLayer: Container,
@@ -906,6 +982,11 @@ export interface PixiEditorState {
   showGhostBorder: boolean;
   ghostBorderHoverCol: number;
   ghostBorderHoverRow: number;
+  /** G2, GAME-DESIGN §5.7 — in-progress room-tag drag rectangle, or null. */
+  roomTagRect?: { colStart: number; rowStart: number; colEnd: number; rowEnd: number } | null;
+  /** G2, GAME-DESIGN §5.2 — next-bay LOCKED ghost bounds + cost, or null
+   *  (max bays reached, or not in build mode). */
+  bayGhost?: { col: number; row: number; w: number; h: number; cost: number } | null;
 }
 
 export interface PixiCrisisState {
@@ -1023,6 +1104,8 @@ export function renderFrame(
     } else if (pools.ghostBorder) {
       pools.ghostBorder.visible = false;
     }
+    renderRoomTagPreview(layers.editorOverlayLayer, pools, editor.roomTagRect ?? null);
+    renderBayGhost(layers.editorOverlayLayer, pools, editor.bayGhost ?? null);
     if (editor.ghostSprite && editor.ghostCol >= 0) {
       renderGhostPreview(
         layers.editorOverlayLayer,
