@@ -20,6 +20,8 @@ interface BottomToolbarProps {
   onToggleShift: () => void;
   isUnlocksOpen: boolean;
   onToggleUnlocks: () => void;
+  isEmployeesOpen: boolean;
+  onToggleEmployees: () => void;
   isHelpOpen: boolean;
   onToggleHelp: () => void;
   isCallOpen: boolean;
@@ -39,6 +41,8 @@ export function BottomToolbar({
   onToggleShift,
   isUnlocksOpen,
   onToggleUnlocks,
+  isEmployeesOpen,
+  onToggleEmployees,
   isHelpOpen,
   onToggleHelp,
   isCallOpen,
@@ -168,6 +172,13 @@ export function BottomToolbar({
         title="Office decor unlocks"
       >
         Unlocks
+      </Button>
+      <Button
+        variant={isEmployeesOpen ? 'active' : 'default'}
+        onClick={onToggleEmployees}
+        title="Employee roster"
+      >
+        Employees
       </Button>
       <Button
         variant={isCallOpen ? 'active' : 'default'}

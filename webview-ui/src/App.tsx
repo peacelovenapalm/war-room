@@ -11,6 +11,7 @@ import { DebugView } from './components/DebugView.js';
 import { DispatchResultModal } from './components/DispatchResultModal.js';
 import { DispatchTray } from './components/DispatchTray.js';
 import { EditActionBar } from './components/EditActionBar.js';
+import { EmployeeRoster } from './components/EmployeeRoster.js';
 import { HelpModal } from './components/HelpModal.js';
 import { MigrationNotice } from './components/MigrationNotice.js';
 import { ProgressionHUD } from './components/ProgressionHUD.js';
@@ -102,6 +103,7 @@ function App() {
     progression,
     dispatchEntries,
     dismissDispatch,
+    employees,
   } = useExtensionMessages(getOfficeState, editor.setLastSavedLayout, isEditDirty);
 
   // Show migration notice once layout reset is detected
@@ -117,6 +119,7 @@ function App() {
   const [isBriefingOpen, setIsBriefingOpen] = useState(false);
   const [isShiftOpen, setIsShiftOpen] = useState(false);
   const [isUnlocksOpen, setIsUnlocksOpen] = useState(false);
+  const [isEmployeesOpen, setIsEmployeesOpen] = useState(false);
   const [isHelpOpen, setIsHelpOpen] = useState(false);
   const [isCallOpen, setIsCallOpen] = useState(false);
   const [callPrefill, setCallPrefill] = useState<CallModalPrefill | null>(null);
@@ -479,6 +482,8 @@ function App() {
         onToggleShift={() => setIsShiftOpen((v) => !v)}
         isUnlocksOpen={isUnlocksOpen}
         onToggleUnlocks={() => setIsUnlocksOpen((v) => !v)}
+        isEmployeesOpen={isEmployeesOpen}
+        onToggleEmployees={() => setIsEmployeesOpen((v) => !v)}
         isHelpOpen={isHelpOpen}
         onToggleHelp={() => setIsHelpOpen((v) => !v)}
         isCallOpen={isCallOpen}
@@ -500,6 +505,12 @@ function App() {
         isOpen={isUnlocksOpen}
         onClose={() => setIsUnlocksOpen(false)}
         progression={progression}
+      />
+
+      <EmployeeRoster
+        isOpen={isEmployeesOpen}
+        onClose={() => setIsEmployeesOpen(false)}
+        employees={employees}
       />
 
       <HelpModal isOpen={isHelpOpen} onClose={() => setIsHelpOpen(false)} />

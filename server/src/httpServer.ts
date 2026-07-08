@@ -347,6 +347,7 @@ function toEmployeeSnapshot(emp: Employee): Record<string, unknown> {
     moodBoost: emp.moodBoost,
     scores: emp.scores,
     trainingBonus: emp.trainingBonus,
+    sampleCount: emp.rolling.recentTurns.length,
     assignedRoomId: emp.assignedRoomId,
     createdAt: emp.createdAt,
     lastActiveAt: emp.lastActiveAt,

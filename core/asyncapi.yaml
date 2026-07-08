@@ -723,6 +723,7 @@ components:
         - moodBoost
         - scores
         - trainingBonus
+        - sampleCount
         - createdAt
         - lastActiveAt
         - lowMoodStreakDays
@@ -764,6 +765,13 @@ components:
           $ref: '#/components/schemas/EmployeeScores'
         trainingBonus:
           $ref: '#/components/schemas/EmployeeTrainingBonus'
+        sampleCount:
+          type: integer
+          description: >-
+            rolling.recentTurns.length — the MIN_SAMPLES=5 gate clients need
+            to know whether `scores` is a real read or still neutral
+            defaults (ROOKIE badge). The raw turn ring buffer itself never
+            leaves the server.
         assignedRoomId:
           type: string
         createdAt:

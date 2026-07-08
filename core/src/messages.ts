@@ -258,6 +258,7 @@ export interface EmployeeSnapshot {
   moodBoost: number;
   scores: EmployeeScores;
   trainingBonus: EmployeeTrainingBonus;
+  sampleCount: number;
   assignedRoomId?: string;
   createdAt: number;
   lastActiveAt: number;
