@@ -26,6 +26,7 @@ export type ServerMessage =
   | SubagentToolPermission
   | AgentTeamInfo
   | AgentTokenUsage
+  | AgentPidUpdate
   | ProgressionUpdate
   | DispatchUpdate
   | LayoutLoaded
@@ -75,6 +76,7 @@ export interface AgentCreated {
   provider?: string;
   sessionId?: string;
   cwd?: string;
+  pid?: number;
 }
 
 export interface AgentClosed {
@@ -97,6 +99,7 @@ export interface ExistingAgents {
   providers?: Record<string, string>;
   sessionIds?: Record<string, string>;
   cwds?: Record<string, string>;
+  pids?: Record<string, number>;
 }
 
 export interface AgentSeatMeta {
@@ -198,6 +201,12 @@ export interface AgentTokenUsage {
   id: number;
   inputTokens: number;
   outputTokens: number;
+}
+
+export interface AgentPidUpdate {
+  type: 'agentPidUpdate';
+  id: number;
+  pid: number;
 }
 
 export interface ProgressionUpdate {

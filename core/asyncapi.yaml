@@ -100,6 +100,7 @@ components:
         # Agent Teams
         - $ref: '#/components/schemas/AgentTeamInfo'
         - $ref: '#/components/schemas/AgentTokenUsage'
+        - $ref: '#/components/schemas/AgentPidUpdate'
         # Progression (v1 mechanic #3)
         - $ref: '#/components/schemas/ProgressionUpdate'
         # Dispatch (v1 mechanic #6b — call a coworker)
@@ -203,6 +204,15 @@ components:
             Real project directory (server AgentState.projectDir) — the
             detail drawer's "project dir" field. Distinct from folderName,
             which is only the short label used for multi-root workspaces.
+        pid:
+          type: integer
+          description: >-
+            OS process id of the claude session, captured via the command-hook
+            forwarder's X-Pid header (server AgentState.pid). Drives the
+            detail drawer's FOCUS button (bin/dispatch-runner.mjs `focus`
+            action fronts a terminal by pid). Absent until the first hook
+            event with pid telemetry arrives for this session — FOCUS stays
+            honestly disabled ("NO PID") until then.
 
     AgentClosed:
       description: An agent has been removed from the office.
@@ -277,6 +287,30 @@ components:
           description: Map of agent ID (string) to real project directory.
           additionalProperties:
             type: string
+        pids:
+          type: object
+          description: Map of agent ID (string) to OS process id (see AgentCreated.pid).
+          additionalProperties:
+            type: integer
+
+    AgentPidUpdate:
+      description: >-
+        Late-arriving pid telemetry for an already-known agent (e.g. a
+        locally-discovered session whose hook events start including X-Pid
+        only after the forwarder is installed/refreshed). AgentCreated/
+        ExistingAgents cover the pid-at-creation case; this covers pid
+        arriving afterward so the FOCUS button lights up live without a
+        page refresh.
+      type: object
+      additionalProperties: false
+      required: [type, id, pid]
+      properties:
+        type:
+          const: agentPidUpdate
+        id:
+          type: integer
+        pid:
+          type: integer
 
     AgentStatus:
       description: Active vs waiting state for an agent (drives character animation).
