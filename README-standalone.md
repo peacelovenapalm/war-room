@@ -151,8 +151,46 @@ usage records), crisis throughput with mean/worst time-to-unblock
 day's first briefing snapshot. Efficiency is average output tokens per
 completed turn, graded **LEAN / STEADY / HEAVY — lower is always better**
 (tokens are money; nothing rewards volume). State survives restarts via
-`~/.pixel-agents/shift-stats.json`. In-dashboard only; push delivery is an
-open design question.
+`~/.pixel-agents/shift-stats.json`.
+
+`GET /api/shift` returns `{ today, yesterday }`: `yesterday` is the last
+ledger that closed at midnight, retained (and persisted) so checking out
+for the day doesn't lose the previous day's numbers — the panel shows it
+as a compact YESTERDAY card under today's. If a panel refresh fails, the
+numbers already on screen are marked **⚠ STALE — last updated HH:MM**
+(shape + text, colorblind-safe) instead of silently going on looking
+current.
+
+### Push delivery (Greg's decision, 2026-07-07)
+
+At day rollover (the moment the ledger closes), the server also POSTs a
+compact plain-text summary of the closed shift to every URL in
+`WAR_ROOM_PUSH_URLS` (comma-separated). Delivery is fire-and-forget and
+never blocks or delays the event plane: each URL gets a 5s-timeout POST,
+at most one retry, and a failure only logs a masked `⚠` line (host only —
+never the full URL, which may carry a device/webhook token). **Unset =
+feature off, zero noise; no fetch call is ever made.**
+
+```
+WAR_ROOM_PUSH_URLS=https://your-nexus-host/bark-wrapper/shift,https://your-morning-page/ingest node dist/cli.js
+```
+
+To point this at your own setup:
+
+- **NEXUS Bark wrapper:** point one URL at whatever local endpoint your
+  Bark wrapper exposes for a plain-text push (see
+  `nexus-notifier`/Bark wrapper docs on NEXUS itself — wiring that side is
+  out of scope here; this server only needs a URL that accepts
+  `POST` with a `text/plain` body).
+- **Morning-page ingest:** point another URL at an endpoint that appends
+  the POSTed text as a tile/section on the morning page.
+- Both can be set at once (comma-separated) — the fan-out is per-URL and
+  tolerant, so one endpoint being down never blocks the other.
+
+The message body (see `server/src/shiftPush.ts::formatShiftPushText`) is a
+few short lines: date, turns completed, tokens in/out, crises
+ignited/resolved (+ mean/worst unblock time), and the efficiency grade —
+same LEAN/STEADY/HEAVY word used in the dashboard, never a color.
 
 ## Emergence rules (v1 mechanic #4)
 

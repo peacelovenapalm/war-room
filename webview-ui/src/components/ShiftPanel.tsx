@@ -1,45 +1,23 @@
 import { useEffect, useState } from 'react';
 
 import { formatAge } from '../office/crisis.js';
+import {
+  compactTokens,
+  EFFICIENCY_WORDS,
+  formatClock,
+  isShiftReportStale,
+  type ShiftReport,
+  type ShiftSnapshot,
+} from '../shiftReport.js';
 import { Modal } from './ui/Modal.js';
 
 /** Refresh cadence while the panel is open. */
 const REFRESH_INTERVAL_MS = 60 * 1000;
 
-interface ShiftReport {
-  date: string;
-  turnsCompleted: number;
-  tokensIn: number;
-  tokensOut: number;
-  crisesIgnited: number;
-  crisesResolved: number;
-  crisesOpen: number;
-  meanTimeToUnblockMs: number | null;
-  longestBlockedMs: number;
-  todosClosed: number | null;
-  gatesAdvanced: number | null;
-  outputTokensPerTurn: number | null;
-  efficiency: 'LEAN' | 'STEADY' | 'HEAVY' | null;
-  generatedAt: string;
-}
-
 interface ShiftPanelProps {
   isOpen: boolean;
   onClose: () => void;
 }
-
-function compactTokens(n: number): string {
-  if (n >= 1_000_000) return `${(n / 1_000_000).toFixed(1)}M`;
-  if (n >= 1_000) return `${(n / 1_000).toFixed(1)}k`;
-  return String(n);
-}
-
-/** Colorblind rule: WORD carries the grade; color is reinforcement only. */
-const EFFICIENCY_WORDS: Record<NonNullable<ShiftReport['efficiency']>, string> = {
-  LEAN: 'LEAN — low spend per completed turn. Keep it up.',
-  STEADY: 'STEADY — normal spend per completed turn.',
-  HEAVY: 'HEAVY — high spend per completed turn. Worth a look.',
-};
 
 function Row({ glyph, word, value }: { glyph: string; word: string; value: string }) {
   return (
@@ -53,13 +31,36 @@ function Row({ glyph, word, value }: { glyph: string; word: string; value: strin
   );
 }
 
+/** Compact single-line summary of a closed day — used for the YESTERDAY
+ *  card. Deliberately terser than the live scorecard (it's history, not
+ *  the thing you're acting on right now). */
+function YesterdayCard({ report }: { report: ShiftReport }) {
+  return (
+    <div className="mt-8 pt-8 border-t border-border" data-testid="shift-yesterday">
+      <div className="text-2xs font-bold uppercase tracking-wide text-text-muted mb-3">
+        ◐ YESTERDAY — {report.date}
+      </div>
+      <div className="text-sm">
+        {report.turnsCompleted} turns · {compactTokens(report.tokensOut)} tokens out ·{' '}
+        {report.crisesResolved}/{report.crisesIgnited} crises resolved ·{' '}
+        <span className="font-bold">{report.efficiency ?? 'n/a'}</span>
+      </div>
+    </div>
+  );
+}
+
 /** SHIFT REPORT (v1 mechanic #2): today's scorecard from real events —
  *  completed turns, real token spend, crisis throughput, briefing deltas.
  *  Efficiency REWARDS LOW SPEND (tokens are money) — the grade is a WORD.
- *  In-dashboard only; push delivery is an open question for Greg. */
+ *  Also shows yesterday's closed ledger and marks the numbers STALE (shape
+ *  + text) whenever a refresh fails instead of silently showing old data
+ *  as fresh. Push delivery to the morning page / Bark is a separate,
+ *  server-side feature (WAR_ROOM_PUSH_URLS) — this panel is unaffected by
+ *  whether push is configured. */
 export function ShiftPanel({ isOpen, onClose }: ShiftPanelProps) {
-  const [report, setReport] = useState<ShiftReport | null>(null);
+  const [snapshot, setSnapshot] = useState<ShiftSnapshot | null>(null);
   const [error, setError] = useState(false);
+  const [lastUpdatedAt, setLastUpdatedAt] = useState<number | null>(null);
 
   useEffect(() => {
     if (!isOpen) return;
@@ -68,10 +69,11 @@ export function ShiftPanel({ isOpen, onClose }: ShiftPanelProps) {
       try {
         const res = await fetch('/api/shift');
         if (!res.ok) throw new Error(`HTTP ${res.status}`);
-        const data = (await res.json()) as ShiftReport;
+        const data = (await res.json()) as ShiftSnapshot;
         if (!cancelled) {
-          setReport(data);
+          setSnapshot(data);
           setError(false);
+          setLastUpdatedAt(Date.now());
         }
       } catch (err) {
         console.log('[ShiftPanel] failed to fetch /api/shift:', err);
@@ -86,6 +88,11 @@ export function ShiftPanel({ isOpen, onClose }: ShiftPanelProps) {
     };
   }, [isOpen]);
 
+  const report = snapshot?.today ?? null;
+  // Stale = we have data on screen but the most recent refresh failed —
+  // never silently keep showing old numbers as if they were fresh.
+  const stale = isShiftReportStale(report !== null, error);
+
   return (
     <Modal
       isOpen={isOpen}
@@ -96,6 +103,11 @@ export function ShiftPanel({ isOpen, onClose }: ShiftPanelProps) {
       <div className="px-10 pb-8 max-h-[70vh] overflow-auto">
         {error && !report && (
           <div className="text-sm text-status-permission mb-8">⚠ unable to reach /api/shift</div>
+        )}
+        {stale && (
+          <div className="text-sm font-bold text-status-permission mb-8" data-testid="shift-stale">
+            ⚠ STALE — last updated {lastUpdatedAt !== null ? formatClock(lastUpdatedAt) : '—'}
+          </div>
         )}
         {report && (
           <>
@@ -151,6 +163,7 @@ export function ShiftPanel({ isOpen, onClose }: ShiftPanelProps) {
               blocked-episodes. Todo/gate deltas measure from the day&apos;s first activity. Lower
               spend is always the better score.
             </p>
+            {snapshot?.yesterday && <YesterdayCard report={snapshot.yesterday} />}
           </>
         )}
       </div>

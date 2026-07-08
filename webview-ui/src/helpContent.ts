@@ -146,6 +146,49 @@ export const HELP_SECTIONS: HelpSection[] = [
         word: 'EFFICIENCY',
         text: 'Graded LEAN / STEADY / HEAVY by average output tokens per completed turn — LOWER is always better. Tokens are real money; nothing on this dashboard ever rewards spending more.',
       },
+      {
+        glyph: '◐',
+        word: 'YESTERDAY',
+        text: 'A compact YESTERDAY card sits under today’s numbers, built from the last ledger that closed at midnight — checking out for the day no longer means losing yesterday’s scorecard.',
+      },
+      {
+        glyph: '⚠',
+        word: 'STALE',
+        text: 'If a refresh of the shift numbers fails, the panel marks what’s on screen STALE with the last-updated time — it never silently keeps showing old numbers as if they were current.',
+      },
+      {
+        glyph: '➤',
+        word: 'PUSH',
+        text: 'When WAR_ROOM_PUSH_URLS is set in the server environment, the closed shift’s summary also POSTs as plain text to your morning page or phone (Bark) at day rollover. Unset by default — no push, no noise, and a failed delivery never blocks or slows the dashboard.',
+      },
+    ],
+  },
+  {
+    id: 'progression',
+    title: 'PROGRESSION (LEVEL / STREAK / XP)',
+    intro:
+      'The top-left strip is honest about what earns XP and what does not — nothing here is gated: every data view above stays reachable no matter your level.',
+    entries: [
+      {
+        glyph: '▲',
+        word: 'LEVEL',
+        text: 'XP comes ONLY from real, observed events: a completed turn (hook Stop), an observed crisis resolution (a real state change away from blocked — never a stale poller-silence clear), and the daily shift-report grade at day rollover. Burning more tokens never earns XP — tokens are real money, and nothing on this dashboard rewards spending more.',
+      },
+      {
+        glyph: '◐',
+        word: 'STREAK',
+        text: 'Counts consecutive local-calendar days with at least one observed real completed turn — the daily-use habit made literal. A day with no activity breaks it back to zero; the longest streak you have ever reached is remembered separately.',
+      },
+      {
+        glyph: '✦',
+        word: 'XP BAR',
+        text: 'Fill shows progress toward the next level as a percentage (shown as a number, not just a bar — the fill color is reinforcement only). State lives on the server, not your browser, so it is shared across every screen you open this dashboard from and survives a cache clear.',
+      },
+      {
+        glyph: '◆',
+        word: 'UNLOCKS',
+        text: 'Streak length, LEAN-graded shift days, and level milestones flip permanent unlock flags server-side. They are data only for now — a later mechanic will use them to unlock office decor. Nothing renders from them yet, and unlocking never removes access to any real dashboard function.',
+      },
     ],
   },
   {
@@ -206,6 +249,49 @@ export const HELP_SECTIONS: HelpSection[] = [
         glyph: '◆',
         word: 'GATES',
         text: 'Briefing gates and todos come from the real vault/tracker files. Closing them in real life is what moves this dashboard.',
+      },
+    ],
+  },
+  {
+    id: 'sound',
+    title: 'SOUND (AMBIENCE + EVENT CHIRPS)',
+    intro:
+      'Procedural WebAudio only — no audio files, no network fetches. Every sound reinforces a signal that is ALSO on screen as shape+text; audio never carries information alone, and it never machine-guns during a burst of events.',
+    entries: [
+      {
+        glyph: '♪',
+        word: 'SOUND: ON',
+        text: 'A quiet, procedurally-generated office hum plays continuously — subtle room tone, designed to stay non-fatiguing over a full 8-hour session. On by default; toggle it from the bottom toolbar, saved per-browser.',
+      },
+      {
+        glyph: '♪',
+        word: 'CLICK TO START',
+        text: 'Browsers block audio until you interact with the page. The toggle shows "SOUND: ON (click to start)" honestly rather than pretending audio is already playing — click anywhere (or the toggle itself) to unlock it.',
+      },
+      {
+        glyph: '▲',
+        word: 'ALARM CHIRP',
+        text: 'A short double-beep plays the moment any desk escalates to the FIRE or ALARM stage — the exact same transition that changes the fire silhouette and stage label.',
+      },
+      {
+        glyph: '✓',
+        word: 'RESOLVED DING',
+        text: 'A single bright note plays for every observed "✓ RESOLVED" — the same honest-resolution rule applies: a fire that drops from lost telemetry, not a real fix, stays silent.',
+      },
+      {
+        glyph: '✓',
+        word: 'ALL CLEAR CHIME',
+        text: 'A warmer three-note chime plays when the last open crisis clears and the board flashes "✓ ALL CLEAR".',
+      },
+      {
+        glyph: '●',
+        word: 'ARRIVAL BLIP',
+        text: 'A soft, low blip plays when a new session or coworker joins the office — not on the initial bulk load of sessions that were already running.',
+      },
+      {
+        glyph: '◐',
+        word: 'NIGHT DUCK',
+        text: 'During NIGHT SHIFT (no active sessions) the ambience ducks to near-silent — an empty office should sound as empty as it looks.',
       },
     ],
   },
