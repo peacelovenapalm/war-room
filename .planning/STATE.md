@@ -796,3 +796,16 @@ model/effort. Fixed + deployed: resultTail capture (~8KB, runner→server→WS
   returns it. Also fixed ship-to-mini.sh (ssh -n; stdin-drain ate the piped
   confirm and silently no-opped a ship — caught by md5 diff, MINI re-shipped
 - runner kickstarted).
+
+### 2026-07-08 (round 3) — model dropdowns DEPLOYED ✓ (`36098d5`)
+
+Greg's "4.6" model failure → MODEL is now a strict per-provider dropdown of
+LIVE-VERIFIED values: codex = default | gpt-5.5 ONLY (gpt-5.5-codex 400s on
+his ChatGPT tier — verified by real runs, not guessed); claude = default |
+fable/opus/sonnet/haiku, effort enum fixed (no 'minimal' — claude --help is
+authoritative: low..max). Codex stdin preamble = cosmetic, no suppress flag,
+left alone. "No codex coworker rendered" root-caused: adapter keep-alive
+sockets pin to the dead container ~10 min after each redeploy (502 burst,
+self-heals; ingest verified 200 across all event types now, container logs
+show both Macs posting). Gates: webview 158/158, server 329, bin 63.
+Deployed; PROD E2E codex -m gpt-5.5 → exited 0 + resultTail verified.
