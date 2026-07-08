@@ -9,6 +9,21 @@
 #   bash macbook-hooks-install.sh MACBOOK
 #   bash macbook-hooks-install.sh MINI
 #
+# Re-running this script is safe and idempotent — the existing token is kept
+# (step 1) and the hook entries + forwarder script are replaced, not
+# duplicated (steps 2/4). Re-run it any time to pick up forwarder changes
+# (e.g. the X-Pid header added below) without re-pasting the token.
+#
+# PID telemetry (2026-07-08): the forwarder also sends an `X-Pid` header.
+# Claude Code runs each command hook as a DIRECT CHILD of the claude
+# process, so `$PPID` inside hook.sh (itself a fresh `/bin/sh` process) is
+# the claude session's own OS pid. The server tags it onto the event as
+# `__pid` (same boundary as the X-Machine -> `__machine` tagging below), so
+# the agent-drawer FOCUS button has a real pid to front the terminal with
+# (bin/dispatch-runner.mjs `focus` action). Best-effort: if `$PPID` is
+# empty, the header is simply omitted and FOCUS stays honestly disabled for
+# that session ("NO PID -- use COPY ID").
+#
 # WHY command hooks, not `type:"http"` (redesigned 2026-07-07):
 #   Claude Code hard-blocks http hooks whose URL resolves to a private or
 #   link-local address — Tailscale 100.x IPs included. The first install
@@ -104,22 +119,23 @@ ENV_FILE="${HOME}/.war-room/env"
 [ -n "${WAR_ROOM_URL:-}" ] || exit 0
 PAYLOAD="$(cat)"
 [ -n "${PAYLOAD}" ] || exit 0
+# PID telemetry: Claude Code runs this hook as a direct child of the claude
+# process, so $PPID here is the session's own OS pid -- forwarded as X-Pid
+# for the agent-drawer FOCUS button. Omitted (not sent as "X-Pid:") when
+# empty so the server never has to distinguish "absent" from "0".
+set -- -s -X POST "${WAR_ROOM_URL}/api/hooks/claude" \
+  -H 'Content-Type: application/json' \
+  -H "Authorization: Bearer ${WAR_ROOM_TOKEN}" \
+  -H "X-Machine: ${WAR_ROOM_MACHINE:-UNKNOWN}"
+if [ -n "${PPID:-}" ]; then
+  set -- "$@" -H "X-Pid: ${PPID}"
+fi
 if [ "${WAR_ROOM_HOOK_SYNC:-}" = "1" ]; then
-  printf '%s' "${PAYLOAD}" | curl -s -o /dev/null -w '%{http_code}' -m 8 -X POST \
-    "${WAR_ROOM_URL}/api/hooks/claude" \
-    -H 'Content-Type: application/json' \
-    -H "Authorization: Bearer ${WAR_ROOM_TOKEN}" \
-    -H "X-Machine: ${WAR_ROOM_MACHINE:-UNKNOWN}" \
-    --data-binary @-
+  printf '%s' "${PAYLOAD}" | curl "$@" -o /dev/null -w '%{http_code}' -m 8 --data-binary @-
   exit 0
 fi
 (
-  printf '%s' "${PAYLOAD}" | curl -s -o /dev/null -m 5 -X POST \
-    "${WAR_ROOM_URL}/api/hooks/claude" \
-    -H 'Content-Type: application/json' \
-    -H "Authorization: Bearer ${WAR_ROOM_TOKEN}" \
-    -H "X-Machine: ${WAR_ROOM_MACHINE:-UNKNOWN}" \
-    --data-binary @-
+  printf '%s' "${PAYLOAD}" | curl "$@" -o /dev/null -m 5 --data-binary @-
 ) </dev/null >/dev/null 2>&1 &
 exit 0
 HOOKEOF
