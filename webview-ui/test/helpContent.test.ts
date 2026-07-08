@@ -7,7 +7,13 @@
 
 import { describe, expect, it } from 'vitest';
 
-import { CRISIS_STAGE_HELP, HELP_SECTIONS, STATE_CHIP_HELP } from '../src/helpContent.js';
+import { DISPATCH_STATUS_CHIPS, DISPATCH_STATUSES } from '../src/dispatch.js';
+import {
+  CRISIS_STAGE_HELP,
+  DISPATCH_STATUS_HELP,
+  HELP_SECTIONS,
+  STATE_CHIP_HELP,
+} from '../src/helpContent.js';
 import { AgentVisualState, STATE_CHIPS } from '../src/office/agentState.js';
 import { CRISIS_STAGE_SPECS, CrisisStage } from '../src/office/crisis.js';
 
@@ -26,6 +32,8 @@ const REQUIRED_SECTION_IDS = [
   'data-sources',
   'decor',
   'sound',
+  'dispatch',
+  'agent-drawer',
 ];
 
 describe('help content completeness', () => {
@@ -48,6 +56,20 @@ describe('help content completeness', () => {
     const words = stageSection.entries.map((e) => e.word);
     for (const stage of Object.values(CrisisStage)) {
       expect(words).toContain(CRISIS_STAGE_SPECS[stage].label);
+    }
+  });
+
+  it('covers every dispatch status (mechanic #6b)', () => {
+    for (const status of DISPATCH_STATUSES) {
+      expect(
+        DISPATCH_STATUS_HELP[status],
+        `missing help text for dispatch status "${status}"`,
+      ).toBeTruthy();
+    }
+    const dispatchSection = HELP_SECTIONS.find((s) => s.id === 'dispatch')!;
+    const words = dispatchSection.entries.map((e) => e.word);
+    for (const status of DISPATCH_STATUSES) {
+      expect(words).toContain(DISPATCH_STATUS_CHIPS[status].word);
     }
   });
 

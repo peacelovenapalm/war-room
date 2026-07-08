@@ -10,6 +10,7 @@
  * by construction (shape + label first, color never carries meaning).
  */
 
+import { DISPATCH_STATUS_CHIPS, DISPATCH_STATUSES, type DispatchStatusValue } from './dispatch.js';
 import { AgentVisualState, STATE_CHIPS } from './office/agentState.js';
 import { ALARM_AT_MS, CRISIS_STAGE_SPECS, CrisisStage, FIRE_AT_MS } from './office/crisis.js';
 
@@ -39,6 +40,28 @@ export const STATE_CHIP_HELP: Record<AgentVisualState, string> = {
   [AgentVisualState.IDLE]:
     'The session is open but between turns — nothing running, nothing waiting.',
 };
+
+/** Per-status explanations (same completeness contract as the state chips —
+ *  enforced by helpContent.test.ts against DISPATCH_STATUSES). */
+export const DISPATCH_STATUS_HELP: Record<DispatchStatusValue, string> = {
+  ringing:
+    'The request is queued on the server, waiting for that machine’s runner to poll and decide.',
+  answered:
+    'The runner accepted the request and started the real CLI process (or fronted the terminal for a FOCUS request).',
+  denied:
+    'The runner’s local allowlist rejected the request — sticky until you dismiss it, and it always carries a plain-text reason (e.g. path-not-allowlisted).',
+  expired:
+    'Nobody’s runner answered within the 10-minute TTL — the machine is probably offline or has no runner installed.',
+  exited: 'The dispatched process finished; the exit code (0 = clean) is shown alongside.',
+};
+
+function dispatchEntries(): HelpEntry[] {
+  return DISPATCH_STATUSES.map((status) => ({
+    glyph: DISPATCH_STATUS_CHIPS[status].glyph,
+    word: DISPATCH_STATUS_CHIPS[status].word,
+    text: DISPATCH_STATUS_HELP[status],
+  }));
+}
 
 /** Per-stage explanations (same completeness contract as the chips). */
 export const CRISIS_STAGE_HELP: Record<CrisisStage, string> = {
@@ -267,6 +290,47 @@ export const HELP_SECTIONS: HelpSection[] = [
         glyph: '✓',
         word: 'UNLOCKED / LOCKED',
         text: 'The Unlocks panel marks each item UNLOCKED or LOCKED by shape and word (✓/✗), never by color alone. Locked items simply do not render in the office — there is no grayed-out preview or nag to unlock them.',
+      },
+    ],
+  },
+  {
+    id: 'dispatch',
+    title: 'CALL A COWORKER (DISPATCH)',
+    intro:
+      'The server never shells out — it only queues a request. A per-machine runner you opt into (install-dispatch-runner-launchd.sh) polls it and decides locally against its OWN allowlist; the dashboard can never force a machine to run anything.',
+    entries: [
+      {
+        glyph: '☎',
+        word: 'CALL',
+        text: 'The Call button (bottom toolbar) opens a modal to pick a machine, provider, project, and prompt — options only ever come from machines with a LIVE runner (GET /api/dispatch/machines); a machine with no runner installed is honestly absent, not a dead choice.',
+      },
+      ...dispatchEntries(),
+      {
+        glyph: '➤',
+        word: 'DISPATCH (TODO BRIDGE)',
+        text: "Every BRIEFING todo line has its own Dispatch button that pre-fills the Call modal's prompt with that line's text — pick the machine/project/provider and send it.",
+      },
+    ],
+  },
+  {
+    id: 'agent-drawer',
+    title: 'AGENT DETAIL DRAWER',
+    intro: undefined,
+    entries: [
+      {
+        glyph: '▤',
+        word: 'DETAILS',
+        text: 'Click any agent to open its drawer: machine, project dir, session id, provider, state, the exact NEEDS-INPUT/permission text, how long it has been blocked, and token spend — the "which window is on fire" problem, solved.',
+      },
+      {
+        glyph: '▶',
+        word: 'FOCUS',
+        text: 'Best-effort: dispatches a focus request to that machine\'s runner, which fronts the session\'s real terminal window. Disabled with "⚠ NO RUNNER" when that machine has no live runner — answering a permission prompt from the browser itself is never possible, by design.',
+      },
+      {
+        glyph: '⧉',
+        word: 'COPY ID',
+        text: "Always works, no runner required: copies a one-line machine + project dir + session id to your clipboard — the honest fallback when FOCUS can't reach a machine.",
       },
     ],
   },
