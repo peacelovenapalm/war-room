@@ -304,7 +304,22 @@ export const HELP_SECTIONS: HelpSection[] = [
         word: 'CALL',
         text: 'The Call button (bottom toolbar) opens a modal to pick a machine, provider, project, and prompt — options only ever come from machines with a LIVE runner (GET /api/dispatch/machines); a machine with no runner installed is honestly absent, not a dead choice.',
       },
+      {
+        glyph: '▤',
+        word: 'PROJECT + SUBFOLDER',
+        text: 'PROJECT picks one of the machine\'s allowlisted roots; the optional SUBFOLDER field runs the coworker in any folder underneath it (e.g. "packages/api") instead of only the root itself. A ".." attempt is rejected client-side as an honest early no — the runner\'s own allowlist containment check is the real, unbypassable gate.',
+      },
+      {
+        glyph: '☰',
+        word: 'MODEL + EFFORT',
+        text: "Both optional. MODEL is a free-text id/alias (e.g. 'fable', 'opus', 'o3') passed to whichever provider's --model flag; EFFORT is a dropdown shown only for providers that actually have a reasoning-effort flag (currently claude) — a provider without one silently ignores it rather than erroring.",
+      },
       ...dispatchEntries(),
+      {
+        glyph: '▤',
+        word: 'RESULT',
+        text: "An EXITED chip is clickable: it opens a monospace, scrollable view of the run's last ~8KB of output (resultTail) — previously visible only in a log file on whichever machine ran it. A page refresh still shows recent results (GET /api/dispatch/recent), not just in-flight ones.",
+      },
       {
         glyph: '➤',
         word: 'DISPATCH (TODO BRIDGE)',

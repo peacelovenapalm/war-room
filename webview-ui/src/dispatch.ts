@@ -22,6 +22,19 @@ export type DispatchActionValue = 'dispatch' | 'focus';
 /** Mirrors dispatchStore.ts DISPATCH_PROMPT_MAX_CHARS — the modal's textarea cap. */
 export const DISPATCH_PROMPT_MAX_CHARS = 4000;
 
+/** Mirrors dispatchStore.ts DISPATCH_EFFORT_VALUES — the modal's EFFORT dropdown options. */
+export const DISPATCH_EFFORT_VALUES = ['minimal', 'low', 'medium', 'high', 'xhigh', 'max'] as const;
+export type DispatchEffort = (typeof DISPATCH_EFFORT_VALUES)[number];
+
+/** Providers with a real --effort-equivalent flag (bin/lib/dispatch-rules.mjs
+ *  buildArgv is the enforcement point) — gates whether the modal even shows
+ *  an EFFORT dropdown for the selected provider. */
+export const DISPATCH_EFFORT_PROVIDERS: readonly DispatchProvider[] = ['claude'];
+
+/** Mirrors dispatchStore.ts's model pattern — client-side hint only, the
+ *  server validates for real. */
+export const DISPATCH_MODEL_PATTERN = /^[a-zA-Z0-9._/-]{1,64}$/;
+
 /** DENIED chips are sticky (dismiss only); every other terminal status
  *  auto-clears after this long so the tray doesn't grow forever. */
 export const DISPATCH_AUTOCLEAR_MS = 60_000;
@@ -55,8 +68,19 @@ export interface DispatchEntry {
   reason?: string;
   pid?: number;
   exitCode?: number;
+  /** Capped tail of the run's log (dispatch action, exited status only) —
+   *  the only place a run's actual output reaches the dashboard. */
+  resultTail?: string;
   /** Client receipt time — anchors the auto-clear timer. */
   receivedAt: number;
+}
+
+/** Only `exited` entries carry a resultTail worth viewing (DENIED already
+ *  shows its reason inline in the chip; EXPIRED means nobody ever ran
+ *  anything, so there is no output to show) — this gates whether a tray
+ *  chip is clickable to open the result view. */
+export function hasViewableResult(entry: Pick<DispatchEntry, 'status'>): boolean {
+  return entry.status === 'exited';
 }
 
 /** Pure auto-clear rule: RINGING/ANSWERED are still in flight (never auto-
@@ -124,6 +148,56 @@ export function buildCopyIdLine(
   sessionId: string | undefined,
 ): string {
   return [machine ?? '(no machine)', cwd ?? '(no cwd)', sessionId ?? '(no session id)'].join(' · ');
+}
+
+// ── Subpath selection (CallModal: root dropdown + free-text subpath) ────
+//
+// The runner's own allowlist containment check (realpath + relative, see
+// bin/lib/dispatch-rules.mjs validateRequest) is the REAL trust boundary —
+// these are client-side conveniences only: joining a chosen root with a
+// typed subpath, and rejecting an obvious `..` escape before it's even sent
+// (an honest early "no" rather than a round trip that comes back denied).
+
+export interface SubpathJoinResult {
+  ok: boolean;
+  cwd?: string;
+  reason?: string;
+}
+
+/** Join an allowlisted root with a user-typed subpath into one cwd. Denies
+ *  (client-side only — the runner denies again, for real) any `..` segment
+ *  or a leading `/` (which would silently ignore the chosen root). */
+export function joinRootSubpath(root: string, subpath: string): SubpathJoinResult {
+  const trimmed = subpath.trim();
+  if (trimmed === '') return { ok: true, cwd: root };
+  if (trimmed.startsWith('/')) {
+    return { ok: false, reason: 'subpath must be relative to the chosen root, not absolute' };
+  }
+  const segments = trimmed.split('/').filter((s) => s !== '');
+  if (segments.some((s) => s === '..')) {
+    return { ok: false, reason: 'subpath must not contain ".."' };
+  }
+  const normalizedRoot = root.replace(/\/+$/, '');
+  return { ok: true, cwd: `${normalizedRoot}/${segments.join('/')}` };
+}
+
+/** Reverse of joinRootSubpath — given a full cwd (e.g. from a BRIEFING
+ *  todo's DISPATCH prefill) and a machine's advertised roots, find which
+ *  root it's under and what the remaining subpath is. Returns null if no
+ *  advertised root contains it (the prefilled cwd may predate this machine's
+ *  current allowlist, or belong to a different machine). */
+export function splitCwdIntoRootSubpath(
+  cwd: string,
+  roots: string[],
+): { root: string; subpath: string } | null {
+  for (const root of roots) {
+    const normalizedRoot = root.replace(/\/+$/, '');
+    if (cwd === normalizedRoot) return { root, subpath: '' };
+    if (cwd.startsWith(`${normalizedRoot}/`)) {
+      return { root, subpath: cwd.slice(normalizedRoot.length + 1) };
+    }
+  }
+  return null;
 }
 
 /** A machine advertisement from GET /api/dispatch/machines. */

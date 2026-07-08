@@ -8,6 +8,7 @@ import { BriefingPanel } from './components/BriefingPanel.js';
 import { CallModal, type CallModalPrefill } from './components/CallModal.js';
 import { ChangelogModal } from './components/ChangelogModal.js';
 import { DebugView } from './components/DebugView.js';
+import { DispatchResultModal } from './components/DispatchResultModal.js';
 import { DispatchTray } from './components/DispatchTray.js';
 import { EditActionBar } from './components/EditActionBar.js';
 import { HelpModal } from './components/HelpModal.js';
@@ -122,6 +123,7 @@ function App() {
   const [drawerAgentId, setDrawerAgentId] = useState<number | null>(null);
   const [pendingSends, setPendingSends] = useState<PendingSend[]>([]);
   const [sendFailures, setSendFailures] = useState<SendFailure[]>([]);
+  const [viewedDispatchId, setViewedDispatchId] = useState<string | null>(null);
 
   // Help is reachable at all times: `?` toggles, Escape closes. Skip when
   // typing in an input/textarea (none today, but cheap insurance).
@@ -554,7 +556,13 @@ function App() {
       <DispatchTray
         entries={dispatchEntries}
         onDismiss={dismissDispatch}
+        onView={setViewedDispatchId}
         sendFailures={sendFailures}
+      />
+
+      <DispatchResultModal
+        entry={dispatchEntries.find((e) => e.id === viewedDispatchId) ?? null}
+        onClose={() => setViewedDispatchId(null)}
       />
 
       <AgentDrawer

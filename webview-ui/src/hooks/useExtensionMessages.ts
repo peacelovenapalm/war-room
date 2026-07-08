@@ -136,6 +136,41 @@ export function useExtensionMessages(
   const [progression, setProgression] = useState<ProgressionSnapshot | null>(null);
   const [dispatchEntries, setDispatchEntries] = useState<DispatchEntry[]>([]);
 
+  // Hydrate from GET /api/dispatch/recent once on mount — a page refresh
+  // otherwise only gets the WS replay of NON-terminal entries (getActive),
+  // losing anything that already finished (including its resultTail).
+  useEffect(() => {
+    let cancelled = false;
+    const load = async () => {
+      try {
+        const res = await fetch('/api/dispatch/recent');
+        if (!res.ok) throw new Error(`HTTP ${res.status}`);
+        const data = (await res.json()) as Array<{
+          id: string;
+          action: DispatchActionValue;
+          status: DispatchStatusValue;
+          machine: string;
+          provider?: string;
+          promptPreview?: string;
+          reason?: string;
+          pid?: number;
+          exitCode?: number;
+          resultTail?: string;
+        }>;
+        if (cancelled) return;
+        setDispatchEntries((prev) =>
+          data.reduce((acc, entry) => upsertDispatchEntry(acc, entry), prev),
+        );
+      } catch (err) {
+        console.log('[useExtensionMessages] failed to fetch /api/dispatch/recent:', err);
+      }
+    };
+    void load();
+    return () => {
+      cancelled = true;
+    };
+  }, []);
+
   // Track whether initial layout has been loaded (ref to avoid re-render)
   const layoutReadyRef = useRef(false);
 
@@ -699,6 +734,7 @@ export function useExtensionMessages(
             reason: msg.reason as string | undefined,
             pid: msg.pid as number | undefined,
             exitCode: msg.exitCode as number | undefined,
+            resultTail: msg.resultTail as string | undefined,
           }),
         );
       }

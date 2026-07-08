@@ -3,6 +3,7 @@ import { useEffect, useState } from 'react';
 import {
   dispatchChipLabel,
   type DispatchEntry,
+  hasViewableResult,
   pruneDispatchEntries,
   pruneSendFailures,
   type SendFailure,
@@ -16,6 +17,9 @@ const PRUNE_TICK_MS = 5_000;
 interface DispatchTrayProps {
   entries: DispatchEntry[];
   onDismiss: (id: string) => void;
+  /** Opens the result view for an EXITED entry's resultTail — the only
+   *  status with output worth viewing (see hasViewableResult). */
+  onView: (id: string) => void;
   /** Sends that never got a server ack within DISPATCH_SEND_TIMEOUT_MS —
    *  dispatchRequest has no ack on the wire, so this is the only honest
    *  signal a silently-dropped send (bad provider, ringing cap, ...) gets. */
@@ -26,8 +30,9 @@ interface DispatchTrayProps {
  *  recently-terminal dispatch/focus request. GLYPH + WORD only (colorblind
  *  hard rule) — DENIED is sticky until explicitly dismissed; every other
  *  terminal status clears itself after ~60s so the tray never grows forever.
- *  Send-failure chips ("⚠ NOT QUEUED — machine") auto-clear the same way. */
-export function DispatchTray({ entries, onDismiss, sendFailures }: DispatchTrayProps) {
+ *  Send-failure chips ("⚠ NOT QUEUED — machine") auto-clear the same way.
+ *  EXITED chips are additionally clickable to view the run's resultTail. */
+export function DispatchTray({ entries, onDismiss, onView, sendFailures }: DispatchTrayProps) {
   // Local prune tick: entries the hook hands us are never removed on a timer
   // by themselves (upsertDispatchEntry only inserts/updates) — this
   // component owns the "hide it once it's old enough" presentation rule.
@@ -43,28 +48,37 @@ export function DispatchTray({ entries, onDismiss, sendFailures }: DispatchTrayP
 
   return (
     <div className="absolute bottom-64 left-10 z-20 flex flex-col gap-4 items-start">
-      {visible.map((entry) => (
-        <div
-          key={entry.id}
-          className="pixel-panel py-4 px-10 text-sm flex items-center gap-8"
-          data-testid="dispatch-chip"
-        >
-          <span className="whitespace-nowrap">
-            {entry.action === 'focus' ? '[FOCUS] ' : ''}
-            {entry.machine}
-            {entry.provider ? ` · ${entry.provider}` : ''} — {dispatchChipLabel(entry)}
-          </span>
-          {entry.status === 'denied' && (
-            <button
-              onClick={() => onDismiss(entry.id)}
-              className="bg-transparent border-none cursor-pointer text-text-muted hover:text-text shrink-0"
-              title="Dismiss"
-            >
-              x
-            </button>
-          )}
-        </div>
-      ))}
+      {visible.map((entry) => {
+        const viewable = hasViewableResult(entry);
+        return (
+          <div
+            key={entry.id}
+            className={`pixel-panel py-4 px-10 text-sm flex items-center gap-8 ${viewable ? 'cursor-pointer' : ''}`}
+            data-testid="dispatch-chip"
+            onClick={viewable ? () => onView(entry.id) : undefined}
+            role={viewable ? 'button' : undefined}
+            title={viewable ? 'Click to view result' : undefined}
+          >
+            <span className="whitespace-nowrap">
+              {entry.action === 'focus' ? '[FOCUS] ' : ''}
+              {entry.machine}
+              {entry.provider ? ` · ${entry.provider}` : ''} — {dispatchChipLabel(entry)}
+            </span>
+            {entry.status === 'denied' && (
+              <button
+                onClick={(e) => {
+                  e.stopPropagation();
+                  onDismiss(entry.id);
+                }}
+                className="bg-transparent border-none cursor-pointer text-text-muted hover:text-text shrink-0"
+                title="Dismiss"
+              >
+                x
+              </button>
+            )}
+          </div>
+        );
+      })}
       {visibleFailures.map((failure) => (
         <div
           key={failure.id}

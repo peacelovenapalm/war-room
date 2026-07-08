@@ -18,6 +18,8 @@ import {
   DISPATCH_STATUSES,
   dispatchChipLabel,
   type DispatchEntry,
+  hasViewableResult,
+  joinRootSubpath,
   machineSupportsFocus,
   type PendingSend,
   promptRemaining,
@@ -26,6 +28,7 @@ import {
   type SendFailure,
   sendFailureChipLabel,
   shouldAutoClear,
+  splitCwdIntoRootSubpath,
   upsertDispatchEntry,
 } from '../src/dispatch.js';
 
@@ -308,5 +311,89 @@ describe('pruneSendFailures', () => {
 describe('sendFailureChipLabel', () => {
   it('names the machine that never got queued', () => {
     expect(sendFailureChipLabel({ machine: 'MACBOOK' })).toBe('⚠ NOT QUEUED — MACBOOK');
+  });
+});
+
+describe('hasViewableResult', () => {
+  it('only EXITED entries carry a resultTail worth viewing', () => {
+    for (const status of DISPATCH_STATUSES) {
+      expect(hasViewableResult({ status })).toBe(status === 'exited');
+    }
+  });
+});
+
+describe('joinRootSubpath', () => {
+  it('returns the root itself when subpath is blank', () => {
+    expect(joinRootSubpath('/Users/dev/proj', '')).toEqual({ ok: true, cwd: '/Users/dev/proj' });
+    expect(joinRootSubpath('/Users/dev/proj', '   ')).toEqual({
+      ok: true,
+      cwd: '/Users/dev/proj',
+    });
+  });
+
+  it('joins a plain relative subpath onto the root', () => {
+    expect(joinRootSubpath('/Users/dev/proj', 'packages/api')).toEqual({
+      ok: true,
+      cwd: '/Users/dev/proj/packages/api',
+    });
+  });
+
+  it('tolerates a trailing slash on the root and stray double-slashes in the subpath', () => {
+    expect(joinRootSubpath('/Users/dev/proj/', 'packages//api/')).toEqual({
+      ok: true,
+      cwd: '/Users/dev/proj/packages/api',
+    });
+  });
+
+  it('rejects an absolute subpath (would silently ignore the chosen root)', () => {
+    const result = joinRootSubpath('/Users/dev/proj', '/etc/passwd');
+    expect(result.ok).toBe(false);
+  });
+
+  it('rejects a ".." escape attempt client-side', () => {
+    const result = joinRootSubpath('/Users/dev/proj', '../../etc');
+    expect(result.ok).toBe(false);
+    expect(result.reason).toMatch(/\.\./);
+  });
+
+  it('rejects a ".." embedded mid-path, not just at the start', () => {
+    const result = joinRootSubpath('/Users/dev/proj', 'packages/../../etc');
+    expect(result.ok).toBe(false);
+  });
+});
+
+describe('splitCwdIntoRootSubpath', () => {
+  it('splits a cwd nested under an advertised root', () => {
+    expect(splitCwdIntoRootSubpath('/Users/dev/proj/packages/api', ['/Users/dev/proj'])).toEqual({
+      root: '/Users/dev/proj',
+      subpath: 'packages/api',
+    });
+  });
+
+  it('returns an empty subpath when the cwd IS the root', () => {
+    expect(splitCwdIntoRootSubpath('/Users/dev/proj', ['/Users/dev/proj'])).toEqual({
+      root: '/Users/dev/proj',
+      subpath: '',
+    });
+  });
+
+  it('returns null when no advertised root contains the cwd', () => {
+    expect(splitCwdIntoRootSubpath('/Users/dev/other', ['/Users/dev/proj'])).toBeNull();
+  });
+
+  it('does not false-match a root that is merely a string prefix (not a path ancestor)', () => {
+    // '/Users/dev/proj-2' textually starts with '/Users/dev/proj' but is a
+    // sibling directory, not nested inside it.
+    expect(splitCwdIntoRootSubpath('/Users/dev/proj-2', ['/Users/dev/proj'])).toBeNull();
+  });
+
+  it('round-trips with joinRootSubpath', () => {
+    const split = splitCwdIntoRootSubpath('/Users/dev/proj/src/lib', ['/Users/dev/proj']);
+    expect(split).not.toBeNull();
+    if (!split) return;
+    expect(joinRootSubpath(split.root, split.subpath)).toEqual({
+      ok: true,
+      cwd: '/Users/dev/proj/src/lib',
+    });
   });
 });

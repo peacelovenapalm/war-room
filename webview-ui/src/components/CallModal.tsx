@@ -1,10 +1,17 @@
 import { useEffect, useState } from 'react';
 
 import {
+  DISPATCH_EFFORT_PROVIDERS,
+  DISPATCH_EFFORT_VALUES,
+  DISPATCH_MODEL_PATTERN,
   DISPATCH_PROMPT_MAX_CHARS,
+  type DispatchEffort,
   type DispatchMachine,
   type DispatchProvider,
+  joinRootSubpath,
   promptRemaining,
+  splitCwdIntoRootSubpath,
+  type SubpathJoinResult,
 } from '../dispatch.js';
 import { transport } from '../transport/index.js';
 import { Button } from './ui/Button.js';
@@ -40,8 +47,14 @@ export function CallModal({ isOpen, onClose, prefill, onSend }: CallModalProps) 
   const [fetchFailed, setFetchFailed] = useState(false);
   const [machine, setMachine] = useState('');
   const [provider, setProvider] = useState<DispatchProvider | ''>('');
-  const [cwd, setCwd] = useState('');
+  const [root, setRoot] = useState('');
+  const [subpath, setSubpath] = useState('');
   const [prompt, setPrompt] = useState('');
+  const [model, setModel] = useState('');
+  const [effort, setEffort] = useState<DispatchEffort | ''>('');
+  // A prefilled cwd (BRIEFING todo bridge) that hasn't yet been split into
+  // root+subpath because the machine's roots weren't loaded at prefill time.
+  const [pendingPrefillCwd, setPendingPrefillCwd] = useState('');
 
   useEffect(() => {
     if (!isOpen) return;
@@ -69,33 +82,64 @@ export function CallModal({ isOpen, onClose, prefill, onSend }: CallModalProps) 
   }, [isOpen]);
 
   // Apply prefill (from a BRIEFING todo's DISPATCH button) each time the
-  // modal opens with one — resets to blank otherwise.
+  // modal opens with one — resets to blank otherwise. The prefill carries a
+  // full cwd, not a root+subpath pair, so it's parked in pendingPrefillCwd
+  // until the machine's roots are known (see the effect below).
   useEffect(() => {
     if (!isOpen) return;
     setMachine(prefill?.machine ?? '');
     setProvider(prefill?.provider ?? '');
-    setCwd(prefill?.cwd ?? '');
+    setRoot('');
+    setSubpath('');
     setPrompt(prefill?.prompt ?? '');
+    setModel('');
+    setEffort('');
+    setPendingPrefillCwd(prefill?.cwd ?? '');
   }, [isOpen, prefill]);
 
   const selectedMachine = machines.find((m) => m.machine === machine);
+
+  // Resolve a pending prefill cwd into root+subpath once the matching
+  // machine's roots are loaded (machines fetch is async, may lag the
+  // prefill-apply effect above). Falls back to leaving root unset if no
+  // advertised root contains it — an honest "pick one yourself" rather than
+  // guessing a root that would silently deny server-side.
+  useEffect(() => {
+    if (!pendingPrefillCwd || !selectedMachine) return;
+    const split = splitCwdIntoRootSubpath(pendingPrefillCwd, selectedMachine.roots);
+    if (split) {
+      setRoot(split.root);
+      setSubpath(split.subpath);
+    }
+    setPendingPrefillCwd('');
+  }, [pendingPrefillCwd, selectedMachine]);
+
   const remaining = promptRemaining(prompt);
+  const joined: SubpathJoinResult =
+    root.trim() !== ''
+      ? joinRootSubpath(root, subpath)
+      : { ok: false, reason: 'no project chosen' };
+  const showEffort = provider !== '' && DISPATCH_EFFORT_PROVIDERS.includes(provider);
+  const modelValid = model.trim() === '' || DISPATCH_MODEL_PATTERN.test(model.trim());
   const canSubmit =
     machine.trim() !== '' &&
     provider !== '' &&
-    cwd.trim() !== '' &&
+    joined.ok &&
     prompt.trim() !== '' &&
-    remaining >= 0;
+    remaining >= 0 &&
+    modelValid;
 
   const handleSubmit = () => {
-    if (!canSubmit) return;
+    if (!canSubmit || !joined.ok || !joined.cwd) return;
     transport.send({
       type: 'dispatchRequest',
       action: 'dispatch',
       machine,
       provider,
-      cwd,
+      cwd: joined.cwd,
       prompt,
+      ...(model.trim() !== '' ? { model: model.trim() } : {}),
+      ...(showEffort && effort !== '' ? { effort } : {}),
     });
     onSend(machine, 'dispatch');
     onClose();
@@ -124,7 +168,8 @@ export function CallModal({ isOpen, onClose, prefill, onSend }: CallModalProps) 
                 onChange={(e) => {
                   setMachine(e.target.value);
                   setProvider('');
-                  setCwd('');
+                  setRoot('');
+                  setSubpath('');
                 }}
               >
                 <option value="">— choose a machine —</option>
@@ -158,8 +203,8 @@ export function CallModal({ isOpen, onClose, prefill, onSend }: CallModalProps) 
                   <span className="font-bold">PROJECT</span>
                   <select
                     className="border-2 border-border bg-bg text-text py-4 px-8 rounded-none"
-                    value={cwd}
-                    onChange={(e) => setCwd(e.target.value)}
+                    value={root}
+                    onChange={(e) => setRoot(e.target.value)}
                   >
                     <option value="">— choose a project —</option>
                     {selectedMachine.roots.map((r) => (
@@ -169,6 +214,59 @@ export function CallModal({ isOpen, onClose, prefill, onSend }: CallModalProps) 
                     ))}
                   </select>
                 </label>
+
+                {root && (
+                  <label className="flex flex-col gap-3 text-sm">
+                    <span className="font-bold">SUBFOLDER (optional)</span>
+                    <input
+                      type="text"
+                      className="border-2 border-border bg-bg text-text py-4 px-8 rounded-none"
+                      value={subpath}
+                      onChange={(e) => setSubpath(e.target.value)}
+                      placeholder="e.g. packages/api"
+                    />
+                    <span className="text-2xs text-text-muted">
+                      Any folder under the chosen project — leave blank to run at the project root.{' '}
+                      {joined.ok
+                        ? `Runs at: ${joined.cwd}`
+                        : `⚠ ${joined.reason ?? 'invalid subfolder'}`}
+                    </span>
+                  </label>
+                )}
+
+                <label className="flex flex-col gap-3 text-sm">
+                  <span className="font-bold">MODEL (optional)</span>
+                  <input
+                    type="text"
+                    className="border-2 border-border bg-bg text-text py-4 px-8 rounded-none"
+                    value={model}
+                    onChange={(e) => setModel(e.target.value)}
+                    placeholder="e.g. fable, opus, o3"
+                  />
+                  {!modelValid && (
+                    <span className="text-2xs text-status-permission font-bold">
+                      ⚠ letters, digits, ".", "_", "/", "-" only
+                    </span>
+                  )}
+                </label>
+
+                {showEffort && (
+                  <label className="flex flex-col gap-3 text-sm">
+                    <span className="font-bold">EFFORT (optional)</span>
+                    <select
+                      className="border-2 border-border bg-bg text-text py-4 px-8 rounded-none"
+                      value={effort}
+                      onChange={(e) => setEffort(e.target.value as DispatchEffort)}
+                    >
+                      <option value="">— default —</option>
+                      {DISPATCH_EFFORT_VALUES.map((level) => (
+                        <option key={level} value={level}>
+                          {level}
+                        </option>
+                      ))}
+                    </select>
+                  </label>
+                )}
               </>
             )}
 
