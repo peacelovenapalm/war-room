@@ -7,7 +7,6 @@ import {
   CAMERA_FOLLOW_LERP,
   CAMERA_FOLLOW_SNAP_THRESHOLD,
   PAN_MARGIN_FRACTION,
-  WAR_ROOM_ENGINE,
   ZOOM_MAX,
   ZOOM_MIN,
   ZOOM_SCROLL_THRESHOLD,
@@ -17,14 +16,15 @@ import { transport } from '../../transport/index.js';
 import { stageForAge } from '../crisis.js';
 import { canPlaceFurniture, getWallPlacementRow } from '../editor/editorActions.js';
 import type { EditorState } from '../editor/editorState.js';
-import { startGameLoop } from '../engine/gameLoop.js';
 import type { OfficeState } from '../engine/officeState.js';
 import { startPixiApp } from '../engine/pixiApp.js';
 import type {
+  DeleteButtonBounds,
   PixiEditorState,
   PixiLayers,
   PixiSelectionState,
   PixiSpritePools,
+  RotateButtonBounds,
 } from '../engine/pixiRenderer.js';
 import {
   createPixiLayers,
@@ -32,13 +32,6 @@ import {
   getSpriteTexture,
   renderFrame as renderPixiFrame,
 } from '../engine/pixiRenderer.js';
-import type {
-  DeleteButtonBounds,
-  EditorRenderState,
-  RotateButtonBounds,
-  SelectionRenderState,
-} from '../engine/renderer.js';
-import { renderFrame as renderCanvasFrame } from '../engine/renderer.js';
 import { getCatalogEntry, isRotatable } from '../layout/furnitureCatalog.js';
 import { EditTool, TILE_SIZE } from '../types.js';
 import { computeNormalModeCursor } from './officeCanvasCursor.js';
@@ -222,18 +215,14 @@ export function OfficeCanvas({
     return isNightMode;
   }, [officeState, zoom, panRef]);
 
-  // Build the shared editor-overlay render state (field-identical between
-  // the canvas EditorRenderState and PixiEditorState shapes).
-  const buildEditorRenderState = useCallback(():
-    | EditorRenderState
-    | PixiEditorState
-    | undefined => {
+  // Build the editor-overlay render state consumed by pixiRenderer.ts.
+  const buildEditorRenderState = useCallback((): PixiEditorState | undefined => {
     if (!isEditMode) return undefined;
     const showGhostBorder =
       editorState.activeTool === EditTool.TILE_PAINT ||
       editorState.activeTool === EditTool.WALL_PAINT ||
       editorState.activeTool === EditTool.ERASE;
-    const editorRender: EditorRenderState = {
+    const editorRender: PixiEditorState = {
       showGrid: true,
       ghostSprite: null,
       ghostMirrored: false,
@@ -318,7 +307,7 @@ export function OfficeCanvas({
   }, [isEditMode, editorState, officeState]);
 
   const buildSelectionRenderState = useCallback(
-    (): SelectionRenderState | PixiSelectionState => ({
+    (): PixiSelectionState => ({
       selectedAgentId: officeState.selectedAgentId,
       hoveredAgentId: officeState.hoveredAgentId,
       hoveredTile: officeState.hoveredTile,
@@ -339,62 +328,15 @@ export function OfficeCanvas({
       observer.observe(containerRef.current);
     }
 
-    if (WAR_ROOM_ENGINE === 'canvas2d') {
-      const stop = startGameLoop(canvas, {
-        update: stepSimulation,
-        render: (ctx) => {
-          const w = canvas.width;
-          const h = canvas.height;
-          const editorRender = buildEditorRenderState() as EditorRenderState | undefined;
-          applyCameraFollowAndAmbience();
-          const selectionRender = buildSelectionRenderState() as SelectionRenderState;
-          const isNightMode = officeState.characters.size === 0;
-
-          const { offsetX, offsetY } = renderCanvasFrame(
-            ctx,
-            w,
-            h,
-            officeState.tileMap,
-            officeState.furniture,
-            officeState.getCharacters(),
-            zoom,
-            panRef.current.x,
-            panRef.current.y,
-            selectionRender,
-            editorRender,
-            officeState.getLayout().tileColors,
-            officeState.getLayout().cols,
-            officeState.getLayout().rows,
-            officeState.pets,
-            {
-              debris: officeState.debris.values(),
-              effects: officeState.crisisEffects,
-              now: Date.now(),
-              nightMode: isNightMode,
-            },
-          );
-          offsetRef.current = { x: offsetX, y: offsetY };
-          deleteButtonBoundsRef.current = editorRender?.deleteButtonBounds ?? null;
-          rotateButtonBoundsRef.current = editorRender?.rotateButtonBounds ?? null;
-        },
-      });
-
-      return () => {
-        stop();
-        observer.disconnect();
-      };
-    }
-
-    // ── Pixi path ──────────────────────────────────────────────
     const handle = startPixiApp(canvas, {
       update: (dt) => {
         const scene = pixiSceneRef.current;
         if (!scene) return; // ready.then() below hasn't landed yet — skip this tick
         stepSimulation(dt);
 
-        const editorRender = buildEditorRenderState() as PixiEditorState | undefined;
+        const editorRender = buildEditorRenderState();
         applyCameraFollowAndAmbience();
-        const selectionRender = buildSelectionRenderState() as PixiSelectionState;
+        const selectionRender = buildSelectionRenderState();
         const isNightMode = officeState.characters.size === 0;
 
         const { offsetX, offsetY } = renderPixiFrame(

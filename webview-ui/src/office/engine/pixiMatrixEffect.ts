@@ -1,10 +1,12 @@
 /**
  * PixiJS rendering for the Matrix-style spawn/despawn digital-rain effect —
- * G0 port. Temporarily a separate file from `matrixEffect.ts` (the old
- * canvas version) so both engines compile side by side while the
- * `WAR_ROOM_ENGINE` flag is being bisected — task 10 deletes the canvas
- * original and renames this file to `matrixEffect.ts` once the flip is
- * verified clean in both directions twice.
+ * G0 port. A separate file from `matrixEffect.ts`: the `WAR_ROOM_ENGINE`
+ * bisection flag and the canvas `renderer.ts`/`gameLoop.ts` engine (task 10)
+ * are gone, but `matrixEffect.ts` itself stays — `officeState.ts` still
+ * imports its `matrixEffectSeeds` pure helper. Its `renderMatrixEffect`
+ * canvas-draw export is now dead code (superseded by this file's own
+ * `renderMatrixEffect`), left in place because BUILD-PLAN.md §G0's task 10
+ * file list names only `renderer.ts`/`gameLoop.ts` for deletion.
  *
  * Per-pixel algorithm is unchanged from the canvas version; only
  * the render TARGET changes: instead of drawing straight into the shared

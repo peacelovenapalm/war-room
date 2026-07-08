@@ -1,10 +1,11 @@
 /**
  * PixiJS rendering for the crisis & triage layer (v1 mechanic #1) — G0 port.
- * Temporarily a separate file from `crisisEffects.ts` (the old canvas
- * version) so both engines compile side by side while the
- * `WAR_ROOM_ENGINE` flag is being bisected — task 10 deletes the canvas
- * original and renames this file to `crisisEffects.ts` once the flip is
- * verified clean in both directions twice.
+ * A separate file from `crisisEffects.ts`: the `WAR_ROOM_ENGINE` bisection
+ * flag and the canvas `renderer.ts`/`gameLoop.ts` engine (task 10) are gone.
+ * `crisisEffects.ts`'s `renderCrisisEffects` export is now dead code (zero
+ * importers — superseded by this file's own `renderCrisisEffects`), left in
+ * place because BUILD-PLAN.md §G0's task 10 file list names only
+ * `renderer.ts`/`gameLoop.ts` for deletion.
  *
  * Draws the aging fire silhouettes (smoke → fire → alarm), debris piles and
  * extinguish steam at the affected desks as pooled Pixi Sprites in the

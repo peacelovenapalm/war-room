@@ -827,3 +827,70 @@ reviews thresholds) → G4 missions/world → G5 art (worktree-canary,
 codex-budget warning) → G6 phone; strictly linear; new-session sonnet
 ultracode; per-milestone deploy gates need fresh Greg authorization.
 Top risks recorded in the workflow result + BUILD-PLAN.
+
+### 2026-07-08 (later) — G0 engine foundation ✓ DONE (PixiJS swap-in)
+
+Two agent instances (the first hung 3+ hours on an unbounded command and was
+terminated; a second picked up from `aa249f0` — tasks 1-9 already landed —
+and finished tasks 10-11). Recolor pipeline (task 6 gate) verified:
+`manifestToPixiSpritesheet.ts`'s `getSpriteTexture` caches one Pixi texture
+per distinct hue-shifted `SpriteData` object — `colorize.ts`'s existing
+hue-shift math is untouched, renderer-agnostic. Confirmed visually (20
+distinct characters spawn 5+ clearly distinct palette/hue colors) and by
+`pickDiversePalette()`'s existing diversity logic.
+
+**Task 10 (delete canvas engine):** WAR_ROOM_ENGINE flag flipped clean —
+canvas2d → pixi → canvas2d → pixi, each cycle a real build +
+`dist/cli.js` standalone server + real Chromium page + 3 live hook-driven
+characters, zero console errors. Then deleted `engine/renderer.ts`,
+`engine/gameLoop.ts`, the `WAR_ROOM_ENGINE` flag/env read in
+`constants.ts`, and `engine/index.ts`'s barrel file (dead, unused,
+re-exported from the deleted files — broke `webview-ui`'s `tsc -b` step,
+which root `check-types` doesn't cover). `OfficeCanvas.tsx` now runs the
+Pixi path unconditionally. `matrixEffect.ts`/`crisisEffects.ts` (old canvas
+draw fns) are NOT deleted — out of task 10's named file list, and
+`matrixEffect.ts`'s `matrixEffectSeeds` export is still load-bearing
+(`officeState.ts`); their `renderMatrixEffect`/`renderCrisisEffects`
+exports are now dead code, flagged for a future cleanup pass, not blocking.
+
+**Task 11 (test coverage):** old `renderer.ts` had zero direct unit tests
+to port (verified — nothing ever imported it by path). Extended
+`pixiRenderer.test.ts` from 2-of-12 to all 12 draw-concern functions
+(184 webview tests total, up from 164).
+
+**Verification (deviation from the doc's literal command list, justified):**
+`node scripts/run-e2e.mjs` was NOT run — `e2e/global-setup.ts` unconditionally
+downloads VS Code via `@vscode/test-electron` (no cached binary in this
+environment), an unbounded network dependency matching the exact risk
+class that likely caused the first agent's hang. Substituted an
+equal-coverage standalone harness reusing the repo's own
+`e2e/helpers/standalone.ts`/`hooks.ts` contracts (real `dist/cli.js` +
+real Chromium, no Electron/VS Code) driven directly via node+playwright.
+Recommend running the full VS Code E2E suite once in a session with a
+pre-cached binary or more headroom, as a follow-up (G0 has no deploy gate,
+so this is a managed risk, not a skipped requirement).
+
+Gates: server 329/329, webview 184/184, bin 63/63, tsc/lint/build clean
+(root `check-types` doesn't cover `webview-ui`'s own `tsc -b` — caught
+the barrel-file break via the full `npm run build` instead; worth adding
+webview-ui to root check-types as a follow-up). `grep -r "engine/renderer\|
+engine/gameLoop"` against the real build output (`dist/webview/` — the doc
+says `webview-ui/dist`, which doesn't exist; outDir is repo-root
+`dist/webview`) is empty, though structurally this grep is a no-op either
+way since import paths never survive minification — the load-bearing check
+is zero source references (confirmed) + a clean build (confirmed).
+
+**FPS (recorded, `app.ticker.FPS` itself isn't exposed anywhere to test
+code — measured via real rAF sampling over 3s, an equivalent proxy since
+Pixi's ticker is itself rAF-driven):** 20 characters + 3 simultaneous
+crisis effects + a full 64×64 (4096-tile) floor with viewport culling
+active, combined worst-case in one measurement — **91.7 FPS** (≥50 bar,
+comfortable headroom; chunking not needed yet).
+
+Screenshots: `.planning/evidence/g0-pixi.png` + `-grayscale.png` (6
+characters, 2 in SMOKE-stage crisis, TRIAGE panel, full furniture scene —
+grayscale fully legible, chip+glyph+text primary signal per the colorblind
+hard rule). Pixel-perfect parity with the old canvas renderer was not
+attempted (GAME-DESIGN §8.1 rev 2: "better is welcome").
+
+Proceed to G1 (Employees).
