@@ -2,10 +2,13 @@ import { useCallback, useEffect, useRef, useState } from 'react';
 
 import { ambience } from './ambience.js';
 import { toMajorMinor } from './changelogData.js';
+import { AgentDrawer } from './components/AgentDrawer.js';
 import { BottomToolbar } from './components/BottomToolbar.js';
 import { BriefingPanel } from './components/BriefingPanel.js';
+import { CallModal, type CallModalPrefill } from './components/CallModal.js';
 import { ChangelogModal } from './components/ChangelogModal.js';
 import { DebugView } from './components/DebugView.js';
+import { DispatchTray } from './components/DispatchTray.js';
 import { EditActionBar } from './components/EditActionBar.js';
 import { HelpModal } from './components/HelpModal.js';
 import { MigrationNotice } from './components/MigrationNotice.js';
@@ -89,6 +92,8 @@ function App() {
     setHooksEnabled,
     hooksInfoShown,
     progression,
+    dispatchEntries,
+    dismissDispatch,
   } = useExtensionMessages(getOfficeState, editor.setLastSavedLayout, isEditDirty);
 
   // Show migration notice once layout reset is detected
@@ -105,6 +110,9 @@ function App() {
   const [isShiftOpen, setIsShiftOpen] = useState(false);
   const [isUnlocksOpen, setIsUnlocksOpen] = useState(false);
   const [isHelpOpen, setIsHelpOpen] = useState(false);
+  const [isCallOpen, setIsCallOpen] = useState(false);
+  const [callPrefill, setCallPrefill] = useState<CallModalPrefill | null>(null);
+  const [drawerAgentId, setDrawerAgentId] = useState<number | null>(null);
 
   // Help is reachable at all times: `?` toggles, Escape closes. Skip when
   // typing in an input/textarea (none today, but cheap insurance).
@@ -195,6 +203,17 @@ function App() {
     const meta = os.subagentMeta.get(agentId);
     const focusId = meta ? meta.parentAgentId : agentId;
     transport.send({ type: 'focusAgent', id: focusId });
+    // Detail drawer (mechanic #6b): same click also opens/toggles the
+    // drawer for the resolved (parent) agent — independent of the canvas's
+    // own selection-highlight toggle, so it survives regardless of that
+    // internal state.
+    setDrawerAgentId((prev) => (prev === focusId ? null : focusId));
+  }, []);
+
+  const handleDispatchTodo = useCallback((prompt: string) => {
+    setCallPrefill({ prompt });
+    setIsCallOpen(true);
+    setIsBriefingOpen(false);
   }, []);
 
   const officeState = getOfficeState();
@@ -418,9 +437,18 @@ function App() {
         onToggleUnlocks={() => setIsUnlocksOpen((v) => !v)}
         isHelpOpen={isHelpOpen}
         onToggleHelp={() => setIsHelpOpen((v) => !v)}
+        isCallOpen={isCallOpen}
+        onToggleCall={() => {
+          setCallPrefill(null);
+          setIsCallOpen((v) => !v);
+        }}
       />
 
-      <BriefingPanel isOpen={isBriefingOpen} onClose={() => setIsBriefingOpen(false)} />
+      <BriefingPanel
+        isOpen={isBriefingOpen}
+        onClose={() => setIsBriefingOpen(false)}
+        onDispatchTodo={handleDispatchTodo}
+      />
 
       <ShiftPanel isOpen={isShiftOpen} onClose={() => setIsShiftOpen(false)} />
 
@@ -470,6 +498,24 @@ function App() {
       {showMigrationNotice && (
         <MigrationNotice onDismiss={() => setMigrationNoticeDismissed(true)} />
       )}
+
+      <CallModal
+        isOpen={isCallOpen}
+        onClose={() => {
+          setIsCallOpen(false);
+          setCallPrefill(null);
+        }}
+        prefill={callPrefill}
+      />
+
+      <DispatchTray entries={dispatchEntries} onDismiss={dismissDispatch} />
+
+      <AgentDrawer
+        agentId={drawerAgentId}
+        officeState={officeState}
+        agentTools={agentTools}
+        onClose={() => setDrawerAgentId(null)}
+      />
     </div>
   );
 }
