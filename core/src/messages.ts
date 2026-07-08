@@ -29,6 +29,9 @@ export type ServerMessage =
   | AgentPidUpdate
   | ProgressionUpdate
   | DispatchUpdate
+  | EmployeeSnapshot
+  | EmployeeHired
+  | EmployeeQuit
   | LayoutLoaded
   | FurnitureAssetsLoaded
   | CharacterSpritesLoaded
@@ -237,6 +240,70 @@ export interface DispatchUpdate {
 export type DispatchActionValue = 'dispatch' | 'focus';
 
 export type DispatchStatusValue = 'ringing' | 'answered' | 'denied' | 'expired' | 'exited';
+
+export interface EmployeeSnapshot {
+  type: 'employeeSnapshot';
+  id: string;
+  machine: string;
+  projectDir: string;
+  projectLabel: string;
+  name: string;
+  spriteIndex: number;
+  defaultProvider: EmployeeProviderValue;
+  defaultModel?: string;
+  status: EmployeeStatusValue;
+  rank: EmployeeRankValue;
+  xp: number;
+  mood: number;
+  moodBoost: number;
+  scores: EmployeeScores;
+  trainingBonus: EmployeeTrainingBonus;
+  assignedRoomId?: string;
+  createdAt: number;
+  lastActiveAt: number;
+  lowMoodStreakDays: number;
+  breakUntil?: number;
+}
+
+export type EmployeeProviderValue = 'claude' | 'codex';
+
+export type EmployeeStatusValue =
+  | 'candidate'
+  | 'active'
+  | 'on_break'
+  | 'training'
+  | 'quit'
+  | 'fired'
+  | 'retired';
+
+export type EmployeeRankValue = 'Junior' | 'Senior' | 'Lead' | 'Principal';
+
+export interface EmployeeScores {
+  speed: number;
+  accuracy: number;
+  nightOwl: number;
+  tokenEfficiency: number;
+}
+
+export interface EmployeeTrainingBonus {
+  speed: number;
+  accuracy: number;
+  nightOwl: number;
+  tokenEfficiency: number;
+}
+
+export interface EmployeeHired {
+  type: 'employeeHired';
+  id: string;
+  name: string;
+  spriteIndex: number;
+}
+
+export interface EmployeeQuit {
+  type: 'employeeQuit';
+  id: string;
+  name: string;
+}
 
 export interface LayoutLoaded {
   type: 'layoutLoaded';

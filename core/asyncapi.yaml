@@ -105,6 +105,10 @@ components:
         - $ref: '#/components/schemas/ProgressionUpdate'
         # Dispatch (v1 mechanic #6b — call a coworker)
         - $ref: '#/components/schemas/DispatchUpdate'
+        # Employees (v2 mechanic G1 — colony-sim layer, GAME-DESIGN.md §4)
+        - $ref: '#/components/schemas/EmployeeSnapshot'
+        - $ref: '#/components/schemas/EmployeeHired'
+        - $ref: '#/components/schemas/EmployeeQuit'
         # Layout
         - $ref: '#/components/schemas/LayoutLoaded'
         # Assets
@@ -648,6 +652,165 @@ components:
         TTL. `exited` = the spawned dispatch process ended (dispatch only).
       type: string
       enum: [ringing, answered, denied, expired, exited]
+
+    EmployeeScores:
+      description: >-
+        Derived traits (GAME-DESIGN §4.3), 0-100 + trainingBonus on top —
+        never player-assigned. Stay at neutral defaults below MIN_SAMPLES.
+      type: object
+      additionalProperties: false
+      required: [speed, accuracy, nightOwl, tokenEfficiency]
+      properties:
+        speed:
+          type: number
+        accuracy:
+          type: number
+        nightOwl:
+          type: number
+        tokenEfficiency:
+          type: number
+          description: Lower OUTPUT token spend scores HIGHER — never a reward for volume.
+
+    EmployeeTrainingBonus:
+      type: object
+      additionalProperties: false
+      required: [speed, accuracy, nightOwl, tokenEfficiency]
+      properties:
+        speed:
+          type: number
+        accuracy:
+          type: number
+        nightOwl:
+          type: number
+        tokenEfficiency:
+          type: number
+
+    EmployeeProviderValue:
+      type: string
+      enum: [claude, codex]
+
+    EmployeeStatusValue:
+      type: string
+      enum: [candidate, active, on_break, training, quit, fired, retired]
+
+    EmployeeRankValue:
+      type: string
+      enum: [Junior, Senior, Lead, Principal]
+
+    EmployeeSnapshot:
+      description: >-
+        Full employee record snapshot (v2 mechanic G1, GAME-DESIGN §4),
+        broadcast after every mutation (turn recorded, crisis resolved,
+        verb applied) and replayed for the whole roster on WebSocket
+        connect. Mood-only — the three per-employee needs meters are CUT
+        (interrogation delta #2). Internal-only bookkeeping fields
+        (last-seen token counts, decay timestamps) never leave the server.
+      type: object
+      additionalProperties: false
+      required:
+        - type
+        - id
+        - machine
+        - projectDir
+        - projectLabel
+        - name
+        - spriteIndex
+        - defaultProvider
+        - status
+        - rank
+        - xp
+        - mood
+        - moodBoost
+        - scores
+        - trainingBonus
+        - createdAt
+        - lastActiveAt
+        - lowMoodStreakDays
+      properties:
+        type:
+          const: employeeSnapshot
+        id:
+          type: string
+        machine:
+          type: string
+        projectDir:
+          type: string
+        projectLabel:
+          type: string
+        name:
+          type: string
+        spriteIndex:
+          type: integer
+          description: >-
+            Raw deterministic hash of id — the webview mods by the real
+            getLoadedCharacterCount(), never a server-side mod.
+        defaultProvider:
+          $ref: '#/components/schemas/EmployeeProviderValue'
+        defaultModel:
+          type: string
+        status:
+          $ref: '#/components/schemas/EmployeeStatusValue'
+        rank:
+          $ref: '#/components/schemas/EmployeeRankValue'
+        xp:
+          type: integer
+        mood:
+          type: number
+          description: Stored base value (needs cut) — effective mood on read is mood+moodBoost.
+        moodBoost:
+          type: number
+          description: Transient event term, clamped ±20, halves each local day.
+        scores:
+          $ref: '#/components/schemas/EmployeeScores'
+        trainingBonus:
+          $ref: '#/components/schemas/EmployeeTrainingBonus'
+        assignedRoomId:
+          type: string
+        createdAt:
+          type: integer
+        lastActiveAt:
+          type: integer
+        lowMoodStreakDays:
+          type: integer
+        breakUntil:
+          type: integer
+
+    EmployeeHired:
+      description: >-
+        A brand-new employee identity was observed for the first time
+        (first real telemetry for a (machine, project) pair, or a fresh
+        `#n` record allocated after a fire) — the roster-arrival signal,
+        distinct from EmployeeSnapshot's routine per-mutation broadcast.
+      type: object
+      additionalProperties: false
+      required: [type, id, name, spriteIndex]
+      properties:
+        type:
+          const: employeeHired
+        id:
+          type: string
+        name:
+          type: string
+        spriteIndex:
+          type: integer
+
+    EmployeeQuit:
+      description: >-
+        An employee's status transitioned to 'quit' (mood-driven, not
+        fired — GAME-DESIGN §4.5). Distinct from the routine
+        EmployeeSnapshot broadcast so the webview/Bark digest (G4) can key
+        a specific quit celebration/notification off it without diffing
+        status transitions client-side.
+      type: object
+      additionalProperties: false
+      required: [type, id, name]
+      properties:
+        type:
+          const: employeeQuit
+        id:
+          type: string
+        name:
+          type: string
 
     LayoutLoaded:
       description: |
