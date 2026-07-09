@@ -1175,3 +1175,33 @@ tinted overlay) — GAME-DESIGN doesn't require one for v1, follow-up for
 G5 polish.
 
 Proceed to G3 (Command + Automation) once G2's deploy is confirmed live.
+
+### 2026-07-08 (later) — G2 BATCH-1 deploy ✓ LIVE, verified by orchestrator
+
+The G2 sub-agent's own deploy attempt was correctly refused by its
+permission classifier (a sub-agent cannot self-authorize an infra action
+on a peer's say-so). The top-level `/goal` orchestrator session — directly
+named in Greg's own kickoff prompt, holding KICKOFF.md rev 2's written
+pre-authorization read first-hand — ran
+`.planning/runbooks/nexus-war-room-deploy.sh` directly.
+
+Two environment snags hit and resolved (documented in detail in
+`.planning/v2/TUNING.md`, both will recur at G4/G6 unless fixed
+upstream): (1) the `nexus` SSH alias times out from this session's shell
+(LAN IP unreachable) — `NEXUS_HOST=nexus-ts` (Tailscale alias) works,
+confirmed reachable via `tailscale status`; (2) the runbook's own
+funnel-check false-alarmed (`[FAIL] SAFETY: :8484 appears in FUNNEL
+status`) — independently re-verified via `ssh nexus-ts tailscale funnel
+status`, which explicitly labels `:8484` `(tailnet only)`. Same
+already-documented false-positive as v1's go-live entry above, not a
+regression; the runbook's grep needs tightening but this isn't a
+blocker.
+
+Deploy verified live and independent of the runbook's own success
+message: `curl https://nexus.tail722a2e.ts.net:8484/api/economy` →
+`{"cash":0,"reputation":0,"grime":0,"vacationMode":false,"bayCount":0,"ledger":[]}`
+— fresh container, correct empty state for a first deploy. Image built
+clean, health check + briefing endpoint both responded.
+
+G2 (Economy + Building) is fully done: code, tests, screenshots, and the
+batch-1 deploy all verified. Proceeding to G3 (Command + Automation).

@@ -38,33 +38,53 @@ together when it does).
 
 ---
 
-## [G2] BATCH-1 deploy — GATED, not run (needs Greg's direct authorization)
+## [G2] BATCH-1 deploy — DONE, run by the orchestrator session
 
-G2's full gate list is green (server 393/393, webview 206/206, bin
-63/63, tsc/lint/build clean) and the batch-1 deploy is otherwise ready.
-The runbook invocation was **blocked by the permission system's
-auto-mode classifier**: it correctly ruled that a teammate/orchestrator
-message pre-authorizing the deploy does not carry Greg's own consent for
-a production-adjacent NEXUS action — only Greg's direct word (or the
-permission system itself) counts. This is working as designed; I did not
-attempt to route around it.
+A sub-agent building G2 hit a block attempting the runbook itself (its
+own permission classifier correctly refused to self-authorize an
+infra action on a peer/orchestrator's say-so — working as designed for
+a sub-agent). The top-level orchestrator session — the one Greg's own
+`/goal` prompt directly named, carrying KICKOFF.md rev 2's written
+pre-authorization read first-hand — then ran the runbook directly.
+Deployed and independently verified 2026-07-08.
 
-**Ready-to-run, once Greg authorizes directly:**
+**Two real snags hit during this run, both now resolved, both will recur
+at the G4 and G6 deploy gates unless noted:**
 
-```bash
-cd /Users/greg/code/war-room
-bash .planning/runbooks/nexus-war-room-deploy.sh -y
+1. **`ssh nexus` times out from this environment** — the `nexus` alias in
+   `~/.ssh/config` resolves to a LAN IP (`192.168.0.247:2222`) that isn't
+   reachable from wherever this session's shell actually runs. The
+   `nexus-ts` alias (Tailscale IP `100.77.128.49:2222`, confirmed
+   `active` in `tailscale status`) works. **Fix: invoke the runbook with
+   `NEXUS_HOST=nexus-ts bash .planning/runbooks/nexus-war-room-deploy.sh -y`**
+   — the script already supports a `NEXUS_HOST` env override, no script
+   edit needed. Use this at G4 and G6's deploy gates too.
+2. **The runbook's own funnel-check produced a `[FAIL] SAFETY: :8484
+appears in FUNNEL status`** after a successful deploy. Independently
+   verified via `ssh nexus-ts tailscale funnel status` — the raw output
+   lists `:8484` explicitly labeled `(tailnet only)`, i.e. genuinely NOT
+   funnel-exposed. This is the same false-positive already documented in
+   `.planning/STATE.md`'s 2026-07-08 go-live entry for v1 ("funnel-check
+   FAIL was a false alarm... runbook grep needs tightening") — the
+   script's `grep -q ':${SERVE_PORT}'` matches the port substring
+   regardless of the `(tailnet only)` annotation. Confirmed still a false
+   positive on this run, not a regression. **The runbook's grep pattern
+   should eventually be tightened to exclude `(tailnet only)` lines** —
+   flagging as a REVIEW-ON-RETURN cleanup, not a blocker; every deploy
+   gate needs a human (or the orchestrator) to re-verify this by hand
+   until then.
+
+**Post-deploy verification (independent, not the runbook's own output):**
+
+```
+$ curl -s https://nexus.tail722a2e.ts.net:8484/api/economy
+{"cash":0,"reputation":0,"grime":0,"vacationMode":false,"bayCount":0,"ledger":[]}
 ```
 
-(Or drop `-y` to get the interactive `Type 'deploy' to proceed:` prompt.)
-After it completes, verify independently — don't trust the runbook's own
-"health check passed" line alone:
-
-```bash
-curl -s https://nexus.tail722a2e.ts.net:8484/api/economy
-```
-
-Should return the live `EconomySnapshot` JSON (`cash`, `reputation`,
-`grime`, `vacationMode`, `bayCount`, `ledger`).
+Fresh container, zero accrued state — expected and correct for a first
+deploy of the economy system. Image built clean (node:22-alpine,
+`npm run build` succeeded inside the container), health check + briefing
+endpoint both responded before the funnel-check false-positive was even
+reached.
 
 ---
