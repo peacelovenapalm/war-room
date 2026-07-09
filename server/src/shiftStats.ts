@@ -21,6 +21,7 @@ import * as path from 'path';
 
 import type { Briefing } from './briefingProvider.js';
 import { getBriefing } from './briefingProvider.js';
+import { contractStore } from './contractStore.js';
 import { economyStore } from './economyStore.js';
 import { progression } from './progressionStore.js';
 import { pushShiftReport } from './shiftPush.js';
@@ -137,6 +138,14 @@ export class ShiftStats {
         // Economy (v2 mechanic G2, GAME-DESIGN §3): same day-close call
         // site as progression above — added alongside, not instead of.
         economyStore.recordShiftDayClosed(summary);
+        // Missions (v2 mechanic G4, GAME-DESIGN §6.2): dailies/weeklies are
+        // self-certifying, but only ever mint off a day that actually had
+        // real activity — the same turnsCompleted>0 gate progression/economy
+        // already apply, so a zero-activity day never pays a contract.
+        if (report.turnsCompleted > 0) {
+          contractStore.mintDaily();
+          if (new Date().getDay() === 1) contractStore.mintWeekly();
+        }
       });
   }
 

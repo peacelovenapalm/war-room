@@ -100,6 +100,12 @@ interface DispatchRecord {
    *  on a real exit ("employeeWorkCompleted", GAME-DESIGN §7.3's one
    *  dispatch-driven XP integration point). */
   employeeId?: string;
+  /** Contract correlation (v2 mechanic G4, §6.2) — an explicit field set by
+   *  the webview's BRIEFING→DISPATCH prefill action, never inferred by
+   *  string-matching the prompt text (the fix for a brittleness the design
+   *  flagged in its own risk list). On a terminal exit 0, httpServer.ts's
+   *  status route calls contractStore.completeByDispatch(contractId). */
+  contractId?: string;
   createdAt: number;
   updatedAt: number;
 }
@@ -121,6 +127,9 @@ export interface DispatchEnqueueInput {
   /** Employee correlation (G3, §7.3) — set by chainOrchestrator.ts/
    *  standingOrderStore.ts when dispatching on behalf of an employee. */
   employeeId?: string;
+  /** Contract correlation (G4, §6.2) — set explicitly by the webview's
+   *  BRIEFING→DISPATCH prefill action. */
+  contractId?: string;
 }
 
 export type DispatchEnqueueResult =
@@ -272,6 +281,7 @@ export class DispatchStore {
       chainRunId: input.chainRunId,
       chainStep: input.chainStep,
       employeeId: input.employeeId,
+      contractId: input.contractId,
       createdAt: now,
       updatedAt: now,
     };
@@ -412,7 +422,9 @@ export class DispatchStore {
    *  after reportStatus() commits the terminal transition. */
   getRecord(
     id: string,
-  ): Pick<DispatchRecord, 'provider' | 'employeeId' | 'chainRunId' | 'chainStep'> | undefined {
+  ):
+    | Pick<DispatchRecord, 'provider' | 'employeeId' | 'chainRunId' | 'chainStep' | 'contractId'>
+    | undefined {
     const record = this.ensureLoaded().get(id);
     if (!record) return undefined;
     return {
@@ -420,6 +432,7 @@ export class DispatchStore {
       employeeId: record.employeeId,
       chainRunId: record.chainRunId,
       chainStep: record.chainStep,
+      contractId: record.contractId,
     };
   }
 
