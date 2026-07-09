@@ -1,6 +1,9 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
 
 import { ambience } from '../ambience.js';
+import type { BudgetSnapshotClient } from '../budget.js';
+import type { ChainRunClient } from '../chain.js';
+import { upsertChainRun } from '../chain.js';
 import {
   dismissDispatchEntry,
   type DispatchActionValue,
@@ -25,6 +28,7 @@ import {
 import type { OfficeLayout, PollStateValue, ToolActivity } from '../office/types.js';
 import { setWallSprites } from '../office/wallTiles.js';
 import { isE2E } from '../runtime.js';
+import type { StandingOrderClient } from '../standingOrders.js';
 import { transport } from '../transport/index.js';
 
 export interface SubagentCharacter {
@@ -139,6 +143,11 @@ interface ExtensionMessageState {
   dismissDispatch: (id: string) => void;
   employees: Record<string, EmployeeSnapshotClient>;
   economy: EconomySnapshotClient | null;
+  chainRuns: ChainRunClient[];
+  chainRunReceivedAtById: Record<string, number>;
+  dismissChainRun: (id: string) => void;
+  standingOrders: StandingOrderClient[];
+  budget: BudgetSnapshotClient | null;
 }
 
 function saveAgentSeats(os: OfficeState): void {
@@ -180,6 +189,10 @@ export function useExtensionMessages(
   const [dispatchEntries, setDispatchEntries] = useState<DispatchEntry[]>([]);
   const [employees, setEmployees] = useState<Record<string, EmployeeSnapshotClient>>({});
   const [economy, setEconomy] = useState<EconomySnapshotClient | null>(null);
+  const [chainRuns, setChainRuns] = useState<ChainRunClient[]>([]);
+  const [chainRunReceivedAtById, setChainRunReceivedAtById] = useState<Record<string, number>>({});
+  const [standingOrders, setStandingOrders] = useState<StandingOrderClient[]>([]);
+  const [budget, setBudget] = useState<BudgetSnapshotClient | null>(null);
 
   // Hydrate from GET /api/dispatch/recent once on mount — a page refresh
   // otherwise only gets the WS replay of NON-terminal entries (getActive),
@@ -828,6 +841,31 @@ export function useExtensionMessages(
           bayCount: msg.bayCount as number,
           ledger: (msg.ledger as EconomySnapshotClient['ledger']) ?? [],
         });
+      } else if (msg.type === 'chainRunUpdate') {
+        const run = msg.run as ChainRunClient;
+        setChainRuns((prev) => upsertChainRun(prev, run));
+        setChainRunReceivedAtById((prev) => ({ ...prev, [run.id]: Date.now() }));
+      } else if (msg.type === 'standingOrderUpdate') {
+        const order = msg.order as StandingOrderClient;
+        setStandingOrders((prev) => {
+          const idx = prev.findIndex((o) => o.id === order.id);
+          if (idx === -1) return [...prev, order];
+          const copy = [...prev];
+          copy[idx] = order;
+          return copy;
+        });
+      } else if (msg.type === 'budgetUpdate') {
+        setBudget({
+          claude: msg.claude as BudgetSnapshotClient['claude'],
+          codex: msg.codex as BudgetSnapshotClient['codex'],
+        });
+      } else if (msg.type === 'automationStopped') {
+        // No local state to update — StopAllControl.tsx tracks its own
+        // stopped/resume UI state from the action it just took; every
+        // OTHER connected screen still sees the effect via the
+        // chainRunUpdate/standingOrderUpdate broadcasts halt-all itself
+        // triggers (halted runs/disabled orders each emit their own
+        // update above).
       } else if (msg.type === 'officeExpanded' || msg.type === 'officeLayoutUpdated') {
         // Server-authoritative building mutation (G2, §5.7) — the acting
         // client already applied this locally on the route's {ok:true};
@@ -852,6 +890,10 @@ export function useExtensionMessages(
 
   const dismissDispatch = useCallback((id: string) => {
     setDispatchEntries((prev) => dismissDispatchEntry(prev, id));
+  }, []);
+
+  const dismissChainRun = useCallback((id: string) => {
+    setChainRuns((prev) => prev.filter((r) => r.id !== id));
   }, []);
 
   return {
@@ -879,5 +921,10 @@ export function useExtensionMessages(
     dismissDispatch,
     employees,
     economy,
+    chainRuns,
+    chainRunReceivedAtById,
+    dismissChainRun,
+    standingOrders,
+    budget,
   };
 }

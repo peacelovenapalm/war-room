@@ -26,6 +26,10 @@ interface BottomToolbarProps {
   onToggleHelp: () => void;
   isCallOpen: boolean;
   onToggleCall: () => void;
+  isChainsOpen: boolean;
+  onToggleChains: () => void;
+  isStandingOrdersOpen: boolean;
+  onToggleStandingOrders: () => void;
 }
 
 export function BottomToolbar({
@@ -47,6 +51,10 @@ export function BottomToolbar({
   onToggleHelp,
   isCallOpen,
   onToggleCall,
+  isChainsOpen,
+  onToggleChains,
+  isStandingOrdersOpen,
+  onToggleStandingOrders,
 }: BottomToolbarProps) {
   const [isFolderPickerOpen, setIsFolderPickerOpen] = useState(false);
   const [isBypassMenuOpen, setIsBypassMenuOpen] = useState(false);
@@ -186,6 +194,20 @@ export function BottomToolbar({
         title="Call a coworker"
       >
         Call
+      </Button>
+      <Button
+        variant={isChainsOpen ? 'active' : 'default'}
+        onClick={onToggleChains}
+        title="Dispatch chains"
+      >
+        Chains
+      </Button>
+      <Button
+        variant={isStandingOrdersOpen ? 'active' : 'default'}
+        onClick={onToggleStandingOrders}
+        title="Standing orders"
+      >
+        Orders
       </Button>
       <Button
         variant={isSettingsOpen ? 'active' : 'default'}

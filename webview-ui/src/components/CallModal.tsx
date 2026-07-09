@@ -1,5 +1,6 @@
 import { useEffect, useState } from 'react';
 
+import { budgetChipLabel, type BudgetSnapshotClient } from '../budget.js';
 import {
   DISPATCH_EFFORT_PROVIDERS,
   DISPATCH_EFFORT_VALUES,
@@ -37,13 +38,18 @@ interface CallModalProps {
   /** Registers a send so the tray can flag it "⚠ NOT QUEUED" if no
    *  dispatchUpdate arrives — dispatchRequest has no ack on the wire. */
   onSend: (machine: string, action: 'dispatch') => void;
+  /** Budget guardrail snapshot (v2 mechanic G3, §7.4) — informational ONLY
+   *  next to Send. Never disables Send: a human clicking Send is a
+   *  conscious spend, never budget-gated (only chain-step auto-
+   *  continuation and standing-order fires are — see budget.ts). */
+  budget: BudgetSnapshotClient | null;
 }
 
 /** CALL modal (v1 mechanic #6b): pick a live machine + provider + project +
  *  prompt → enqueue a real dispatch. Machine/provider/root choices come ONLY
  *  from GET /api/dispatch/machines (live runner advertisements) — a machine
  *  without a runner is honestly absent, never a dead dropdown entry. */
-export function CallModal({ isOpen, onClose, prefill, onSend }: CallModalProps) {
+export function CallModal({ isOpen, onClose, prefill, onSend, budget }: CallModalProps) {
   const [machines, setMachines] = useState<DispatchMachine[]>([]);
   const [fetchFailed, setFetchFailed] = useState(false);
   const [machine, setMachine] = useState('');
@@ -287,7 +293,17 @@ export function CallModal({ isOpen, onClose, prefill, onSend }: CallModalProps) 
               </span>
             </label>
 
-            <div className="flex justify-end gap-6 pt-4">
+            <div className="flex items-center justify-end gap-6 pt-4">
+              {/* Budget meter (v2 mechanic G3, §7.4) — informational ONLY,
+                  never disables Send (a human clicking Send is a
+                  conscious spend, never budget-gated). */}
+              <span
+                className="text-2xs text-text-muted whitespace-nowrap mr-auto"
+                data-testid="call-modal-budget-chip"
+                title="Informational only — manual sends are never budget-gated"
+              >
+                {budgetChipLabel(budget, provider || undefined)}
+              </span>
               <Button variant="ghost" onClick={onClose}>
                 Cancel
               </Button>

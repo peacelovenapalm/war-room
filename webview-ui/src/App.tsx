@@ -6,6 +6,8 @@ import { AgentDrawer } from './components/AgentDrawer.js';
 import { BottomToolbar } from './components/BottomToolbar.js';
 import { BriefingPanel } from './components/BriefingPanel.js';
 import { CallModal, type CallModalPrefill } from './components/CallModal.js';
+import { ChainBuilderPanel } from './components/ChainBuilderPanel.js';
+import { ChainTray } from './components/ChainTray.js';
 import { ChangelogModal } from './components/ChangelogModal.js';
 import { DebugView } from './components/DebugView.js';
 import { DispatchResultModal } from './components/DispatchResultModal.js';
@@ -18,6 +20,8 @@ import { MigrationNotice } from './components/MigrationNotice.js';
 import { ProgressionHUD } from './components/ProgressionHUD.js';
 import { SettingsModal } from './components/SettingsModal.js';
 import { ShiftPanel } from './components/ShiftPanel.js';
+import { StandingOrdersPanel } from './components/StandingOrdersPanel.js';
+import { StopAllControl } from './components/StopAllControl.js';
 import { Tooltip } from './components/Tooltip.js';
 import { TriagePanel } from './components/TriagePanel.js';
 import { Modal } from './components/ui/Modal.js';
@@ -106,6 +110,10 @@ function App() {
     dismissDispatch,
     employees,
     economy,
+    chainRuns,
+    chainRunReceivedAtById,
+    dismissChainRun,
+    budget,
   } = useExtensionMessages(getOfficeState, editor.setLastSavedLayout, isEditDirty);
 
   // Show migration notice once layout reset is detected
@@ -124,6 +132,8 @@ function App() {
   const [isEmployeesOpen, setIsEmployeesOpen] = useState(false);
   const [isHelpOpen, setIsHelpOpen] = useState(false);
   const [isCallOpen, setIsCallOpen] = useState(false);
+  const [isChainsOpen, setIsChainsOpen] = useState(false);
+  const [isStandingOrdersOpen, setIsStandingOrdersOpen] = useState(false);
   const [callPrefill, setCallPrefill] = useState<CallModalPrefill | null>(null);
   const [drawerAgentId, setDrawerAgentId] = useState<number | null>(null);
   const [pendingSends, setPendingSends] = useState<PendingSend[]>([]);
@@ -401,6 +411,10 @@ function App() {
           {/* ECONOMY HUD (v2 mechanic G2): Cash + Reputation, always visible */}
           <EconomyHUD economy={economy} />
 
+          {/* STOP ALL kill switch (v2 mechanic G3, §7.5): always visible,
+              never buried in a menu. */}
+          <StopAllControl />
+
           {editor.buildActionMessage && (
             <div
               className="absolute top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2 z-20 pixel-panel py-4 px-8 text-sm pointer-events-none whitespace-nowrap"
@@ -512,6 +526,17 @@ function App() {
           setCallPrefill(null);
           setIsCallOpen((v) => !v);
         }}
+        isChainsOpen={isChainsOpen}
+        onToggleChains={() => setIsChainsOpen((v) => !v)}
+        isStandingOrdersOpen={isStandingOrdersOpen}
+        onToggleStandingOrders={() => setIsStandingOrdersOpen((v) => !v)}
+      />
+
+      <ChainBuilderPanel isOpen={isChainsOpen} onClose={() => setIsChainsOpen(false)} />
+
+      <StandingOrdersPanel
+        isOpen={isStandingOrdersOpen}
+        onClose={() => setIsStandingOrdersOpen(false)}
       />
 
       <BriefingPanel
@@ -583,6 +608,7 @@ function App() {
         }}
         prefill={callPrefill}
         onSend={registerSend}
+        budget={budget}
       />
 
       <DispatchTray
@@ -590,6 +616,12 @@ function App() {
         onDismiss={dismissDispatch}
         onView={setViewedDispatchId}
         sendFailures={sendFailures}
+      />
+
+      <ChainTray
+        runs={chainRuns}
+        receivedAtById={chainRunReceivedAtById}
+        onDismiss={dismissChainRun}
       />
 
       <DispatchResultModal
