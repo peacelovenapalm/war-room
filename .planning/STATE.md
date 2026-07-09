@@ -1690,3 +1690,37 @@ checks of the same underlying signals (manifest 200+valid, SW reaches
 All 7 milestones (G0-G6) now code/test complete. Proceeding to the
 BATCH-3 deploy (final), then completion: Bark push + final handoff +
 Fable review pass.
+
+### 2026-07-08 (final) — G6 BATCH-3 deploy ✓ LIVE — ALL 7 MILESTONES SHIPPED
+
+Final deploy of the rev-2 /goal run: G5+G6 batched, same pattern as
+batch-1/batch-2 (`NEXUS_HOST=nexus-ts`, funnel-check false-positive
+re-confirmed via raw `tailscale funnel status` output — still genuinely
+tailnet-only). Image build included the PWA output (`registerSW.js`,
+`manifest.webmanifest`, `sw.js`, workbox runtime) confirmed in the build
+log.
+
+Independently verified live, beyond the runbook's own success message:
+
+- `GET https://nexus.tail722a2e.ts.net:8484/manifest.webmanifest` → 200,
+  `content-type: application/manifest+json`, correct name/display/icons.
+- Live WebSocket connect to `wss://nexus.tail722a2e.ts.net:8484/ws` →
+  opened successfully.
+
+**All 7 milestones (G0-G6) are now code-complete, test-verified, and
+deployed live on NEXUS.** Final gate counts: server 512/512, webview
+264/264, bin/poller 74/74, tsc/lint/build clean across every milestone's
+independent re-verification by the orchestrator (not just sub-agent
+self-reports).
+
+TUNING.md carries: 2 numeric-tuning REVIEW-ON-RETURN items (economy
+rates, budget/perk thresholds), 1 deployed-config item (Bark URL unset,
+statusline hook not yet registered — both Greg-owned, both fail safely
+closed), 1 asset-swap item (TEMP PWA icons + deferred Track 2 art
+generation as a proposed /loop job), and Greg's own 6-item live-testing
+feedback list (explicitly not acted on this run, flagged for the Fable
+review + next iteration) plus a third independently-found HUD-overlap
+data point reinforcing item 6.
+
+Proceeding to completion: final full-suite re-verification, Bark push,
+final handoff, and (usage permitting) a Fable medium review pass.
