@@ -104,6 +104,14 @@ ssh "${NEXUS_HOST}" "docker run -d --name war-room --restart unless-stopped \
   -p 127.0.0.1:${APP_PORT}:3141 war-room:latest" >/dev/null \
   && ok "container war-room running (127.0.0.1:${APP_PORT} on nexus, briefing mounts ro)" || fail "docker run failed"
 
+# ── Bark wrapper network (2026-07-09): WAR_ROOM_BARK_URL=http://notify:8581/notify
+# resolves only on the notify container's compose network — rejoin after every
+# recreate or Bark pushes silently die (notifyBark.ts is fire-and-forget).
+ssh "${NEXUS_HOST}" "docker network connect bark-dispatch_default war-room 2>/dev/null || true"
+ssh "${NEXUS_HOST}" "docker inspect war-room --format '{{json .NetworkSettings.Networks}}'" | grep -q bark-dispatch_default \
+  && ok "war-room joined bark-dispatch_default (Bark wrapper reachable as http://notify:8581)" \
+  || warn "war-room NOT on bark-dispatch_default — Bark pushes will fail silently"
+
 sleep 4
 ssh "${NEXUS_HOST}" "curl -sf http://127.0.0.1:${APP_PORT}/api/health" >/dev/null \
   && ok "health check passed on nexus loopback" || fail "health check failed — docker logs war-room"
