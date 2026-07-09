@@ -113,6 +113,11 @@ components:
         - $ref: '#/components/schemas/EconomyUpdate'
         - $ref: '#/components/schemas/OfficeExpanded'
         - $ref: '#/components/schemas/OfficeLayoutUpdated'
+        # Command + Automation (v2 mechanic G3 — GAME-DESIGN.md §7)
+        - $ref: '#/components/schemas/ChainRunUpdate'
+        - $ref: '#/components/schemas/StandingOrderUpdate'
+        - $ref: '#/components/schemas/BudgetUpdate'
+        - $ref: '#/components/schemas/AutomationStopped'
         # Layout
         - $ref: '#/components/schemas/LayoutLoaded'
         # Assets
@@ -911,6 +916,239 @@ components:
         layout:
           type: object
           description: Opaque OfficeLayout object — format defined by webview-ui, same as LayoutLoaded.
+
+    # ── Command + Automation (v2 mechanic G3 — GAME-DESIGN.md §7) ───
+
+    ChainStepStatusValue:
+      type: string
+      enum: [pending, running, exited, denied, expired]
+
+    ChainRunStatusValue:
+      type: string
+      enum: [running, completed, failed, halted]
+
+    ChainStepRun:
+      type: object
+      additionalProperties: false
+      required: [stepId, status]
+      properties:
+        stepId:
+          type: string
+        dispatchId:
+          type: string
+        status:
+          $ref: '#/components/schemas/ChainStepStatusValue'
+        exitCode:
+          type: integer
+        resultTail:
+          type: string
+        prompt:
+          type: string
+          description: The step's prompt AFTER {{stepK.result}}/{{stepK.exitCode}} substitution.
+        startedAt:
+          type: integer
+        finishedAt:
+          type: integer
+
+    ChainRun:
+      type: object
+      additionalProperties: false
+      required: [id, chainId, status, currentStep, steps, createdAt, updatedAt]
+      properties:
+        id:
+          type: string
+        chainId:
+          type: string
+        status:
+          $ref: '#/components/schemas/ChainRunStatusValue'
+        currentStep:
+          type: integer
+          description: 0-based index into steps — the step currently pending/running.
+        steps:
+          type: array
+          items:
+            $ref: '#/components/schemas/ChainStepRun'
+        failReason:
+          type: string
+        stoppedByKillSwitch:
+          type: boolean
+        createdAt:
+          type: integer
+        updatedAt:
+          type: integer
+
+    ChainRunUpdate:
+      description: >-
+        Dispatch chain run lifecycle (v2 mechanic G3, §7.1): broadcast
+        whenever a ChainRun mutates (step enqueued, step terminal,
+        run completed/failed/halted), and replayed for non-terminal
+        (status=running) runs to every client on WebSocket connect —
+        same rationale as DispatchUpdate's getActive() replay.
+      type: object
+      additionalProperties: false
+      required: [type, run]
+      properties:
+        type:
+          const: chainRunUpdate
+        run:
+          $ref: '#/components/schemas/ChainRun'
+
+    StandingOrderScheduleDaily:
+      type: object
+      additionalProperties: false
+      required: [kind, atLocalHour]
+      properties:
+        kind:
+          const: daily
+        atLocalHour:
+          type: integer
+
+    StandingOrderScheduleInterval:
+      type: object
+      additionalProperties: false
+      required: [kind, everyMs]
+      properties:
+        kind:
+          const: interval
+        everyMs:
+          type: integer
+
+    StandingOrderScheduleValue:
+      oneOf:
+        - $ref: '#/components/schemas/StandingOrderScheduleDaily'
+        - $ref: '#/components/schemas/StandingOrderScheduleInterval'
+
+    StandingOrder:
+      description: >-
+        A saved dispatch that fires unattended on a schedule (§7.2).
+        needsFirstFireConfirm is an UNCONDITIONAL gate — no perk/purchase
+        ever clears it except an explicit human confirm click.
+      type: object
+      additionalProperties: false
+      required: [id, name, schedule, prompt, enabled, needsFirstFireConfirm, createdAt, updatedAt]
+      properties:
+        id:
+          type: string
+        name:
+          type: string
+        schedule:
+          $ref: '#/components/schemas/StandingOrderScheduleValue'
+        machine:
+          type: string
+        provider:
+          type: string
+        cwd:
+          type: string
+        prompt:
+          type: string
+        model:
+          type: string
+        effort:
+          type: string
+        employeeId:
+          type: string
+        enabled:
+          type: boolean
+        needsFirstFireConfirm:
+          type: boolean
+        lastFiredAt:
+          type: integer
+        lastFiredDate:
+          type: string
+        lastSkipReason:
+          type: string
+        stoppedByKillSwitch:
+          type: boolean
+        createdAt:
+          type: integer
+        updatedAt:
+          type: integer
+
+    StandingOrderUpdate:
+      description: >-
+        Standing order lifecycle (v2 mechanic G3, §7.2): broadcast on every
+        create/confirm/enable/fire/skip mutation, and replayed in full to
+        every client on WebSocket connect.
+      type: object
+      additionalProperties: false
+      required: [type, order]
+      properties:
+        type:
+          const: standingOrderUpdate
+        order:
+          $ref: '#/components/schemas/StandingOrder'
+
+    BudgetClaudeSnapshot:
+      type: object
+      additionalProperties: false
+      required: [fiveHourUsedPct, sevenDayUsedPct, stale, receivedAt]
+      properties:
+        fiveHourUsedPct:
+          type: [number, 'null']
+        sevenDayUsedPct:
+          type: [number, 'null']
+        stale:
+          type: boolean
+          description: >-
+            true whenever no fresh Claude snapshot exists — the fail-safe
+            pause condition (BUDGET_STALE_MS).
+        receivedAt:
+          type: [integer, 'null']
+
+    BudgetCodexSnapshot:
+      type: object
+      additionalProperties: false
+      required: [weeklyCap, weeklyUsed, estimatedPct]
+      properties:
+        weeklyCap:
+          type: [integer, 'null']
+        weeklyUsed:
+          type: integer
+        estimatedPct:
+          type: [integer, 'null']
+          description: >-
+            Always rendered with an "est." prefix client-side — NEVER the
+            bare % the Claude meter gets (the word is the honesty signal,
+            GAME-DESIGN §7.4).
+
+    BudgetUpdate:
+      description: >-
+        Budget guardrail snapshot (v2 mechanic G3, §7.4) — the REAL,
+        non-fictional Claude rate-limit signal (fail-safe `stale:true` when
+        no fresh report exists) plus the manual, honestly `est.`-labeled
+        Codex weekly heuristic. Broadcast whenever the underlying snapshot
+        changes and sent again to every client on WebSocket connect.
+      type: object
+      additionalProperties: false
+      required: [type, claude, codex]
+      properties:
+        type:
+          const: budgetUpdate
+        claude:
+          $ref: '#/components/schemas/BudgetClaudeSnapshot'
+        codex:
+          $ref: '#/components/schemas/BudgetCodexSnapshot'
+
+    AutomationStopped:
+      description: >-
+        The global STOP ALL kill switch fired (§7.5) — every enabled
+        standing order disabled and every running chain run halted, in one
+        server transaction. Resuming (POST /api/automation/resume) is a
+        separate explicit action, never automatic.
+      type: object
+      additionalProperties: false
+      required: [type, haltedOrderIds, haltedRunIds]
+      properties:
+        type:
+          const: automationStopped
+        haltedOrderIds:
+          type: array
+          items:
+            type: string
+        haltedRunIds:
+          type: array
+          items:
+            type: string
 
     LayoutLoaded:
       description: |

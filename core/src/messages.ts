@@ -35,6 +35,10 @@ export type ServerMessage =
   | EconomyUpdate
   | OfficeExpanded
   | OfficeLayoutUpdated
+  | ChainRunUpdate
+  | StandingOrderUpdate
+  | BudgetUpdate
+  | AutomationStopped
   | LayoutLoaded
   | FurnitureAssetsLoaded
   | CharacterSpritesLoaded
@@ -337,6 +341,99 @@ export interface OfficeExpanded {
 export interface OfficeLayoutUpdated {
   type: 'officeLayoutUpdated';
   layout: Record<string, any>;
+}
+
+export interface ChainRunUpdate {
+  type: 'chainRunUpdate';
+  run: ChainRun;
+}
+
+export interface ChainRun {
+  id: string;
+  chainId: string;
+  status: ChainRunStatusValue;
+  currentStep: number;
+  steps: ChainStepRun[];
+  failReason?: string;
+  stoppedByKillSwitch?: boolean;
+  createdAt: number;
+  updatedAt: number;
+}
+
+export type ChainRunStatusValue = 'running' | 'completed' | 'failed' | 'halted';
+
+export interface ChainStepRun {
+  stepId: string;
+  dispatchId?: string;
+  status: ChainStepStatusValue;
+  exitCode?: number;
+  resultTail?: string;
+  prompt?: string;
+  startedAt?: number;
+  finishedAt?: number;
+}
+
+export type ChainStepStatusValue = 'pending' | 'running' | 'exited' | 'denied' | 'expired';
+
+export interface StandingOrderUpdate {
+  type: 'standingOrderUpdate';
+  order: StandingOrder;
+}
+
+export interface StandingOrder {
+  id: string;
+  name: string;
+  schedule: StandingOrderScheduleDaily | StandingOrderScheduleInterval;
+  machine?: string;
+  provider?: string;
+  cwd?: string;
+  prompt: string;
+  model?: string;
+  effort?: string;
+  employeeId?: string;
+  enabled: boolean;
+  needsFirstFireConfirm: boolean;
+  lastFiredAt?: number;
+  lastFiredDate?: string;
+  lastSkipReason?: string;
+  stoppedByKillSwitch?: boolean;
+  createdAt: number;
+  updatedAt: number;
+}
+
+export interface StandingOrderScheduleDaily {
+  kind: 'daily';
+  atLocalHour: number;
+}
+
+export interface StandingOrderScheduleInterval {
+  kind: 'interval';
+  everyMs: number;
+}
+
+export interface BudgetUpdate {
+  type: 'budgetUpdate';
+  claude: BudgetClaudeSnapshot;
+  codex: BudgetCodexSnapshot;
+}
+
+export interface BudgetClaudeSnapshot {
+  fiveHourUsedPct: number | null;
+  sevenDayUsedPct: number | null;
+  stale: boolean;
+  receivedAt: number | null;
+}
+
+export interface BudgetCodexSnapshot {
+  weeklyCap: number | null;
+  weeklyUsed: number;
+  estimatedPct: number | null;
+}
+
+export interface AutomationStopped {
+  type: 'automationStopped';
+  haltedOrderIds: string[];
+  haltedRunIds: string[];
 }
 
 export interface LayoutLoaded {
