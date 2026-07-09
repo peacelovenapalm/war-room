@@ -10,6 +10,56 @@ do about it.
 
 ---
 
+## [Greg feedback, 2026-07-08 live testing] — NOTE ONLY, next build iteration
+
+Greg's own observations from using the deployed instance directly (not a
+sub-agent finding). Explicit instruction: **do not act on these now** —
+record for the Fable review pass and the next build iteration after
+v1.0 ships. Not gating G6 or the batch-3 deploy.
+
+1. **Crisis card for a permission-denied agent isn't interactive.** When
+   an agent hits a permission error, it starts a crisis ("fire") but
+   there's no way to click into it to open the agent and give it input —
+   the crisis card should be clickable, opening the same drawer/modal a
+   normal agent click would.
+2. **Breaking visual bug: changing the view or altering room contents
+   makes everything disappear until a manual refresh.** Worth checking
+   against G2's Pixi `dispose()`/canvas-DOM-detachment fix (`ef5dfa8`) —
+   that fix specifically covered the `isEditMode` toggle path; this
+   report describes a broader trigger set ("view changed" / "things in
+   the room are altered"), so either the fix doesn't cover every
+   dispose+recreate trigger, or this is a related-but-distinct instance
+   of the same bug class. Needs a fresh repro pass across all the paths
+   that call `OfficeCanvas`'s dispose/recreate effect, not just edit-mode
+   toggling.
+3. **Help section reads as a wall of text** — not something Greg
+   references in practice. Needs a UX pass (progressive disclosure,
+   search, or trimming to the handful of things people actually look
+   up) rather than more content added to it.
+4. **Real runtime error, FOCUS feature (pre-existing v1 functionality,
+   not new in v2):**
+   ```
+   [FOCUS] MACBOOK — ⊘ DENIED — focus-failed: Command failed: osascript -e
+   'tell application "System Events" to set frontmost of (first process
+   whose unix id is 7096) to true'
+   ```
+   `osascript`-based window-focus is failing on Greg's Mac. Pre-dates
+   this v2 run (FOCUS pid wiring shipped in the v1 dispatch vertical,
+   see STATE.md's "FOCUS pid wiring" entry) — flagging since it surfaced
+   during this session's live testing, not a v2 regression.
+5. **No way to stop a single agent's process** — only the global STOP
+   ALL (G3) exists. Feature gap, not a bug: clicking an individual
+   worker/employee should offer a per-agent stop, distinct from the
+   all-or-nothing kill switch.
+6. **Progress tracker overlaps the zoom `+` button.** Same bug CLASS as
+   the G5 WorldEventBanner/ProgressionHUD overlap (`d8b18df`'s fix,
+   `top-8`→`top-24`) — another instance of two absolutely-positioned HUD
+   elements colliding at certain viewport/zoom states. Worth a dedicated
+   HUD-layout pass across all overlay elements rather than fixing
+   collisions one at a time as they're found.
+
+---
+
 ## [G2] economyConstants.ts rate table — REVIEW-ON-RETURN
 
 `server/src/economyConstants.ts` holds every Cash/Reputation number in the
