@@ -35,6 +35,11 @@ import {
   getSpriteTexture,
   renderFrame as renderPixiFrame,
 } from '../engine/pixiRenderer.js';
+import {
+  computePinchPanDelta,
+  computePinchZoomStep,
+  computeTwoFingerGesture,
+} from '../engine/touchCamera.js';
 import { getCatalogEntry, isRotatable } from '../layout/furnitureCatalog.js';
 import { EditTool, TILE_SIZE } from '../types.js';
 import { computeNormalModeCursor } from './officeCanvasCursor.js';
@@ -1070,11 +1075,8 @@ export function OfficeCanvas({
       if (touchPointersRef.current.size === 2) {
         clearLongPress();
         officeState.cameraFollowId = null;
-        const pts = [...touchPointersRef.current.values()];
-        const midX = (pts[0].x + pts[1].x) / 2;
-        const midY = (pts[0].y + pts[1].y) / 2;
-        const dist = Math.hypot(pts[0].x - pts[1].x, pts[0].y - pts[1].y);
-        twoFingerGestureRef.current = { midX, midY, dist };
+        const [p0, p1] = [...touchPointersRef.current.values()];
+        twoFingerGestureRef.current = computeTwoFingerGesture([p0, p1]);
       }
     },
     [isEditMode, editorState, officeState, onEditorEraseAction, screenToTile, clearLongPress],
@@ -1095,29 +1097,28 @@ export function OfficeCanvas({
       touchPointersRef.current.set(e.pointerId, { x: e.clientX, y: e.clientY });
 
       if (touchPointersRef.current.size === 2 && twoFingerGestureRef.current) {
-        const pts = [...touchPointersRef.current.values()];
-        const midX = (pts[0].x + pts[1].x) / 2;
-        const midY = (pts[0].y + pts[1].y) / 2;
-        const dist = Math.hypot(pts[0].x - pts[1].x, pts[0].y - pts[1].y);
+        const [p0, p1] = [...touchPointersRef.current.values()];
+        const next = computeTwoFingerGesture([p0, p1]);
         const dpr = window.devicePixelRatio || 1;
 
         // Pan: midpoint delta.
-        const dx = (midX - twoFingerGestureRef.current.midX) * dpr;
-        const dy = (midY - twoFingerGestureRef.current.midY) * dpr;
+        const { dx, dy } = computePinchPanDelta(twoFingerGestureRef.current, next, dpr);
         if (dx !== 0 || dy !== 0) {
           panRef.current = clampPan(panRef.current.x + dx, panRef.current.y + dy);
         }
 
         // Pinch: distance ratio → discrete zoom step (same integer zoom
         // ladder the wheel handler steps through).
-        if (twoFingerGestureRef.current.dist > 0) {
-          const ratio = dist / twoFingerGestureRef.current.dist;
-          const rawZoom = zoom * ratio;
-          const steppedZoom = Math.round(Math.max(ZOOM_MIN, Math.min(ZOOM_MAX, rawZoom)));
-          if (steppedZoom !== zoom) onZoomChange(steppedZoom);
-        }
+        const steppedZoom = computePinchZoomStep(
+          twoFingerGestureRef.current.dist,
+          next.dist,
+          zoom,
+          ZOOM_MIN,
+          ZOOM_MAX,
+        );
+        if (steppedZoom !== zoom) onZoomChange(steppedZoom);
 
-        twoFingerGestureRef.current = { midX, midY, dist };
+        twoFingerGestureRef.current = next;
       }
     },
     [zoom, onZoomChange, panRef, clampPan, clearLongPress],
