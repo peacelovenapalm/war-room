@@ -50,6 +50,7 @@ import {
   PetState,
   TILE_SIZE,
 } from '../types.js';
+import { ambientWanderTarget } from '../world/ambientEvents.js';
 import { createCharacter, updateCharacter } from './characters.js';
 import { matrixEffectSeeds } from './matrixEffect.js';
 import { createPet, updatePet } from './petEntity.js';
@@ -1150,6 +1151,17 @@ export class OfficeState {
       }
     }
 
+    // Ambient wander bias (v2 mechanic G5, BUILD-PLAN §G5 task 1): idle,
+    // non-burned-out employees occasionally drift toward the Break Room or a
+    // same-project coworker instead of a fully random tile. Computed once per
+    // tick (cheap — same list this loop already iterates) so each character's
+    // decision uses a fresh snapshot of everyone else's current position; only
+    // consulted when no live crisis crowd-target is pulling (crisis attention
+    // always wins over ambient flavor, same precedence the v1 emergence rule
+    // established). characters.ts's updateCharacter() FSM is unmodified —
+    // this only changes which target value it receives.
+    const allCharsSnapshot = crowdTarget ? null : this.getCharacters();
+
     const toDelete: number[] = [];
     for (const ch of this.characters.values()) {
       // Handle matrix effect animation
@@ -1169,6 +1181,16 @@ export class OfficeState {
         continue; // skip normal FSM while effect is active
       }
 
+      let wanderTarget = crowdTarget;
+      if (!wanderTarget && allCharsSnapshot && ch.state === CharacterState.IDLE) {
+        wanderTarget = ambientWanderTarget(
+          ch,
+          allCharsSnapshot,
+          this.layout.rooms,
+          this.walkableTiles,
+        );
+      }
+
       // Temporarily unblock own seat so character can pathfind to it
       this.withOwnSeatUnblocked(ch, () =>
         updateCharacter(
@@ -1178,7 +1200,7 @@ export class OfficeState {
           this.seats,
           this.tileMap,
           this.blockedTiles,
-          crowdTarget,
+          wanderTarget,
         ),
       );
 
