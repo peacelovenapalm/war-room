@@ -124,6 +124,77 @@ right once real chain/standing-order usage exists to tune against
 (same "retune after a week of real telemetry" posture as the G2 economy
 numbers already carry).
 
+---
+
+## [G4] Batch-2 deploy pre-check + Bark wiring gaps — REVIEW-ON-RETURN
+
+Code/test complete, no deploy attempted this milestone (a sub-agent
+correctly cannot self-authorize the batch-2 deploy — same posture as
+G2's own sub-agent). Before running the batch-2 deploy runbook, per the
+BUILD-PLAN §G4 deploy-cadence note:
+
+**1. Verify the deployed contracts todo path is Greg's REAL vault, not a
+fixture.** `server/src/contractStore.ts` reads through the EXISTING
+`briefingProvider.ts`/`WAR_ROOM_TODO_DIR` env var (unchanged, no new env
+var introduced) — so this is really "is `WAR_ROOM_TODO_DIR` on the NEXUS
+container already pointed at the real vault-notifier clone?" The
+G2/v1 deploy history says yes (STATE.md's 2026-07-07 entry: "todo from
+the vault-notifier clone (self-refreshes every 15 min)"), but re-confirm
+with `ssh nexus-ts "docker exec war-room env | grep WAR_ROOM_TODO_DIR"`
+(or the container's actual name) before assuming contracts will mint
+against real data — this needs a NEXUS action, which a sub-agent is
+correctly blocked from performing itself.
+
+**2. Bark wiring — 3 of 5 big-moment classes wired, 2 deferred:**
+`server/src/notifyBark.ts` implements the full class-filtered emitter
+(unit-tested: class allowlist + daily-digest dedupe). Wired at real call
+sites: `contract-completed` (`contractStore.onCompleted`), `stop-all`
+(the existing STOP ALL route), `chain-failed`
+(`chainStore.onRunUpdate`, filtered to `status==='failed'`). **NOT
+wired:** `employee-quit` and `budget-paused`.
+
+- `employee-quit`: found (not introduced) a pre-existing gap —
+  `employeeStore.ts`'s quit roll (inside `applyUpkeep()`) never calls
+  `finish()`/persists+broadcasts+ledger-appends the same way every
+  other mutation does; it only appends to the JSONL ledger directly.
+  Wiring a Bark push off a broadcast that doesn't fire would be
+  silently dead code, and fixing the underlying emit gap felt like
+  scope creep beyond G4's task list — flagging for a dedicated look
+  rather than a rushed fix.
+- `budget-paused`: needs edge-triggered state (push only on the
+  false→true transition, not every paused tick) that neither
+  `budgetStore.isAutomationPaused()` nor any G4 task explicitly asked
+  for. Deferred rather than guessed at.
+
+**3. `WAR_ROOM_BARK_URL` is unset on NEXUS today** (never configured) —
+by design this means zero Bark pushes fire (feature-off posture,
+verified: `getBarkUrl()` returns undefined, `push()` no-ops before any
+fetch). Setting it is a Greg-owned NEXUS env change, not something this
+session touched.
+
+**4. Daily/weekly contract flavor titles are a judgment call.**
+GAME-DESIGN §6.2 names "12-entry template table" / "4-entry template
+table" for dailies/weeklies by COUNT only — no literal titles are given
+anywhere in the design doc (unlike the World Event table, which is fully
+inlined at §6.3). `DAILY_CONTRACT_TITLES`/`WEEKLY_CONTRACT_TITLES` in
+`contractStore.ts` are my own flavor text (12/4 entries, deterministically
+picked by date hash) — payout is flat regardless of title, so this is
+purely cosmetic and safe to edit freely.
+
+**5. `dayNight.ts`'s ambience wiring — deliberately NOT changed.**
+BUILD-PLAN §G4 task 12 says "wire ambience.ts's existing night duck to
+getDayPhase() instead of any ad hoc check." The existing "night duck" in
+`OfficeCanvas.tsx` (`ambience.setNightMode(characters.size === 0)`) is
+actually the v1 "NIGHT SHIFT" mechanic (ducks when the office is EMPTY —
+no active sessions), a different concept from this milestone's wall-clock
+day/night cycle, and it has dedicated help-modal text describing exactly
+that behavior. Replacing it with `getDayPhase()==='night'` would duck the
+ambience during real nighttime work sessions regardless of activity — a
+functional regression, not an enhancement. `dayNight.ts` ships standalone
+(pure, tested, GAME-DESIGN §6.4-compliant) for G5's rendering layer to
+consume; the empty-office duck logic is untouched. Flagging in case this
+reading is wrong and Greg actually wants the literal wire.
+
 **Statusline snapshot source — Greg's own decision is still OPEN**
 (interrogation delta #13, "unsure"). G3 implemented Option B (the
 decoupled default) per GAME-DESIGN §7.4: `bin/rate-limit-snapshot-hook.mjs`

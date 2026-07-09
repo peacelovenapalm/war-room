@@ -1327,3 +1327,141 @@ Option A never touched).
 
 No deploy at G3 (batches with G4 per rev-2 sequencing). Proceeding to G4
 (Missions).
+
+### 2026-07-08 (later) — G4 (Missions + World Events) code/test complete, no deploy
+
+Two waves, one agent, one checkout, sequential — no collisions. Implements
+GAME-DESIGN.md §6 exactly (contracts §6.2, world events §6.3, fiction/real
+labeling §6.1, digest+Bark §6.5).
+
+**Wave A (contracts):** `contractStore.ts` — 5 sources (priority/backlog/
+gate/daily/weekly), the exact payout table, 5 completion methods in
+priority order (dispatch-result > todo-disappeared/gate-flipped >
+manual-claim > daily-auto). Piggybacks `briefingProvider.ts`'s existing
+60s cache via `reconcile()`, called from both `/api/briefing` and the new
+`/api/contracts` — no new poll loop. `MAX_MANUAL_CLAIMS_PER_DAY=3` rejects
+(never silently no-ops) the 4th claim. Backlog re-minting dedupe checks
+both currently-open AND completed-in-the-last-7-days by normalized
+sourceKey (gates use the same rule with an unbounded lookback — a gate
+contract pays out once, ever). `dispatchStore.ts` gained an explicit
+`contractId` field (mirrors `employeeId`'s pattern) — set only by the
+webview's BRIEFING→DISPATCH prefill / ContractsPanel's "Dispatch via…"
+employee-assign dropdown, never string-matched; a terminal exit 0 calls
+`contractStore.completeByDispatch()` from `httpServer.ts`'s existing
+dispatch status route. Dailies/weeklies are self-certifying (mint and
+complete in the same call) wired into `shiftStats.ts`'s onDayClose path,
+gated on `turnsCompleted > 0` (the same real-activity trace every other
+award already requires) — weekly additionally gated on the new day being
+a Monday. Wired to the real `economyStore` singleton at export time (same
+pattern as `employeeStore.ts`), never as a call-site import.
+
+**Wave B (world events):** `core/src/worldEventGlyphs.ts` (NEW, shared)
+holds the 12-entry SIM glyph table as the single source of truth for both
+`worldEventStore.ts` (server) and `signalChip.test.ts` (webview) — neither
+side hand-types a duplicate that could drift. `webview-ui/src/office/
+realGlyphs.ts` derives the REAL glyph set by importing `crisis.ts`'s
+`CRISIS_STAGE_SPECS` + a newly-exported `DEBRIS_GLYPH` (previously an
+inline literal in `buildTriageRows`, promoted to a named export so it's
+mechanically derivable, not hand-typed) and `dispatch.ts`'s
+`DISPATCH_STATUS_CHIPS`. `webview-ui/test/signalChip.test.ts` asserts the
+two pools are disjoint — verified this session to actually FAIL when
+`mail_delivery`'s glyph was deliberately changed to the real debris glyph
+`✗` (`colliding glyphs: ✗`), then reverted and re-verified green.
+
+`server/src/worldEventStore.ts` — the 12-entry weighted table exactly per
+§6.3 (weights/min-gaps/durations), `pureAmbient`/`onlineOnly` flags
+driving vacation-mode suppression and the online-only skip
+(`power_surge`/`power_outage_scare`). ONE-WAY LAYERING held: this file
+imports neither `economyStore.ts` nor `employeeStore.ts` (grep-verified —
+zero code hits, only comments); every effect (`inspection`'s Reputation
+swing, `rival_poach`/`birthday`'s employee moodBoost nudge, `flavor_bonus`'s
+capped Cash) routes through an injected `WorldEventTickDeps` object built
+in `httpServer.ts`'s new live-tick handler — the ONE place those two
+stores are actually touched for world events. `flavor_bonus` is capped at
+`+5/local day` independent of its own 24h min-gap (belt-and-suspenders,
+unit-tested by forcibly re-seeding eligibility across 5 simulated
+triggers). Added `server/src/digest.ts` (`renderDigest`/`templateNarrator`
+— the named LLM seam, templates only in v1.0) and `server/src/
+notifyBark.ts` (class-filtered big-moment emitter + 1/day morning-digest
+dedupe, `WAR_ROOM_BARK_URL` env-gated, feature-off = zero fetch calls).
+`webview-ui/src/office/dayNight.ts` ships standalone (`getDayPhase`/
+`getSeason`/`isHolidayWeek`, pure, GAME-DESIGN §6.4-compliant) for G5's
+rendering layer — **deviation, documented in TUNING.md:** did NOT wire it
+into `ambience.ts`'s existing "night duck" as BUILD-PLAN's task 12
+literally says, because that duck is actually the v1 "NIGHT SHIFT"
+empty-office mechanic (a different concept with its own help text);
+replacing it with wall-clock night would duck sound during real late-night
+work sessions regardless of activity — judged a functional regression, not
+an enhancement.
+
+**Live-tick infrastructure (new, not present before G4):** GAME-DESIGN §2's
+"coarse interval, ≥1 socket connected, every 5 min" cadence didn't exist
+in the codebase yet. Added a plain per-`createHttpServer()`-instance
+socket counter (incremented/decremented in `registerWebSocketRoute`'s
+connect/close handlers, not a module-level singleton — safe across the
+many test files that each construct their own app) gating a new 5-min
+`setInterval` that calls `worldEventStore.tick()`.
+
+**Bark wiring — 3 of 5 big-moment classes wired this session, 2 explicitly
+deferred (detail in TUNING.md):** `contract-completed`
+(`contractStore.onCompleted`), `stop-all` (existing route), `chain-failed`
+(`chainStore.onRunUpdate` filtered to `status==='failed'`). NOT wired:
+`employee-quit` (found a pre-existing gap — the quit roll inside
+`employeeStore.ts`'s `applyUpkeep()` never calls `finish()`/broadcasts at
+all, fixing that felt like scope creep beyond G4's task list) and
+`budget-paused` (needs edge-triggered state tracking no G4 task specified).
+
+**ContractsPanel.tsx** mirrors TriagePanel.tsx's row structure (glyph+word
+`SignalChip`, identity, one-line detail) — CLAIM button (manual-claim) +
+an employee-assign "Dispatch via…" dropdown that opens CallModal prefilled
+from the chosen employee's real record + the contract's explicit id
+(`contractId`/`employeeId` threaded end-to-end: `CallModalPrefill` →
+`dispatchRequest` WS message → `clientMessageHandler.ts` →
+`dispatchStore.enqueue()`). Manual-claim completions render `SIM ·
+CLAIMED (unverified)` with a dashed border even though the underlying
+contract is real — the one documented exception to the real/SIM border
+rule (§6.1), verified live in the evidence screenshot.
+
+**Verification (before → after):** server 463 → 509 (+46 —
+`contractStore.test.ts` 17, `worldEventStore.test.ts` 14,
+`digest.test.ts` 6, `notifyBark.test.ts` 9), webview 231 → 237 (+6 —
+`dayNight.test.ts` 3, `signalChip.test.ts` 3), bin/poller 74 → 74
+(unchanged — no bin/ files touched this milestone). Root `check-types`,
+webview's own `tsc -b`, full `npm run lint`, root `npm test`, and
+`npm run build` all clean. `grep -in "token"` swept across every new G4
+file — zero hits in reward-computation code (both hits are benign:
+"zero token spend" in a doc comment, "may carry a token" in a URL-masking
+comment).
+
+**Live E2E (isolated HOME, fresh port, real `dist/cli.js` + real HTTP —
+Greg's own running instances on 3149/3199 + the dispatch-runner/
+coworker-adapter/needs-input-poller processes detected and left
+untouched throughout):** dropped a real `WAR_ROOM_TODO_DIR` file with a
+"Start now" line → `GET /api/contracts` minted a priority contract
+(`$40`/`★2`, `status:"open"`) within the same tick. Edited the file to
+remove the line, waited past the 60s briefing cache TTL (polled, no fixed
+sleep), re-queried → `status:"completed"`,
+`completionMethod:"todo-disappeared"`. Independently confirmed via
+`GET /api/economy` that real Cash/Reputation actually moved
+(`{"cash":40,"reputation":2}`, ledger reason
+`"contract-priority-todo-disappeared"`) — not just a mocked unit
+assertion. Also live-verified the manual-claim route accepting a claim,
+then honestly rejecting a re-claim (`not-open`) and an unknown id
+(`not-found`).
+
+**Screenshots:** `.planning/evidence/g4-missions-world.png` + `-grayscale`
+— CONTRACTS panel with 2 open priority + 1 open backlog contract (solid-
+border `SignalChip`s, real=true) and a RECENT section showing the
+manually-claimed contract's dashed `SIM · CLAIMED (unverified)` chip.
+Grayscale fully legible — every signal is shape+glyph+text, colorblind
+hard rule held.
+
+**Not deployed — sub-agent correctly did not attempt NEXUS/SSH/deploy of
+any kind** (per this session's explicit instructions). TUNING.md carries
+the pre-deploy checklist for the batch-2 orchestrator: verify
+`WAR_ROOM_TODO_DIR` on the NEXUS container is still the real vault clone
+(not a fixture), and note `WAR_ROOM_BARK_URL` is unset today (Bark pushes
+are feature-off by design until Greg configures it).
+
+Proceed to G5 (Art + Living World Polish) once G4's batch-2 deploy
+(bundled with G3) is confirmed live.
