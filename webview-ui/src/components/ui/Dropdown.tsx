@@ -28,7 +28,7 @@ export function DropdownItem({ onClick, children, className = '' }: DropdownItem
   return (
     <button
       onClick={onClick}
-      className={`block w-full text-left py-2 px-12 bg-transparent border-none rounded-none cursor-pointer whitespace-nowrap hover:bg-btn-bg ${className}`}
+      className={`block w-full text-left py-2 px-12 bg-transparent border-none rounded-none cursor-pointer whitespace-nowrap hover:bg-btn-bg max-sm:min-h-44 max-sm:flex max-sm:items-center ${className}`}
     >
       {children}
     </button>

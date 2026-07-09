@@ -35,6 +35,7 @@ import {
   GHOST_VALID_TINT,
   GRID_LINE_COLOR,
   HOVERED_OUTLINE_ALPHA,
+  MOBILE_BUTTON_MIN_RADIUS,
   OUTLINE_Z_SORT_OFFSET,
   OVERLAY_GLYPH_COLOR,
   OVERLAY_GLYPH_OUTLINE_COLOR,
@@ -801,6 +802,19 @@ const BUTTON_MIN_RADIUS = 6;
 const BUTTON_RADIUS_ZOOM_FACTOR = 3;
 const BUTTON_ICON_SIZE_FACTOR = 0.45;
 
+// Touch target floor (G6, BUILD-PLAN §G6 task 4): coarse-pointer (touch)
+// devices get MOBILE_BUTTON_MIN_RADIUS instead of BUTTON_MIN_RADIUS for the
+// delete/rotate buttons below. Cached at module scope — a device's pointer
+// type doesn't change mid-session, no need to re-query every frame.
+let cachedIsCoarsePointer: boolean | null = null;
+function minButtonRadius(): number {
+  if (cachedIsCoarsePointer === null) {
+    cachedIsCoarsePointer =
+      typeof window !== 'undefined' && !!window.matchMedia?.('(pointer: coarse)').matches;
+  }
+  return cachedIsCoarsePointer ? MOBILE_BUTTON_MIN_RADIUS : BUTTON_MIN_RADIUS;
+}
+
 /** @internal */
 export function renderDeleteButton(
   editorOverlayLayer: Container,
@@ -819,7 +833,7 @@ export function renderDeleteButton(
   const { bg, mark } = pool.deleteButton;
   const cx = (col + w) * TILE_SIZE + 1 / zoom;
   const cy = row * TILE_SIZE - 1 / zoom;
-  const radius = Math.max(BUTTON_MIN_RADIUS / zoom, BUTTON_RADIUS_ZOOM_FACTOR);
+  const radius = Math.max(minButtonRadius() / zoom, BUTTON_RADIUS_ZOOM_FACTOR);
 
   bg.clear();
   bg.circle(cx, cy, radius).fill(DELETE_BUTTON_BG);
@@ -852,7 +866,7 @@ export function renderRotateButton(
     pool.rotateButton = { bg, mark };
   }
   const { bg, mark } = pool.rotateButton;
-  const radius = Math.max(BUTTON_MIN_RADIUS / zoom, BUTTON_RADIUS_ZOOM_FACTOR);
+  const radius = Math.max(minButtonRadius() / zoom, BUTTON_RADIUS_ZOOM_FACTOR);
   const cx = col * TILE_SIZE - 1 / zoom;
   const cy = row * TILE_SIZE - 1 / zoom;
 

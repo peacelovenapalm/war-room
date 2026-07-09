@@ -175,7 +175,7 @@ export function CallModal({ isOpen, onClose, prefill, onSend, budget }: CallModa
             <label className="flex flex-col gap-3 text-sm">
               <span className="font-bold">MACHINE</span>
               <select
-                className="border-2 border-border bg-bg text-text py-4 px-8 rounded-none"
+                className="border-2 border-border bg-bg text-text py-4 px-8 rounded-none max-sm:min-h-44"
                 value={machine}
                 onChange={(e) => {
                   setMachine(e.target.value);
@@ -198,7 +198,7 @@ export function CallModal({ isOpen, onClose, prefill, onSend, budget }: CallModa
                 <label className="flex flex-col gap-3 text-sm">
                   <span className="font-bold">PROVIDER</span>
                   <select
-                    className="border-2 border-border bg-bg text-text py-4 px-8 rounded-none"
+                    className="border-2 border-border bg-bg text-text py-4 px-8 rounded-none max-sm:min-h-44"
                     value={provider}
                     onChange={(e) => {
                       setProvider(e.target.value as DispatchProvider);
@@ -219,7 +219,7 @@ export function CallModal({ isOpen, onClose, prefill, onSend, budget }: CallModa
                 <label className="flex flex-col gap-3 text-sm">
                   <span className="font-bold">PROJECT</span>
                   <select
-                    className="border-2 border-border bg-bg text-text py-4 px-8 rounded-none"
+                    className="border-2 border-border bg-bg text-text py-4 px-8 rounded-none max-sm:min-h-44"
                     value={root}
                     onChange={(e) => setRoot(e.target.value)}
                   >
@@ -237,7 +237,7 @@ export function CallModal({ isOpen, onClose, prefill, onSend, budget }: CallModa
                     <span className="font-bold">SUBFOLDER (optional)</span>
                     <input
                       type="text"
-                      className="border-2 border-border bg-bg text-text py-4 px-8 rounded-none"
+                      className="border-2 border-border bg-bg text-text py-4 px-8 rounded-none max-sm:min-h-44"
                       value={subpath}
                       onChange={(e) => setSubpath(e.target.value)}
                       placeholder="e.g. packages/api"
@@ -254,7 +254,7 @@ export function CallModal({ isOpen, onClose, prefill, onSend, budget }: CallModa
                 <label className="flex flex-col gap-3 text-sm">
                   <span className="font-bold">MODEL (optional)</span>
                   <select
-                    className="border-2 border-border bg-bg text-text py-4 px-8 rounded-none"
+                    className="border-2 border-border bg-bg text-text py-4 px-8 rounded-none max-sm:min-h-44"
                     value={model}
                     onChange={(e) => setModel(e.target.value)}
                   >
@@ -271,7 +271,7 @@ export function CallModal({ isOpen, onClose, prefill, onSend, budget }: CallModa
                   <label className="flex flex-col gap-3 text-sm">
                     <span className="font-bold">EFFORT (optional)</span>
                     <select
-                      className="border-2 border-border bg-bg text-text py-4 px-8 rounded-none"
+                      className="border-2 border-border bg-bg text-text py-4 px-8 rounded-none max-sm:min-h-44"
                       value={effort}
                       onChange={(e) => setEffort(e.target.value as DispatchEffort)}
                     >

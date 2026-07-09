@@ -70,7 +70,8 @@ export function DispatchTray({ entries, onDismiss, onView, sendFailures }: Dispa
                   e.stopPropagation();
                   onDismiss(entry.id);
                 }}
-                className="bg-transparent border-none cursor-pointer text-text-muted hover:text-text shrink-0"
+                className="bg-transparent border-none cursor-pointer text-text-muted hover:text-text shrink-0
+                  max-sm:min-w-44 max-sm:min-h-44 max-sm:flex max-sm:items-center max-sm:justify-center"
                 title="Dismiss"
               >
                 x

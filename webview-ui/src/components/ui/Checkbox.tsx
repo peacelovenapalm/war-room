@@ -9,7 +9,7 @@ export function Checkbox({ checked, onChange, label, className = '' }: CheckboxP
   return (
     <button
       onClick={onChange}
-      className={`flex items-center justify-between w-full py-6 px-10 bg-transparent border-none rounded-none cursor-pointer text-left hover:bg-btn-bg ${className}`}
+      className={`flex items-center justify-between w-full py-6 px-10 bg-transparent border-none rounded-none cursor-pointer text-left hover:bg-btn-bg max-sm:min-h-44 ${className}`}
     >
       <span>{label}</span>
       <span

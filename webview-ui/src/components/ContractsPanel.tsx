@@ -124,7 +124,11 @@ export function ContractsPanel({
     >
       <div className="flex items-center justify-between py-4 px-8 border-b-2 border-border">
         <span className="font-bold text-sm">CONTRACTS — {open.length} OPEN</span>
-        <button onClick={onClose} className="text-xs" aria-label="Close contracts panel">
+        <button
+          onClick={onClose}
+          className="text-xs max-sm:min-w-44 max-sm:min-h-44 max-sm:shrink-0 max-sm:flex max-sm:items-center max-sm:justify-center"
+          aria-label="Close contracts panel"
+        >
           ✗
         </button>
       </div>
@@ -157,7 +161,8 @@ export function ContractsPanel({
             </span>
             <div className="flex items-center gap-3">
               <button
-                className="text-xs border-2 border-border rounded-none py-1 px-3"
+                className="text-xs border-2 border-border rounded-none py-1 px-3
+                  max-sm:min-w-44 max-sm:min-h-44 max-sm:flex max-sm:items-center max-sm:justify-center"
                 onClick={() => handleClaim(c.id)}
                 data-testid="contract-claim"
               >
@@ -165,7 +170,7 @@ export function ContractsPanel({
               </button>
               {activeEmployees.length > 0 && (
                 <select
-                  className="text-xs border-2 border-border bg-bg text-text py-1 px-2 rounded-none"
+                  className="text-xs border-2 border-border bg-bg text-text py-1 px-2 rounded-none max-sm:min-h-44"
                   defaultValue=""
                   onChange={(e) => {
                     const emp = employees[e.target.value];

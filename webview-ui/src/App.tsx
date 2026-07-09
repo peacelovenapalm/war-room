@@ -525,7 +525,8 @@ function App() {
           <div className="text-center">
             <button
               onClick={() => setIsHooksInfoOpen(false)}
-              className="py-4 px-20 text-lg bg-accent text-white border-2 border-accent rounded-none cursor-pointer shadow-pixel"
+              className="py-4 px-20 text-lg bg-accent text-white border-2 border-accent rounded-none cursor-pointer shadow-pixel
+                max-sm:min-h-44 max-sm:flex max-sm:items-center max-sm:justify-center"
             >
               Got it
             </button>

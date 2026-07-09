@@ -38,7 +38,8 @@ export function WorldEventBanner({ events }: WorldEventBannerProps) {
         <SignalChip glyph={current.glyph} word={current.summary} real={false} />
         <button
           type="button"
-          className="text-xs border-2 border-border py-2 px-3"
+          className="text-xs border-2 border-border py-2 px-3
+            max-sm:min-w-44 max-sm:min-h-44 max-sm:flex max-sm:items-center max-sm:justify-center"
           data-testid="world-event-banner-dismiss"
           aria-label="Dismiss"
           onClick={() => setDismissedTs((prev) => new Set(prev).add(current.ts))}

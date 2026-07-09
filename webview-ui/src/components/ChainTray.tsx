@@ -37,7 +37,8 @@ export function ChainTray({ runs, receivedAtById, onDismiss }: ChainTrayProps) {
           {run.status === 'failed' && (
             <button
               onClick={() => onDismiss(run.id)}
-              className="bg-transparent border-none cursor-pointer text-text-muted hover:text-text shrink-0"
+              className="bg-transparent border-none cursor-pointer text-text-muted hover:text-text shrink-0
+                max-sm:min-w-44 max-sm:min-h-44 max-sm:flex max-sm:items-center max-sm:justify-center"
               title="Dismiss"
             >
               x

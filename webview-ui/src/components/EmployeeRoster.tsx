@@ -142,7 +142,7 @@ export function EmployeeRoster({ isOpen, onClose, employees }: EmployeeRosterPro
                     {emp.status === 'active' && (
                       <>
                         <select
-                          className="bg-bg border-2 border-border text-2xs py-1 px-4"
+                          className="bg-bg border-2 border-border text-2xs py-1 px-4 max-sm:min-h-44"
                           value={track}
                           onChange={(e) =>
                             setTrainTrack((prev) => ({

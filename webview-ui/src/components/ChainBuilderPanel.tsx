@@ -134,7 +134,8 @@ export function ChainBuilderPanel({ isOpen, onClose }: ChainBuilderPanelProps) {
                 {steps.length > 1 && (
                   <button
                     onClick={() => handleRemoveStep(step.id)}
-                    className="bg-transparent border-none cursor-pointer text-text-muted hover:text-text"
+                    className="bg-transparent border-none cursor-pointer text-text-muted hover:text-text
+                      max-sm:min-w-44 max-sm:min-h-44 max-sm:flex max-sm:items-center max-sm:justify-center"
                     title="Remove step"
                   >
                     x

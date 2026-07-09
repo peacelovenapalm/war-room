@@ -350,6 +350,28 @@
   }
 }
 
+/* Touch target floor (G6, BUILD-PLAN §G6 task 4): these three chip-shaped
+   buttons keep their compact desktop padding but grow to a 44px minimum hit
+   area below the 640px breakpoint. Growing the row taller than its content
+   on a dense list (triage-row__clear) is an accepted tradeoff — a mis-tap on
+   a live incident board is worse than a slightly taller row. */
+@media not all and (width >= 40rem) {
+  .debris-tag,
+  .triage-row__clear {
+    min-height: 44px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+  }
+  /* Full-width, left-aligned header bar — vertically center only, don't
+     re-center the text (would move the label away from its ▸/▾ glyph). */
+  .triage-panel__header {
+    min-height: 44px;
+    display: flex;
+    align-items: center;
+  }
+}
+
 @keyframes pixel-pulse {
   0%,
   100% {
