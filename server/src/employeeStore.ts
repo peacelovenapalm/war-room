@@ -22,14 +22,14 @@
  * natural quit does NOT blacklist — the same id auto-rehires (status flips
  * back to 'active') the moment new telemetry arrives for it.
  *
- * G2+ dependencies (economy Cash/Reputation, vacation-mode flag) don't
- * exist yet. Verb gates that will eventually also require Cash are
- * implemented against their REAL non-economic gates now (level/mood/status
- * thresholds); Cash debiting is deferred to G2's economyStore wiring, same
- * for Reputation awards (accepted via an optional injected callback, a
- * silent no-op until G2 supplies one). `isVacationActive` is injected the
- * same way — defaults to "never on vacation" until G2's economyStore flag
- * exists.
+ * G2 dependencies (economy Cash/Reputation, vacation-mode flag) are wired
+ * via an optional injected-deps object (`EmployeeStoreDeps`), each with a
+ * permissive no-op default (never on vacation / silent no-op / debit
+ * always succeeds) for test-constructed instances — only the process-wide
+ * singleton export below wires the real economyStore. train()/promote()
+ * debit Cash this way (GAME-DESIGN §3.1, F1: 100/session and
+ * `200 * nextTierIndex`); other verbs' non-economic gates
+ * (level/mood/status thresholds) are unaffected.
  */
 
 import * as fs from 'fs';
@@ -92,6 +92,15 @@ export const RANK_TIERS: readonly RankTier[] = [
   { rank: 'Lead', minLevel: 10, trainingCap: 28 },
   { rank: 'Principal', minLevel: 18, trainingCap: 36 },
 ];
+
+// ── Verb costs (GAME-DESIGN §3.1/§4.6) ────────────────────────────────
+export const TRAIN_COST_CASH = 100;
+/** Promote costs `200 * nextTierIndex`, where nextTierIndex is the 0-based
+ *  RANK_TIERS index of the tier being promoted INTO (= currentIndex + 1,
+ *  same "next" already resolved via `RANK_TIERS[currentIndex + 1]`):
+ *  Junior(0)->Senior(1) = 200, Senior(1)->Lead(2) = 400,
+ *  Lead(2)->Principal(3) = 600. */
+export const PROMOTE_COST_PER_TIER = 200;
 
 // ── Traits ──────────────────────────────────────────────────────────────
 export const MIN_SAMPLES = 5;
@@ -251,6 +260,16 @@ export interface EmployeeStoreDeps {
   isVacationActive?: () => boolean;
   /** G2's economyStore Reputation award — no-op until wired. */
   awardReputation?: (delta: number, reason: string) => void;
+  /** G2's economyStore Cash debit (GAME-DESIGN §3.1, F1) — mirrors
+   *  economyStore.spend()'s contract exactly: returns false WITHOUT
+   *  mutating anything (economy or employee state) when funds are
+   *  insufficient, true (and the debit already applied) on success. Must
+   *  be called, and must return, before any employee-state mutation.
+   *  Permissive no-op default (always succeeds) for test-constructed
+   *  instances that don't care about Cash, same posture as
+   *  awardReputation's silent no-op default — only the process-wide
+   *  singleton below wires the real economyStore.spend. */
+  spendCash?: (amount: number, reason: string, now: number) => boolean;
 }
 
 export class EmployeeStore {
@@ -264,12 +283,14 @@ export class EmployeeStore {
   private listeners: Array<(snapshot: Employee) => void> = [];
   private readonly isVacationActive: () => boolean;
   private readonly awardReputation: (delta: number, reason: string) => void;
+  private readonly spendCash: (amount: number, reason: string, now: number) => boolean;
 
   constructor(persistPath?: string, ledgerDir?: string, deps: EmployeeStoreDeps = {}) {
     this.explicitPath = persistPath;
     this.explicitLedgerDir = ledgerDir;
     this.isVacationActive = deps.isVacationActive ?? (() => false);
     this.awardReputation = deps.awardReputation ?? (() => {});
+    this.spendCash = deps.spendCash ?? (() => true);
   }
 
   /** Subscribe to per-employee mutations (fired after every recorded event
@@ -427,6 +448,13 @@ export class EmployeeStore {
     if (emp.trainingBonus[track] >= tier.trainingCap) return { ok: false, reason: 'track-at-cap' };
     const today = localDate(now);
     if (emp.lastTrainedDate === today) return { ok: false, reason: 'cooldown' };
+    // GAME-DESIGN §3.1: 100 Cash/session. Checked last, right before the
+    // first mutation — every gate above is a free read-only refusal, so
+    // insufficient Cash never burns the once/day cooldown or grants any
+    // partial XP/mood/track effect (no dark patterns).
+    if (!this.spendCash(TRAIN_COST_CASH, `train-${track}`, now)) {
+      return { ok: false, reason: 'insufficient-cash' };
+    }
     emp.trainingBonus[track] = Math.min(tier.trainingCap, emp.trainingBonus[track] + 2);
     emp.scores = computeScores(emp.rolling.recentTurns, emp.trainingBonus);
     emp.moodBoost = clamp(-MOOD_BOOST_CLAMP, MOOD_BOOST_CLAMP, emp.moodBoost + 3);
@@ -445,6 +473,15 @@ export class EmployeeStore {
     const { level } = computeLevel(emp.xp, EMPLOYEE_LEVEL_CURVE);
     if (level < next.minLevel) return { ok: false, reason: 'level-too-low' };
     if (emp.mood < 50) return { ok: false, reason: 'mood-too-low' };
+    // GAME-DESIGN §3.1: `200 * nextTierIndex` — nextTierIndex is `next`'s
+    // own 0-based RANK_TIERS index (currentIndex + 1). Checked last, right
+    // before the first mutation — insufficient Cash never grants the rank
+    // or the +15 moodBoost (no dark patterns).
+    const nextTierIndex = currentIndex + 1;
+    const cost = PROMOTE_COST_PER_TIER * nextTierIndex;
+    if (!this.spendCash(cost, `promote-${next.rank}`, now)) {
+      return { ok: false, reason: 'insufficient-cash' };
+    }
     emp.rank = next.rank;
     emp.moodBoost = clamp(-MOOD_BOOST_CLAMP, MOOD_BOOST_CLAMP, emp.moodBoost + 15);
     this.finish(emp, now, 'promote', { rank: next.rank });
@@ -816,4 +853,5 @@ export class EmployeeStore {
 export const employeeStore = new EmployeeStore(undefined, undefined, {
   isVacationActive: () => economyStore.isVacationActive(),
   awardReputation: (delta, reason) => economyStore.addReputation(delta, reason),
+  spendCash: (amount, reason, now) => economyStore.spend(amount, reason, now),
 });

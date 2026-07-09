@@ -20,6 +20,7 @@ import {
   KITCHEN_MOOD_DECAY_MULT,
   WAR_ROOM_CRISIS_XP_BONUS_PCT,
 } from '../src/economyConstants.js';
+import type { Employee } from '../src/employeeStore.js';
 import {
   computeBadges,
   computeScores,
@@ -29,9 +30,11 @@ import {
   MIN_SAMPLES,
   MOOD_BREAK_RESTORE,
   MOOD_DECAY_PER_HOUR_IDLE,
+  PROMOTE_COST_PER_TIER,
   QUIT_GRACE_DAYS,
   QUIT_THRESHOLD_MOOD,
   SPEED_MS_REFERENCE,
+  TRAIN_COST_CASH,
   XP_CRISIS_RESOLVED,
   XP_TURN,
 } from '../src/employeeStore.js';
@@ -664,6 +667,153 @@ describe('EmployeeStore idle mood decay — Kitchen moodDecayMult (G2, GAME-DESI
       mood = store.getById(emp.id, laterNow)!.mood;
     }).not.toThrow();
     expect(70 - mood!).toBeCloseTo(elapsedHours * MOOD_DECAY_PER_HOUR_IDLE, 5);
+  });
+});
+
+describe('EmployeeStore.train/.promote — Cash debit (GAME-DESIGN §3.1, §4.6) — F1', () => {
+  /** 3 real turns -> auto-onboards 'candidate' to 'active' (same pattern as
+   *  the F2 break_/idle-decay describe blocks above). An optional
+   *  xpOverride on the first turn shortcuts leveling for promote tests
+   *  without simulating hundreds of turns. */
+  function activeEmployee(store: EmployeeStore, projectDir: string, xpOverride?: number): Employee {
+    let emp = store.recordTurn(
+      'MACBOOK',
+      projectDir,
+      projectDir,
+      { outputTokensCumulative: 1, xpOverride },
+      DAY1,
+    );
+    emp = store.recordTurn(
+      'MACBOOK',
+      projectDir,
+      projectDir,
+      { outputTokensCumulative: 2 },
+      DAY1 + 1000,
+    );
+    emp = store.recordTurn(
+      'MACBOOK',
+      projectDir,
+      projectDir,
+      { outputTokensCumulative: 3 },
+      DAY1 + 2000,
+    );
+    expect(emp.status).toBe('active');
+    return emp;
+  }
+
+  it('train() debits TRAIN_COST_CASH on success and still applies the real training effect', () => {
+    const spendCash = vi.fn(() => true);
+    const store = new EmployeeStore(statePath, ledgerDir, { spendCash });
+    const emp = activeEmployee(store, '/f1-train-ok');
+
+    const result = store.train(emp.id, 'speed', DAY1 + 3000);
+
+    expect(result.ok).toBe(true);
+    expect(spendCash).toHaveBeenCalledTimes(1);
+    expect(spendCash).toHaveBeenCalledWith(TRAIN_COST_CASH, 'train-speed', DAY1 + 3000);
+    const trained = (result as { ok: true; employee: Employee }).employee;
+    expect(trained.trainingBonus.speed).toBe(2);
+    expect(trained.moodBoost).toBe(3);
+    expect(trained.lastTrainedDate).not.toBeNull();
+  });
+
+  it('train() refuses insufficient-cash and grants NOTHING — no trainingBonus/moodBoost, cooldown not consumed', () => {
+    const spendCash = vi.fn(() => false);
+    const store = new EmployeeStore(statePath, ledgerDir, { spendCash });
+    const emp = activeEmployee(store, '/f1-train-refuse');
+    const before = store.getById(emp.id, DAY1 + 3000)!;
+
+    const result = store.train(emp.id, 'speed', DAY1 + 3000);
+
+    expect(result).toEqual({ ok: false, reason: 'insufficient-cash' });
+    expect(spendCash).toHaveBeenCalledWith(TRAIN_COST_CASH, 'train-speed', DAY1 + 3000);
+    const after = store.getById(emp.id, DAY1 + 3000)!;
+    expect(after.trainingBonus).toEqual(before.trainingBonus);
+    expect(after.moodBoost).toBe(before.moodBoost);
+    expect(after.lastTrainedDate).toBeNull();
+
+    // Cooldown genuinely untouched by the refusal: funds arriving later the
+    // SAME day still let the once/day training succeed.
+    spendCash.mockReturnValue(true);
+    const retried = store.train(emp.id, 'speed', DAY1 + 4000);
+    expect(retried.ok).toBe(true);
+  });
+
+  it("promote() debits 200 * nextTierIndex Cash (next tier's own 0-based RANK_TIERS index) and applies the rank/moodBoost", () => {
+    const spendCash = vi.fn(() => true);
+    const store = new EmployeeStore(statePath, ledgerDir, { spendCash });
+    // xp=1700 clears level 10 (Lead's minLevel) up front so both
+    // promotions below are level-gated OK; mood stays at the 70 default
+    // (>= the 50 gate) across both quick promotions.
+    const emp = activeEmployee(store, '/f1-promote-ok', 1700);
+
+    // Junior(index 0) -> Senior(index 1): nextTierIndex 1, cost 200*1.
+    const first = store.promote(emp.id, DAY1 + 3000);
+    expect(first.ok).toBe(true);
+    expect(spendCash).toHaveBeenNthCalledWith(
+      1,
+      PROMOTE_COST_PER_TIER * 1,
+      'promote-Senior',
+      DAY1 + 3000,
+    );
+    expect((first as { ok: true; employee: Employee }).employee.rank).toBe('Senior');
+    expect((first as { ok: true; employee: Employee }).employee.moodBoost).toBe(15);
+
+    // Senior(index 1) -> Lead(index 2): nextTierIndex 2, cost 200*2.
+    const second = store.promote(emp.id, DAY1 + 4000);
+    expect(second.ok).toBe(true);
+    expect(spendCash).toHaveBeenNthCalledWith(
+      2,
+      PROMOTE_COST_PER_TIER * 2,
+      'promote-Lead',
+      DAY1 + 4000,
+    );
+    expect((second as { ok: true; employee: Employee }).employee.rank).toBe('Lead');
+  });
+
+  it('promote() refuses insufficient-cash and grants NOTHING — rank/moodBoost unchanged', () => {
+    const spendCash = vi.fn(() => false);
+    const store = new EmployeeStore(statePath, ledgerDir, { spendCash });
+    const emp = activeEmployee(store, '/f1-promote-refuse', 1700);
+    const before = store.getById(emp.id, DAY1 + 3000)!;
+
+    const result = store.promote(emp.id, DAY1 + 3000);
+
+    expect(result).toEqual({ ok: false, reason: 'insufficient-cash' });
+    expect(spendCash).toHaveBeenCalledWith(
+      PROMOTE_COST_PER_TIER * 1,
+      'promote-Senior',
+      DAY1 + 3000,
+    );
+    const after = store.getById(emp.id, DAY1 + 3000)!;
+    expect(after.rank).toBe(before.rank);
+    expect(after.moodBoost).toBe(before.moodBoost);
+
+    // Funds arriving later still let the same promotion succeed — no gate
+    // was silently consumed by the refusal.
+    spendCash.mockReturnValue(true);
+    const retried = store.promote(emp.id, DAY1 + 4000);
+    expect(retried.ok).toBe(true);
+    expect((retried as { ok: true; employee: Employee }).employee.rank).toBe('Senior');
+  });
+
+  it('the process-wide employeeStore singleton wires spendCash to the real economyStore.spend (source-guard, F4-test-pattern precedent)', () => {
+    // The default `spendCash` (permissive no-op, always succeeds) exists
+    // ONLY for test-constructed instances — every test above proves the
+    // gating logic against an explicit mock, none of them can observe
+    // whether the process-wide singleton itself is still wired to the real
+    // economyStore. A future edit that silently dropped `spendCash` from
+    // the singleton's deps would fall back to that permissive default
+    // (free training/promotion in production) with no other test catching
+    // it. Same source-text-drift-guard technique as editorActions.test.ts's
+    // PRICED_FURNITURE_TYPES regression test (F4) — reads the actual wiring
+    // out of the source file rather than re-asserting a duplicated literal.
+    expect(employeeStore).toBeInstanceOf(EmployeeStore);
+    const src = fs.readFileSync(path.join(__dirname, '../src/employeeStore.ts'), 'utf8');
+    const singletonBlock = src.slice(
+      src.indexOf('export const employeeStore = new EmployeeStore('),
+    );
+    expect(singletonBlock).toMatch(/spendCash:\s*\([^)]*\)\s*=>\s*economyStore\.spend\(/);
   });
 });
 
