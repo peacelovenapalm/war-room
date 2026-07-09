@@ -20,10 +20,27 @@ export interface HelpEntry {
   text: string;
 }
 
+/**
+ * Groups for the HelpModal quick-menu (KICKOFF v1.1 item 8) — purely
+ * organizational, not new content. Each HELP_SECTIONS entry below carries
+ * one of these so the modal can render a skimmable category list instead of
+ * always fully expanding all 15 sections at once.
+ */
+export const HELP_CATEGORIES = [
+  'SIGNALS',
+  'DISPATCH',
+  'PROGRESS & ECONOMY',
+  'OFFICE LIFE',
+  'BRIEFING',
+  'SOUND',
+] as const;
+export type HelpCategory = (typeof HELP_CATEGORIES)[number];
+
 export interface HelpSection {
   id: string;
   title: string;
   intro?: string;
+  category: HelpCategory;
   entries: HelpEntry[];
 }
 
@@ -94,6 +111,7 @@ export const HELP_SECTIONS: HelpSection[] = [
     title: 'AGENT STATE CHIPS',
     intro:
       'Every agent wears a chip: SHAPE + WORD are the signal, color is decoration. States come from live session activity plus the per-machine poller.',
+    category: 'SIGNALS',
     entries: chipEntries(),
   },
   {
@@ -101,12 +119,14 @@ export const HELP_SECTIONS: HelpSection[] = [
     title: 'FIRE STAGES (CRISES)',
     intro:
       'A blocked session is a fire at that desk, and fires AGE. Each stage is a different silhouette, not a different color — check the tag under the chip for the stage word and how long it has burned.',
+    category: 'SIGNALS',
     entries: stageEntries(),
   },
   {
     id: 'debris',
     title: 'DEBRIS',
     intro: undefined,
+    category: 'SIGNALS',
     entries: [
       {
         glyph: '✗',
@@ -119,6 +139,7 @@ export const HELP_SECTIONS: HelpSection[] = [
     id: 'triage-board',
     title: 'TRIAGE BOARD',
     intro: undefined,
+    category: 'SIGNALS',
     entries: [
       {
         glyph: '⚠',
@@ -136,6 +157,7 @@ export const HELP_SECTIONS: HelpSection[] = [
     id: 'briefing',
     title: 'BRIEFING PANEL',
     intro: undefined,
+    category: 'BRIEFING',
     entries: [
       {
         glyph: '◷',
@@ -148,6 +170,7 @@ export const HELP_SECTIONS: HelpSection[] = [
     id: 'machines',
     title: 'MACHINE & IDENTITY LABELS',
     intro: undefined,
+    category: 'OFFICE LIFE',
     entries: [
       {
         glyph: '#',
@@ -160,6 +183,7 @@ export const HELP_SECTIONS: HelpSection[] = [
     id: 'shift-report',
     title: 'SHIFT REPORT',
     intro: undefined,
+    category: 'PROGRESS & ECONOMY',
     entries: [
       {
         glyph: '✦',
@@ -193,6 +217,7 @@ export const HELP_SECTIONS: HelpSection[] = [
     title: 'PROGRESSION (LEVEL / STREAK / XP)',
     intro:
       'The top-left strip is honest about what earns XP and what does not — nothing here is gated: every data view above stays reachable no matter your level.',
+    category: 'PROGRESS & ECONOMY',
     entries: [
       {
         glyph: '▲',
@@ -220,6 +245,7 @@ export const HELP_SECTIONS: HelpSection[] = [
     id: 'coworkers',
     title: 'AI COWORKERS (CODEX / GEMINI)',
     intro: undefined,
+    category: 'OFFICE LIFE',
     entries: [
       {
         glyph: '▣',
@@ -237,6 +263,7 @@ export const HELP_SECTIONS: HelpSection[] = [
     id: 'emergence',
     title: 'OFFICE LIFE (EMERGENT RULES)',
     intro: 'Cheap simple rules that interact — none deeper than a few lines:',
+    category: 'OFFICE LIFE',
     entries: [
       {
         glyph: '◎',
@@ -254,6 +281,7 @@ export const HELP_SECTIONS: HelpSection[] = [
     id: 'data-sources',
     title: 'WHERE THE DATA COMES FROM',
     intro: 'Nothing here is a game score — everything reflects real state:',
+    category: 'OFFICE LIFE',
     entries: [
       {
         glyph: '▶',
@@ -282,6 +310,7 @@ export const HELP_SECTIONS: HelpSection[] = [
     title: 'OFFICE DECOR (UNLOCKS)',
     intro:
       'Purely cosmetic — nothing here changes what you can see or do. Streaks, levels, and LEAN shift days from the progression strip permanently unlock office decor; the Unlocks button (bottom toolbar) lists every item and its requirement.',
+    category: 'PROGRESS & ECONOMY',
     entries: [
       {
         glyph: '◆',
@@ -300,6 +329,7 @@ export const HELP_SECTIONS: HelpSection[] = [
     title: 'CALL A COWORKER (DISPATCH)',
     intro:
       'The server never shells out — it only queues a request. A per-machine runner you opt into (install-dispatch-runner-launchd.sh) polls it and decides locally against its OWN allowlist; the dashboard can never force a machine to run anything.',
+    category: 'DISPATCH',
     entries: [
       {
         glyph: '☎',
@@ -338,6 +368,7 @@ export const HELP_SECTIONS: HelpSection[] = [
     id: 'agent-drawer',
     title: 'AGENT DETAIL DRAWER',
     intro: undefined,
+    category: 'DISPATCH',
     entries: [
       {
         glyph: '▤',
@@ -366,6 +397,7 @@ export const HELP_SECTIONS: HelpSection[] = [
     title: 'SOUND (AMBIENCE + EVENT CHIRPS)',
     intro:
       'Procedural WebAudio only — no audio files, no network fetches. Every sound reinforces a signal that is ALSO on screen as shape+text; audio never carries information alone, and it never machine-guns during a burst of events.',
+    category: 'SOUND',
     entries: [
       {
         glyph: '♪',

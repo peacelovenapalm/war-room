@@ -5,6 +5,7 @@ import { isBrowserRuntime } from '../runtime.js';
 import { transport } from '../transport/index.js';
 import { SoundToggle } from './SoundToggle.js';
 import { Button } from './ui/Button.js';
+import { ControlTooltip } from './ui/ControlTooltip.js';
 import { Dropdown, DropdownItem } from './ui/Dropdown.js';
 
 interface BottomToolbarProps {
@@ -167,13 +168,11 @@ export function BottomToolbar({
           </Dropdown>
         </div>
       )}
-      <Button
-        variant={isEditMode ? 'active' : 'default'}
-        onClick={onToggleEditMode}
-        title="Edit office layout"
-      >
-        Layout
-      </Button>
+      <ControlTooltip label="Edit office layout" side="top">
+        <Button variant={isEditMode ? 'active' : 'default'} onClick={onToggleEditMode}>
+          Layout
+        </Button>
+      </ControlTooltip>
       <Button
         variant={isBriefingOpen ? 'active' : 'default'}
         onClick={onToggleBriefing}
@@ -202,27 +201,24 @@ export function BottomToolbar({
       >
         Employees
       </Button>
-      <Button
-        variant={isCallOpen ? 'active' : 'default'}
-        onClick={onToggleCall}
-        title="Call a coworker"
-      >
-        Call
-      </Button>
-      <Button
-        variant={isChainsOpen ? 'active' : 'default'}
-        onClick={onToggleChains}
-        title="Dispatch chains"
-      >
-        Chains
-      </Button>
-      <Button
-        variant={isStandingOrdersOpen ? 'active' : 'default'}
-        onClick={onToggleStandingOrders}
-        title="Standing orders"
-      >
-        Orders
-      </Button>
+      <ControlTooltip label="Call a coworker" side="top">
+        <Button variant={isCallOpen ? 'active' : 'default'} onClick={onToggleCall}>
+          Call
+        </Button>
+      </ControlTooltip>
+      <ControlTooltip label="Build and dispatch multi-step chains" side="top">
+        <Button variant={isChainsOpen ? 'active' : 'default'} onClick={onToggleChains}>
+          Chains
+        </Button>
+      </ControlTooltip>
+      <ControlTooltip label="Standing orders — chains that fire automatically" side="top">
+        <Button
+          variant={isStandingOrdersOpen ? 'active' : 'default'}
+          onClick={onToggleStandingOrders}
+        >
+          Orders
+        </Button>
+      </ControlTooltip>
       <Button
         variant={isContractsOpen ? 'active' : 'default'}
         onClick={onToggleContracts}
@@ -230,17 +226,17 @@ export function BottomToolbar({
       >
         Contracts
       </Button>
-      <Button
-        variant={isSettingsOpen ? 'active' : 'default'}
-        onClick={onToggleSettings}
-        title="Settings"
-      >
-        Settings
-      </Button>
+      <ControlTooltip label="Settings" side="top">
+        <Button variant={isSettingsOpen ? 'active' : 'default'} onClick={onToggleSettings}>
+          Settings
+        </Button>
+      </ControlTooltip>
       {/* Word button, not icon-only (colorblind/help hard rule); ? also opens it */}
-      <Button variant={isHelpOpen ? 'active' : 'default'} onClick={onToggleHelp} title="Help (?)">
-        Help
-      </Button>
+      <ControlTooltip label="Help (press ?)" side="top">
+        <Button variant={isHelpOpen ? 'active' : 'default'} onClick={onToggleHelp}>
+          Help
+        </Button>
+      </ControlTooltip>
       <SoundToggle />
     </div>
   );

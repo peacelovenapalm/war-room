@@ -1,5 +1,6 @@
 import { OfficeState } from './office/engine/officeState.js';
 import { getPixiInitCount } from './office/engine/pixiApp.js';
+import { ROTATING_TIPS } from './rotatingTips.js';
 
 declare global {
   interface Window {
@@ -37,6 +38,10 @@ declare global {
        *  canvas click on an agent takes (App.tsx wires this to handleClick,
        *  not this module — see App.tsx's own useEffect for why). */
       openAgentDrawer?: (id: number) => void;
+      /** e2e-only (KICKOFF v1.1 item 8): the real ROTATING_TIPS array, so
+       *  e2e can assert the rendered tip is a member of it instead of
+       *  duplicating tip strings inside the test file. */
+      getRotatingTips?: () => string[];
     };
   }
 }
@@ -97,6 +102,8 @@ export function installTestHooks(officeStateRef: { current: OfficeState | null }
   // proving OfficeCanvas.tsx's mount effect no longer dispose+recreates the
   // Application on every interaction (the disappearing-view bug).
   hooks.getPixiInitCount = () => getPixiInitCount();
+
+  hooks.getRotatingTips = () => ROTATING_TIPS;
 
   // Point-in-time snapshot of every live pet. Pets render only on the canvas
   // (no DOM) and the heart bubble is never persisted, so e2e reads pet state

@@ -8,6 +8,7 @@ import {
   ZOOM_MIN,
 } from '../constants.js';
 import { Button } from './ui/Button.js';
+import { ControlTooltip } from './ui/ControlTooltip.js';
 
 /** Shows the "Nx" level briefly whenever `zoom` changes, then fades and
  *  hides — shared by ZoomLevelBadge (rendered in the top-center HUD stack,
@@ -82,54 +83,56 @@ export function ZoomControls({ zoom, onZoomChange }: ZoomControlsProps) {
   const maxDisabled = zoom >= ZOOM_MAX;
 
   return (
-    <div className="flex flex-col gap-4" data-testid="zoom-controls">
-      <Button
-        size="icon_lg"
-        onClick={() => onZoomChange(zoom + 1)}
-        disabled={maxDisabled}
-        className="border-border! shadow-pixel disabled:hover:bg-btn-bg disabled:cursor-default disabled:opacity-(--btn-disabled-opacity)"
-        title="Zoom in (Ctrl+Scroll)"
-      >
-        <svg width="18" height="18" viewBox="0 0 18 18" fill="none">
-          <line
-            x1="9"
-            y1="3"
-            x2="9"
-            y2="15"
-            stroke="currentColor"
-            strokeWidth="2"
-            strokeLinecap="round"
-          />
-          <line
-            x1="3"
-            y1="9"
-            x2="15"
-            y2="9"
-            stroke="currentColor"
-            strokeWidth="2"
-            strokeLinecap="round"
-          />
-        </svg>
-      </Button>
-      <Button
-        size="icon_lg"
-        onClick={() => onZoomChange(zoom - 1)}
-        disabled={minDisabled}
-        className="border-border! shadow-pixel disabled:hover:bg-btn-bg disabled:cursor-default disabled:opacity-(--btn-disabled-opacity)"
-        title="Zoom out (Ctrl+Scroll)"
-      >
-        <svg width="18" height="18" viewBox="0 0 18 18" fill="none">
-          <line
-            x1="3"
-            y1="9"
-            x2="15"
-            y2="9"
-            stroke="currentColor"
-            strokeWidth="2"
-            strokeLinecap="round"
-          />
-        </svg>
-      </Button>
-    </div>
+    <ControlTooltip label="Zoom in / out (Ctrl+Scroll)" side="bottom" display="flex">
+      <div className="flex flex-col gap-4" data-testid="zoom-controls">
+        <Button
+          size="icon_lg"
+          onClick={() => onZoomChange(zoom + 1)}
+          disabled={maxDisabled}
+          className="border-border! shadow-pixel disabled:hover:bg-btn-bg disabled:cursor-default disabled:opacity-(--btn-disabled-opacity)"
+          title="Zoom in (Ctrl+Scroll)"
+        >
+          <svg width="18" height="18" viewBox="0 0 18 18" fill="none">
+            <line
+              x1="9"
+              y1="3"
+              x2="9"
+              y2="15"
+              stroke="currentColor"
+              strokeWidth="2"
+              strokeLinecap="round"
+            />
+            <line
+              x1="3"
+              y1="9"
+              x2="15"
+              y2="9"
+              stroke="currentColor"
+              strokeWidth="2"
+              strokeLinecap="round"
+            />
+          </svg>
+        </Button>
+        <Button
+          size="icon_lg"
+          onClick={() => onZoomChange(zoom - 1)}
+          disabled={minDisabled}
+          className="border-border! shadow-pixel disabled:hover:bg-btn-bg disabled:cursor-default disabled:opacity-(--btn-disabled-opacity)"
+          title="Zoom out (Ctrl+Scroll)"
+        >
+          <svg width="18" height="18" viewBox="0 0 18 18" fill="none">
+            <line
+              x1="3"
+              y1="9"
+              x2="15"
+              y2="9"
+              stroke="currentColor"
+              strokeWidth="2"
+              strokeLinecap="round"
+            />
+          </svg>
+        </Button>
+      </div>
+    </ControlTooltip>
   );
 }

@@ -4,6 +4,7 @@ import { ambience } from '../ambience.js';
 import { buildTriageRows, type TriageRow } from '../office/crisis.js';
 import { formatAge } from '../office/crisis.js';
 import type { OfficeState } from '../office/engine/officeState.js';
+import { ControlTooltip } from './ui/ControlTooltip.js';
 
 /** Board refresh cadence — ages tick visibly without RAF churn. */
 const TICK_MS = 500;
@@ -124,34 +125,48 @@ function TriageRowView({
   onOpenAgent: (agentId: number) => void;
 }) {
   return (
-    <div
-      className={`triage-row triage-row--clickable ${row.loud ? 'triage-row--loud' : ''}`}
-      data-testid="triage-row"
-      data-kind={row.kind}
-      data-stage={row.stage ?? 'debris'}
-      onClick={() => onOpenAgent(row.agentId)}
-      title="Open this agent"
+    <ControlTooltip
+      label="Click to open this agent's session"
+      side="bottom"
+      display="flex"
+      className="w-full"
     >
-      <span className="triage-row__stage">
-        {row.glyph} {row.word}
-      </span>
-      <span className="triage-row__identity">{row.identity}</span>
-      <span className="triage-row__cause" title={row.cause}>
-        {row.cause}
-      </span>
-      <span className="triage-row__age tabular-nums">{formatAge(row.ageMs)}</span>
-      {row.debrisKey && (
-        <button
-          className="triage-row__clear"
-          onClick={(e) => {
-            e.stopPropagation();
-            officeState.acknowledgeDebris(row.debrisKey!);
-          }}
-          title="Acknowledge — clear this debris"
-        >
-          CLEAR
-        </button>
-      )}
-    </div>
+      <div
+        className={`triage-row triage-row--clickable ${row.loud ? 'triage-row--loud' : ''}`}
+        data-testid="triage-row"
+        data-kind={row.kind}
+        data-stage={row.stage ?? 'debris'}
+        role="button"
+        tabIndex={0}
+        onClick={() => onOpenAgent(row.agentId)}
+        onKeyDown={(e) => {
+          if (e.key === 'Enter' || e.key === ' ') {
+            e.preventDefault();
+            onOpenAgent(row.agentId);
+          }
+        }}
+      >
+        <span className="triage-row__stage">
+          {row.glyph} {row.word}
+        </span>
+        <span className="triage-row__identity">{row.identity}</span>
+        <span className="triage-row__cause" title={row.cause}>
+          {row.cause}
+        </span>
+        <span className="triage-row__age tabular-nums">{formatAge(row.ageMs)}</span>
+        {row.debrisKey && (
+          <button
+            className="triage-row__clear"
+            onClick={(e) => {
+              e.stopPropagation();
+              officeState.acknowledgeDebris(row.debrisKey!);
+            }}
+            title="Acknowledge — clear this debris"
+          >
+            CLEAR
+          </button>
+        )}
+      </div>
+    </ControlTooltip>
   );
 }

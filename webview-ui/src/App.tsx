@@ -19,6 +19,7 @@ import { EmployeeRoster } from './components/EmployeeRoster.js';
 import { HelpModal } from './components/HelpModal.js';
 import { MigrationNotice } from './components/MigrationNotice.js';
 import { ProgressionHUD } from './components/ProgressionHUD.js';
+import { RotatingTip } from './components/RotatingTip.js';
 import { SettingsModal } from './components/SettingsModal.js';
 import { ShiftPanel } from './components/ShiftPanel.js';
 import { StandingOrdersPanel } from './components/StandingOrdersPanel.js';
@@ -645,6 +646,7 @@ function App() {
           onDismiss={handleWhatsNewDismiss}
           onOpenChangelog={handleOpenChangelog}
         />
+        {!isDebugMode && <RotatingTip />}
       </HudStack>
 
       <ChangelogModal

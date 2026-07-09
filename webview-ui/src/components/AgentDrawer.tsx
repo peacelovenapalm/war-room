@@ -8,6 +8,7 @@ import type { ToolActivity } from '../office/types.js';
 import { compactTokens } from '../shiftReport.js';
 import { transport } from '../transport/index.js';
 import { Button } from './ui/Button.js';
+import { ControlTooltip } from './ui/ControlTooltip.js';
 import { Modal } from './ui/Modal.js';
 
 /** Refresh cadence for the FOCUS availability check while the drawer is open. */
@@ -267,24 +268,26 @@ export function AgentDrawer({
           >
             Focus
           </Button>
-          <Button
-            variant={
-              killPhase === 'confirm'
-                ? 'accent'
-                : canKill && (killPhase === 'idle' || killPhase === 'denied')
-                  ? 'default'
-                  : 'disabled'
-            }
-            onClick={handleKill}
-            disabled={!canKill || killPhase === 'pending' || killPhase === 'killed'}
-            title={pid === undefined ? 'No PID available — use Copy ID instead' : undefined}
-            data-testid="kill-control"
-          >
-            {killPhase === 'confirm' && '⚠ CONFIRM'}
-            {killPhase === 'pending' && '⏳ KILLING…'}
-            {killPhase === 'killed' && '✕ KILLED'}
-            {(killPhase === 'idle' || killPhase === 'denied') && '✕ Kill'}
-          </Button>
+          <ControlTooltip label="End this worker's session for real — two-step confirm" side="top">
+            <Button
+              variant={
+                killPhase === 'confirm'
+                  ? 'accent'
+                  : canKill && (killPhase === 'idle' || killPhase === 'denied')
+                    ? 'default'
+                    : 'disabled'
+              }
+              onClick={handleKill}
+              disabled={!canKill || killPhase === 'pending' || killPhase === 'killed'}
+              title={pid === undefined ? 'No PID available — use Copy ID instead' : undefined}
+              data-testid="kill-control"
+            >
+              {killPhase === 'confirm' && '⚠ CONFIRM'}
+              {killPhase === 'pending' && '⏳ KILLING…'}
+              {killPhase === 'killed' && '✕ KILLED'}
+              {(killPhase === 'idle' || killPhase === 'denied') && '✕ Kill'}
+            </Button>
+          </ControlTooltip>
         </div>
       </div>
     </Modal>
