@@ -46,7 +46,15 @@ export function startPixiApp(
     });
 
     if (disposed) {
-      instance.destroy(true, { children: true, texture: false });
+      // removeView must stay false — the <canvas> DOM node belongs to
+      // React (mounted/unmounted via the ref), never to Pixi. `true` here
+      // physically detaches the canvas from the document; a later
+      // startPixiApp() call reusing the same ref then initializes onto an
+      // orphaned node React never re-inserts, leaving the office
+      // permanently blank on the next dispose+recreate cycle (e.g. every
+      // isEditMode/_editorTick change in OfficeCanvas.tsx's effect deps —
+      // found via a real-browser G2 build-mode screenshot repro).
+      instance.destroy({ removeView: false }, { children: true, texture: false });
       throw new Error('pixiApp: disposed before init resolved');
     }
 
@@ -69,7 +77,9 @@ export function startPixiApp(
       disposed = true;
       if (app) {
         if (tickerFn) app.ticker.remove(tickerFn);
-        app.destroy(true, { children: true, texture: false });
+        // removeView: false — see the matching comment above; React owns
+        // the canvas element's DOM lifecycle, not Pixi.
+        app.destroy({ removeView: false }, { children: true, texture: false });
         app = null;
       }
     },
