@@ -51,7 +51,20 @@ export interface EmployeeDispatchDefaults {
 }
 
 export type ResolveEmployeeDefaults = (employeeId: string) => EmployeeDispatchDefaults | undefined;
-export type IsAutomationPaused = (machine: string, provider: string | undefined) => boolean;
+
+/** Narrow local mirror of budgetStore.ts's AutomationPauseResult (KICKOFF
+ *  v1.1 item 5) — kept as a structural duplicate rather than an import so
+ *  this file still doesn't depend on budgetStore.ts directly (httpServer.ts
+ *  wires the real gate in via configure(), same one-way-layering rationale
+ *  as EmployeeDispatchDefaults above). */
+export interface AutomationPauseCheck {
+  paused: boolean;
+  reason?: string;
+}
+export type IsAutomationPaused = (
+  machine: string,
+  provider: string | undefined,
+) => AutomationPauseCheck;
 
 export type ChainStartResult = { ok: true; run: ChainRun } | { ok: false; reason: string };
 
@@ -69,7 +82,10 @@ export class ChainOrchestrator {
     // treat automation as PAUSED — an unwired gate must never silently mean
     // "never pauses" (same fail-safe posture as budgetStore's own
     // stale-snapshot default).
-    isAutomationPaused: IsAutomationPaused = () => true,
+    isAutomationPaused: IsAutomationPaused = () => ({
+      paused: true,
+      reason: 'gate-not-configured',
+    }),
   ) {
     this.resolveEmployeeDefaults = resolveEmployeeDefaults;
     this.isAutomationPaused = isAutomationPaused;
@@ -155,11 +171,21 @@ export class ChainOrchestrator {
       return;
     }
 
-    if (opts.gateByBudget && this.isAutomationPaused(machine, provider)) {
-      // Step stays 'pending' — sweep() retries on a later tick. Never a
-      // hard failure: a transient budget pause shouldn't kill the chain.
-      return;
+    if (opts.gateByBudget) {
+      const pauseCheck = this.isAutomationPaused(machine, provider);
+      if (pauseCheck.paused) {
+        // Step stays 'pending' — sweep() retries on a later tick. Never a
+        // hard failure: a transient budget pause shouldn't kill the chain.
+        // pausedReason is the ONLY thing that lets a client distinguish
+        // this from "just between steps" (KICKOFF v1.1 item 5).
+        this.chains.setPausedReason(runId, pauseCheck.reason, now);
+        return;
+      }
     }
+    // Gate cleared (or wasn't applied) — this run is no longer paused.
+    // setPausedReason() no-ops when the reason isn't actually changing, so
+    // this doesn't churn persistence on every sweep tick of an unpaused run.
+    this.chains.setPausedReason(runId, undefined, now);
 
     const prompt = renderStepPrompt(stepDef.prompt, run.steps);
     const result = this.dispatch.enqueue(

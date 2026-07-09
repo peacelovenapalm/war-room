@@ -145,6 +145,15 @@ export type EnqueueDispatch = (input: {
   employeeId?: string;
 }) => { ok: boolean; reason?: string };
 
+/** Narrow local mirror of budgetStore.ts's AutomationPauseResult (KICKOFF
+ *  v1.1 item 5) — kept as a structural duplicate, not an import, matching
+ *  this file's one-way-layering rule against economyStore/budgetStore
+ *  (see file header). */
+export type IsAutomationPaused = (
+  machine: string,
+  provider: string | undefined,
+) => { paused: boolean; reason?: string };
+
 export class StandingOrderStore {
   private orders: Map<string, StandingOrder> | null = null;
   private lastPersistAt = 0;
@@ -264,7 +273,7 @@ export class StandingOrderStore {
    *  next tick retries; a transient pause never counts as a fire). */
   tick(
     now: number,
-    isAutomationPaused: (machine: string, provider: string | undefined) => boolean,
+    isAutomationPaused: IsAutomationPaused,
     resolveEmployeeDefaults: ResolveEmployeeDefaults,
     enqueueDispatch: EnqueueDispatch,
   ): void {
@@ -279,8 +288,9 @@ export class StandingOrderStore {
         this.finish(order, now, false);
         continue;
       }
-      if (isAutomationPaused(target.machine, target.provider)) {
-        order.lastSkipReason = 'budget-paused';
+      const pauseCheck = isAutomationPaused(target.machine, target.provider);
+      if (pauseCheck.paused) {
+        order.lastSkipReason = pauseCheck.reason ?? 'budget-paused';
         order.updatedAt = now;
         this.finish(order, now, false);
         continue;

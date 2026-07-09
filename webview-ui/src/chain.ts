@@ -8,6 +8,8 @@
  * EmployeeSnapshotClient use).
  */
 
+import { budgetPauseReasonWord } from './budget.js';
+
 export const CHAIN_RUN_STATUSES = ['running', 'completed', 'failed', 'halted'] as const;
 export type ChainRunStatusValue = (typeof CHAIN_RUN_STATUSES)[number];
 
@@ -43,6 +45,10 @@ export interface ChainRunClient {
   /** Set when a killed dispatch halted this run (KICKOFF v1.1 item 3) —
    *  distinct from stoppedByKillSwitch, which is STOP ALL's own provenance flag. */
   haltReason?: string;
+  /** Set while a 'running' run's step-continuation is budget-gated (KICKOFF
+   *  v1.1 item 5) — one of budget.ts's AutomationPauseReason values. Cleared
+   *  once the gate unblocks. */
+  pausedReason?: string;
   createdAt: number;
   updatedAt: number;
 }
@@ -77,9 +83,18 @@ export const CHAIN_RUN_STATUS_CHIPS: Record<ChainRunStatusValue, ChainRunStatusS
 };
 
 /** One line of tray chip text, e.g. "◎ RUNNING (step 2/3)",
- *  "⊘ FAILED — denied: path-not-allowlisted", "■ HALTED". */
+ *  "⏸ PAUSED — 5h budget (step 2/3)", "⊘ FAILED — denied:
+ *  path-not-allowlisted", "■ HALTED". A paused step is otherwise
+ *  indistinguishable from "just between steps" (both are a pending step,
+ *  nothing else) — pausedReason is the only signal that tells them apart
+ *  (KICKOFF v1.1 item 5). ⏸ is the established pause glyph
+ *  (standingOrders.ts:60) — this never touches the running ◎ glyph's own
+ *  meaning, only adds a distinct paused rendering ahead of it. */
 export function chainRunChipLabel(
-  run: Pick<ChainRunClient, 'status' | 'currentStep' | 'steps' | 'failReason' | 'haltReason'>,
+  run: Pick<
+    ChainRunClient,
+    'status' | 'currentStep' | 'steps' | 'failReason' | 'haltReason' | 'pausedReason'
+  >,
 ): string {
   const { glyph, word } = CHAIN_RUN_STATUS_CHIPS[run.status];
   if (run.status === 'failed' && run.failReason) {
@@ -87,6 +102,9 @@ export function chainRunChipLabel(
   }
   if (run.status === 'halted' && run.haltReason) {
     return `${glyph} ${word} — ${run.haltReason}`;
+  }
+  if (run.status === 'running' && run.pausedReason) {
+    return `⏸ PAUSED — ${budgetPauseReasonWord(run.pausedReason)} (step ${run.currentStep + 1}/${run.steps.length})`;
   }
   if (run.status === 'running') {
     return `${glyph} ${word} (step ${run.currentStep + 1}/${run.steps.length})`;

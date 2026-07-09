@@ -36,7 +36,7 @@ beforeEach(() => {
     chains,
     dispatch,
     () => undefined,
-    () => false,
+    () => ({ paused: false }),
   );
 });
 
@@ -68,7 +68,7 @@ function deny(machine: string, reason: string): void {
 
 describe('ChainOrchestrator.startRun', () => {
   it('enqueues step 1 immediately, never budget-gated', () => {
-    const isPaused = vi.fn(() => true); // would fail every step if checked
+    const isPaused = vi.fn(() => ({ paused: true, reason: 'stale-snapshot' })); // would fail every step if checked
     orchestrator = new ChainOrchestrator(chains, dispatch, () => undefined, isPaused);
     orchestrator.start();
     const defResult = chains.createDef({ name: 'x', steps: [step('s1', 'do it')] });
@@ -220,7 +220,7 @@ describe('Budget gate — auto-continuation only, never step 1', () => {
       chains,
       dispatch,
       () => undefined,
-      () => paused,
+      () => (paused ? { paused: true, reason: '5h-threshold' } : { paused: false }),
     );
     orchestrator.start();
     const defResult = chains.createDef({
@@ -237,12 +237,17 @@ describe('Budget gate — auto-continuation only, never step 1', () => {
     expect(run.status).toBe('running');
     expect(run.steps[1].status).toBe('pending'); // held, not enqueued
     expect(dispatch.pendingFor('MACBOOK')).toHaveLength(0);
+    // KICKOFF v1.1 item 5: the specific reason threads onto the run itself —
+    // this is what lets a client tell "paused: 5h-threshold" apart from
+    // "just between steps" (both would otherwise be an identical pending step).
+    expect(run.pausedReason).toBe('5h-threshold');
 
     paused = false;
     orchestrator.sweep();
     run = chains.getRun(started.run.id)!;
     expect(run.steps[1].status).toBe('running');
     expect(dispatch.pendingFor('MACBOOK')).toHaveLength(1);
+    expect(run.pausedReason).toBeUndefined(); // cleared once the gate unblocks
   });
 });
 

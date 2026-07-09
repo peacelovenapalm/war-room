@@ -190,6 +190,28 @@ describe('ChainStore run lifecycle', () => {
     expect(s.getRun(run.id)?.status).toBe('completed'); // unchanged, not overwritten to halted
   });
 
+  it('setPausedReason (KICKOFF v1.1 item 5) sets/clears pausedReason and no-ops when the reason is unchanged', () => {
+    const s = new ChainStore(defsPath, runsPath, auditPath);
+    const defResult = s.createDef({ name: 'x', steps: [step('s1', 'a')] });
+    if (!defResult.ok) throw new Error('unreachable');
+    const run = s.createRun(defResult.def);
+    expect(run.pausedReason).toBeUndefined();
+
+    const t1 = s.setPausedReason(run.id, '5h-threshold', 1_000)!;
+    expect(t1.pausedReason).toBe('5h-threshold');
+    expect(t1.updatedAt).toBe(1_000);
+
+    // Same reason again, later timestamp — a genuine no-op (updatedAt must
+    // NOT bump), the guard sweep() relies on to avoid thrashing persistence
+    // on every retry tick of an ongoing pause.
+    const t2 = s.setPausedReason(run.id, '5h-threshold', 2_000)!;
+    expect(t2.updatedAt).toBe(1_000);
+
+    const cleared = s.setPausedReason(run.id, undefined, 3_000)!;
+    expect(cleared.pausedReason).toBeUndefined();
+    expect(cleared.updatedAt).toBe(3_000);
+  });
+
   it('persists runs across a fresh instance pointed at the same files', () => {
     const s1 = new ChainStore(defsPath, runsPath, auditPath);
     const defResult = s1.createDef({ name: 'x', steps: [step('s1', 'a')] });

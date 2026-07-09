@@ -60,6 +60,50 @@ describe('chainRunChipLabel', () => {
       `${CHAIN_RUN_STATUS_CHIPS.halted.glyph} HALTED`,
     );
   });
+
+  it('surfaces the halt reason when halted', () => {
+    expect(chainRunChipLabel(run({ status: 'halted', haltReason: 'step-killed' }))).toBe(
+      `${CHAIN_RUN_STATUS_CHIPS.halted.glyph} HALTED — step-killed`,
+    );
+  });
+
+  it('a budget-paused running step renders distinctly from mid-chain running (KICKOFF v1.1 item 5)', () => {
+    const twoStepRun = {
+      currentStep: 1,
+      steps: [
+        { stepId: 's1', status: 'exited' as const },
+        { stepId: 's2', status: 'pending' as const },
+      ],
+    };
+    const paused = chainRunChipLabel(
+      run({ status: 'running', ...twoStepRun, pausedReason: '5h-threshold' }),
+    );
+    const running = chainRunChipLabel(run({ status: 'running', ...twoStepRun }));
+    // Same status/currentStep either way — pausedReason is the ONLY thing
+    // that lets a client tell "paused" apart from "just between steps"
+    // (both are otherwise an identical pending step, nothing else).
+    expect(paused).not.toBe(running);
+    expect(paused).toBe('⏸ PAUSED — 5h budget (step 2/2)');
+  });
+
+  it('each of the 4 real budget-pause reasons renders distinctly', () => {
+    const labels = {
+      'stale-snapshot': chainRunChipLabel(
+        run({ status: 'running', pausedReason: 'stale-snapshot' }),
+      ),
+      '5h-threshold': chainRunChipLabel(run({ status: 'running', pausedReason: '5h-threshold' })),
+      '7d-threshold': chainRunChipLabel(run({ status: 'running', pausedReason: '7d-threshold' })),
+      'codex-cap-reached': chainRunChipLabel(
+        run({ status: 'running', pausedReason: 'codex-cap-reached' }),
+      ),
+    };
+    expect(labels['stale-snapshot']).toContain('stale telemetry');
+    expect(labels['5h-threshold']).toContain('5h budget');
+    expect(labels['7d-threshold']).toContain('7d budget');
+    expect(labels['codex-cap-reached']).toContain('codex cap');
+    const values = Object.values(labels);
+    expect(new Set(values).size).toBe(values.length);
+  });
 });
 
 describe('shouldAutoClearChainRun', () => {

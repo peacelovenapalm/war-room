@@ -61,3 +61,34 @@ export function budgetChipLabel(
     ? codexBudgetChipLabel(snapshot.codex)
     : claudeBudgetChipLabel(snapshot.claude);
 }
+
+/** Mirrors server/src/budgetStore.ts's AutomationPauseResult reasons (KICKOFF
+ *  v1.1 item 5) — the ONLY four reasons a chain step or standing-order tick
+ *  is ever budget-gated. Shared here (not duplicated in chain.ts and
+ *  standingOrders.ts) since both need the identical glyph+word rendering. */
+export const AUTOMATION_PAUSE_REASONS = [
+  'stale-snapshot',
+  '5h-threshold',
+  '7d-threshold',
+  'codex-cap-reached',
+] as const;
+export type AutomationPauseReason = (typeof AUTOMATION_PAUSE_REASONS)[number];
+
+export function isAutomationPauseReason(reason: string): reason is AutomationPauseReason {
+  return (AUTOMATION_PAUSE_REASONS as readonly string[]).includes(reason);
+}
+
+const AUTOMATION_PAUSE_REASON_WORDS: Record<AutomationPauseReason, string> = {
+  'stale-snapshot': 'stale telemetry',
+  '5h-threshold': '5h budget',
+  '7d-threshold': '7d budget',
+  'codex-cap-reached': 'codex cap',
+};
+
+/** Colorblind rule: glyph + word, never color alone — this supplies the WORD
+ *  half for a raw pause-reason string off the wire. Falls back to the raw
+ *  string for forward-compat with a reason this client build doesn't know
+ *  about yet, rather than hiding it. */
+export function budgetPauseReasonWord(reason: string): string {
+  return isAutomationPauseReason(reason) ? AUTOMATION_PAUSE_REASON_WORDS[reason] : reason;
+}

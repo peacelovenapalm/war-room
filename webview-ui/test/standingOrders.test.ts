@@ -65,13 +65,34 @@ describe('standingOrderStatusLabel', () => {
     expect(standingOrderStatusLabel(order({ enabled: false }))).toBe('○ DISABLED');
   });
 
-  it('budget-paused skip reason renders distinctly from a generic skip', () => {
+  it('legacy pre-item-5 generic budget-paused literal still renders (not a raw fallthrough)', () => {
     expect(standingOrderStatusLabel(order({ lastSkipReason: 'budget-paused' }))).toBe(
-      '⏸ BUDGET PAUSED',
+      '⏸ PAUSED — budget',
     );
+  });
+
+  it('a non-budget skip reason renders as a generic SKIPPED, not a pause', () => {
     expect(standingOrderStatusLabel(order({ lastSkipReason: 'missing-dispatch-target' }))).toBe(
       '⚠ SKIPPED — missing-dispatch-target',
     );
+  });
+
+  it('each of the 4 real budget-pause reasons renders distinctly (KICKOFF v1.1 item 5)', () => {
+    const labels = {
+      'stale-snapshot': standingOrderStatusLabel(order({ lastSkipReason: 'stale-snapshot' })),
+      '5h-threshold': standingOrderStatusLabel(order({ lastSkipReason: '5h-threshold' })),
+      '7d-threshold': standingOrderStatusLabel(order({ lastSkipReason: '7d-threshold' })),
+      'codex-cap-reached': standingOrderStatusLabel(order({ lastSkipReason: 'codex-cap-reached' })),
+    };
+    expect(labels['stale-snapshot']).toBe('⏸ PAUSED — stale telemetry');
+    expect(labels['5h-threshold']).toBe('⏸ PAUSED — 5h budget');
+    expect(labels['7d-threshold']).toBe('⏸ PAUSED — 7d budget');
+    expect(labels['codex-cap-reached']).toBe('⏸ PAUSED — codex cap');
+    // All four render distinctly from one another — no two reasons collapse
+    // to the same string (the exact bug this item fixes: previously every
+    // reason rendered as the same generic 'budget-paused').
+    const values = Object.values(labels);
+    expect(new Set(values).size).toBe(values.length);
   });
 
   it('active, no flags set', () => {

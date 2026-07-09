@@ -29,8 +29,8 @@ let tmpDir: string;
 let statePath: string;
 
 const resolveNoDefaults = () => undefined;
-const neverPaused = () => false;
-const alwaysPaused = () => true;
+const neverPaused = () => ({ paused: false });
+const alwaysPaused = () => ({ paused: true, reason: '7d-threshold' });
 
 function acceptingEnqueue() {
   return { ok: true as const };
@@ -281,7 +281,10 @@ describe('Budget-pause skip', () => {
 
     s.tick(DAY1_9AM + 5_000, alwaysPaused, resolveNoDefaults, acceptingEnqueue);
     const order = s.get(created.order.id);
-    expect(order?.lastSkipReason).toBe('budget-paused');
+    // KICKOFF v1.1 item 5: the SPECIFIC reason is recorded, not a generic
+    // 'budget-paused' literal — this is what lets the UI render distinctly
+    // per reason instead of one indistinguishable "paused" string.
+    expect(order?.lastSkipReason).toBe('7d-threshold');
     expect(order?.lastFiredAt).toBe(beforeFire); // unchanged
   });
 });

@@ -132,7 +132,7 @@ export async function createHttpServer(options: HttpServerOptions): Promise<Http
   chainOrchestrator.configure({
     resolveEmployeeDefaults: (id) => employeeStore.resolveEmployeeDefaults(id),
     isAutomationPaused: (_machine, provider) =>
-      budgetStore.isAutomationPaused(provider, economyStore.getPerkFlags()).paused,
+      budgetStore.isAutomationPaused(provider, economyStore.getPerkFlags()),
   });
   chainOrchestrator.start();
   const chainSweepTimer = setInterval(() => chainOrchestrator.sweep(), CHAIN_SWEEP_INTERVAL_MS);
@@ -147,8 +147,7 @@ export async function createHttpServer(options: HttpServerOptions): Promise<Http
   const standingOrderTimer = setInterval(() => {
     standingOrderStore.tick(
       Date.now(),
-      (_machine, provider) =>
-        budgetStore.isAutomationPaused(provider, economyStore.getPerkFlags()).paused,
+      (_machine, provider) => budgetStore.isAutomationPaused(provider, economyStore.getPerkFlags()),
       (id) => employeeStore.resolveEmployeeDefaults(id),
       (input) => dispatchStore.enqueue(input),
     );

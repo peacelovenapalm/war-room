@@ -96,6 +96,16 @@ export interface ChainRun {
   /** Set by haltRun() (KICKOFF v1.1 item 3 — a killed dispatch halts its own
    *  chain run, same terminal semantics as STOP ALL but scoped to one run). */
   haltReason?: string;
+  /** Set by chainOrchestrator while a 'running' run's step-continuation is
+   *  budget-gated (KICKOFF v1.1 item 5) — one of budgetStore.ts's
+   *  AutomationPauseResult reasons ('stale-snapshot' | '5h-threshold' |
+   *  '7d-threshold' | 'codex-cap-reached'). Cleared (undefined) once the
+   *  gate unblocks. Only meaningful while status === 'running' — it's what
+   *  lets a client tell "paused for budget" apart from "just between
+   *  steps", since both otherwise look identical (a pending step, nothing
+   *  else). Never set for the human-initiated step-0 kickoff (never
+   *  budget-gated). */
+  pausedReason?: string;
   createdAt: number;
   updatedAt: number;
 }
@@ -381,6 +391,26 @@ export class ChainStore {
     run.updatedAt = now;
     this.persistRuns();
     this.audit('run-halted', run);
+    this.emit(run);
+    return run;
+  }
+
+  /** KICKOFF v1.1 item 5: chainOrchestrator calls this on every gated
+   *  enqueueStep — with a reason when the budget gate blocks the step,
+   *  with undefined once it unblocks. No-op (no persist/emit) when the
+   *  reason isn't actually changing, so sweep()'s per-tick retries of an
+   *  ongoing pause don't thrash persistence. */
+  setPausedReason(
+    runId: string,
+    reason: string | undefined,
+    now: number = Date.now(),
+  ): ChainRun | undefined {
+    const run = this.ensureRunsLoaded().get(runId);
+    if (!run) return undefined;
+    if (run.pausedReason === reason) return run;
+    run.pausedReason = reason;
+    run.updatedAt = now;
+    this.persistRuns();
     this.emit(run);
     return run;
   }

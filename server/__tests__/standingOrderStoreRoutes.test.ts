@@ -233,14 +233,16 @@ describe('Standing order budget-pause E2E (real poller spawn)', () => {
 
     standingOrderStore.tick(
       Date.now(),
-      (_machine, provider) =>
-        budgetStore.isAutomationPaused(provider, economyStore.getPerkFlags()).paused,
+      (_machine, provider) => budgetStore.isAutomationPaused(provider, economyStore.getPerkFlags()),
       (id) => employeeStore.resolveEmployeeDefaults(id),
       (input) => dispatchStore.enqueue(input),
     );
 
     const afterOrder = standingOrderStore.get(orderId);
-    expect(afterOrder?.lastSkipReason).toBe('budget-paused');
+    // KICKOFF v1.1 item 5: the real reason threads through end-to-end (real
+    // poller -> real budgetStore -> tick()), not a generic 'budget-paused'
+    // literal. 95% five_hour usage trips the 5h base threshold (70%).
+    expect(afterOrder?.lastSkipReason).toBe('5h-threshold');
     expect(afterOrder?.lastFiredAt).toBe(beforeLastFiredAt); // unchanged
   });
 });
