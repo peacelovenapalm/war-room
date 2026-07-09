@@ -43,6 +43,11 @@ export const CRISIS_STAGE_SPECS: Record<CrisisStage, CrisisStageSpec> = {
   [CrisisStage.ALARM]: { glyph: '✱', label: 'ALARM', loud: true },
 };
 
+/** Debris rows' glyph (buildTriageRows below) — exported so realGlyphs.ts
+ *  (GAME-DESIGN §6.1) can derive the real glyph set mechanically instead of
+ *  hand-typing it; this is the single source of truth, not a duplicate. */
+export const DEBRIS_GLYPH = '✗';
+
 export function stageForAge(ageMs: number): CrisisStage {
   if (ageMs >= ALARM_AT_MS) return CrisisStage.ALARM;
   if (ageMs >= FIRE_AT_MS) return CrisisStage.FIRE;
@@ -202,7 +207,7 @@ export function buildTriageRows(
       rowKey: `debris:${d.key}`,
       agentId: d.agentId,
       kind: d.kind,
-      glyph: '✗',
+      glyph: DEBRIS_GLYPH,
       word: 'DEBRIS',
       loud: false,
       identity: d.label,

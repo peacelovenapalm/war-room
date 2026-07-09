@@ -30,6 +30,8 @@ interface BottomToolbarProps {
   onToggleChains: () => void;
   isStandingOrdersOpen: boolean;
   onToggleStandingOrders: () => void;
+  isContractsOpen: boolean;
+  onToggleContracts: () => void;
 }
 
 export function BottomToolbar({
@@ -55,6 +57,8 @@ export function BottomToolbar({
   onToggleChains,
   isStandingOrdersOpen,
   onToggleStandingOrders,
+  isContractsOpen,
+  onToggleContracts,
 }: BottomToolbarProps) {
   const [isFolderPickerOpen, setIsFolderPickerOpen] = useState(false);
   const [isBypassMenuOpen, setIsBypassMenuOpen] = useState(false);
@@ -208,6 +212,13 @@ export function BottomToolbar({
         title="Standing orders"
       >
         Orders
+      </Button>
+      <Button
+        variant={isContractsOpen ? 'active' : 'default'}
+        onClick={onToggleContracts}
+        title="Contracts"
+      >
+        Contracts
       </Button>
       <Button
         variant={isSettingsOpen ? 'active' : 'default'}

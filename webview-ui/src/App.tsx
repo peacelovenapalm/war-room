@@ -9,6 +9,7 @@ import { CallModal, type CallModalPrefill } from './components/CallModal.js';
 import { ChainBuilderPanel } from './components/ChainBuilderPanel.js';
 import { ChainTray } from './components/ChainTray.js';
 import { ChangelogModal } from './components/ChangelogModal.js';
+import { ContractsPanel } from './components/ContractsPanel.js';
 import { DebugView } from './components/DebugView.js';
 import { DispatchResultModal } from './components/DispatchResultModal.js';
 import { DispatchTray } from './components/DispatchTray.js';
@@ -134,6 +135,7 @@ function App() {
   const [isCallOpen, setIsCallOpen] = useState(false);
   const [isChainsOpen, setIsChainsOpen] = useState(false);
   const [isStandingOrdersOpen, setIsStandingOrdersOpen] = useState(false);
+  const [isContractsOpen, setIsContractsOpen] = useState(false);
   const [callPrefill, setCallPrefill] = useState<CallModalPrefill | null>(null);
   const [drawerAgentId, setDrawerAgentId] = useState<number | null>(null);
   const [pendingSends, setPendingSends] = useState<PendingSend[]>([]);
@@ -241,6 +243,29 @@ function App() {
     setIsCallOpen(true);
     setIsBriefingOpen(false);
   }, []);
+
+  // Contracts (v2 mechanic G4, §6.2): ContractsPanel's "Dispatch via…"
+  // employee-assign dropdown opens the CALL modal prefilled from that
+  // employee's real record + this contract's explicit id (dispatch-result
+  // completion, never string-matched).
+  const handleDispatchContract = useCallback(
+    (
+      contract: { id: string; title: string },
+      employee: { id: string; machine: string; projectDir: string; defaultProvider: string },
+    ) => {
+      setCallPrefill({
+        machine: employee.machine,
+        provider: employee.defaultProvider as CallModalPrefill['provider'],
+        cwd: employee.projectDir,
+        prompt: contract.title,
+        contractId: contract.id,
+        employeeId: employee.id,
+      });
+      setIsCallOpen(true);
+      setIsContractsOpen(false);
+    },
+    [],
+  );
 
   // dispatchRequest has no ack on the wire (see dispatch.ts) — track our own
   // sends and, while any are outstanding (or a failure chip is still
@@ -530,6 +555,15 @@ function App() {
         onToggleChains={() => setIsChainsOpen((v) => !v)}
         isStandingOrdersOpen={isStandingOrdersOpen}
         onToggleStandingOrders={() => setIsStandingOrdersOpen((v) => !v)}
+        isContractsOpen={isContractsOpen}
+        onToggleContracts={() => setIsContractsOpen((v) => !v)}
+      />
+
+      <ContractsPanel
+        isOpen={isContractsOpen}
+        onClose={() => setIsContractsOpen(false)}
+        employees={employees}
+        onDispatchContract={handleDispatchContract}
       />
 
       <ChainBuilderPanel isOpen={isChainsOpen} onClose={() => setIsChainsOpen(false)} />

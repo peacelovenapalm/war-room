@@ -23,12 +23,20 @@ import { Modal } from './ui/Modal.js';
  *  runner can come online/go offline (30s advertisement TTL server-side). */
 const REFRESH_INTERVAL_MS = 10_000;
 
-/** Prefill carried from a BRIEFING todo line's DISPATCH button. */
+/** Prefill carried from a BRIEFING todo line's DISPATCH button, or from
+ *  ContractsPanel's "Dispatch via…" employee-assign dropdown. */
 export interface CallModalPrefill {
   machine?: string;
   provider?: DispatchProvider;
   cwd?: string;
   prompt?: string;
+  /** Contract correlation (v2 mechanic G4, §6.2) — an explicit id, never
+   *  string-matched. On a terminal exit 0, the server completes this
+   *  contract via the dispatch-result method. */
+  contractId?: string;
+  /** Employee correlation (v2 mechanic G3, §7.3) — credits this employee's
+   *  XP on a terminal exit. */
+  employeeId?: string;
 }
 
 interface CallModalProps {
@@ -142,6 +150,8 @@ export function CallModal({ isOpen, onClose, prefill, onSend, budget }: CallModa
       prompt,
       ...(model.trim() !== '' ? { model: model.trim() } : {}),
       ...(showEffort && effort !== '' ? { effort } : {}),
+      ...(prefill?.contractId ? { contractId: prefill.contractId } : {}),
+      ...(prefill?.employeeId ? { employeeId: prefill.employeeId } : {}),
     });
     onSend(machine, 'dispatch');
     onClose();
