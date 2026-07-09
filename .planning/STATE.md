@@ -1724,3 +1724,39 @@ data point reinforcing item 6.
 
 Proceeding to completion: final full-suite re-verification, Bark push,
 final handoff, and (usage permitting) a Fable medium review pass.
+
+### 2026-07-08 (session close) — Fable review complete, run finished
+
+Final step of the `/goal` run: a Fable-model medium-effort adversarial
+review of the full v2 diff (`50f9ef2..HEAD`, 155 files), targeted at
+award-site sourcing, the three unattended-run safety guards, server-
+authoritative Cash mutation, and the G2 Pixi dispose fix — not a
+line-by-line sweep (matches "medium effort" calibration). Findings
+logged to TUNING.md, not acted on (explicit run design: this is the
+final review pass, not another build cycle).
+
+**Clean:** all three safety guards verified in code; every v2 HTTP
+route's Cash handling is server-authoritative; the Pixi dispose fix is
+correct and consistent.
+
+**4 real bugs found (F1-F4), none a hard-rule violation, all genuine
+economy-design gaps:** F4 (highest priority) — buffed furniture
+placeable for free via the ordinary edit tool, the paid route appears
+unwired; F2 — 4 of 5 building-buff effects (War Room/Server Room/
+Kitchen/Break Room) computed but never consumed; F1 — train/promote
+never debit Cash; F3 — the Chain Gang perk is a paid no-op. Full detail
+
+- repro steps in TUNING.md's "[Fable review]" section.
+
+The review agent also flagged a suspected prompt-injection attempt
+mid-task (a message impersonating the orchestrator with fabricated
+system-reminder content) — it correctly declined to treat it as
+authoritative. Noted here for Greg's awareness; worth a transcript check.
+
+**Run summary: all 7 milestones (G0-G6) shipped, tested, and deployed
+live across 3 batched NEXUS deploys, every milestone independently
+re-verified by the orchestrator (not just trusted from sub-agent
+reports) — this caught 2 real regressions (G2 Pixi canvas-detachment,
+G5 HUD-overlap) before they'd have shipped invisibly. TUNING.md carries
+9 review sections for Greg's return.** Session handoff written to
+`SESSION-HANDOFF-2026-07-08.md`.

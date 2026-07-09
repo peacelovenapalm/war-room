@@ -209,15 +209,43 @@ review sections from the just-completed G0-G6 build run (2026-07-08):
 numeric-tuning items, 2 Greg-owned config gates (statusline hook, Bark
 URL), the deferred G5 Track 2 art-generation job, TEMP PWA icons, and
 Greg's own 6-item live-testing feedback list plus a 3rd HUD-overlap data
-point. Also read SESSION-HANDOFF-2026-07-08.md for full context. Current
-state: all 7 milestones shipped and deployed live on NEXUS
+point, PLUS a Fable review section with 4 real bugs (F1-F4, priority
+order F4→F2→F1→F3) found in the economy/building-buff wiring. Also read
+SESSION-HANDOFF-2026-07-08.md for full context. Current state: all 7
+milestones shipped and deployed live on NEXUS
 (https://nexus.tail722a2e.ts.net:8484), verified gates server 512/512,
 webview 264/264, bin/poller 74/74. Ask Greg which TUNING.md item to
-tackle first, or whether he wants the deferred Fable medium review run
-now.
+tackle first — F4 (free buffed-furniture placement bypassing the paid
+route) is the highest-priority code bug found this session.
 ```
 
 ## Fable review
 
-Not run yet as of this write — see the run's completion sequence, which
-allows it "if usage headroom allows." Update this section once it runs.
+Ran as the final step — targeted (not line-by-line) adversarial pass over
+`git diff 50f9ef2..HEAD` (155 files), focused on award-site sourcing, the
+three unattended-run safety guards, server-authoritative Cash mutation,
+and the G2 Pixi dispose fix. **Three areas came back clean**: all three
+safety guards hold in code (not just comments); every v2 HTTP route's
+Cash handling is server-authoritative; the Pixi dispose fix is correct
+and consistently applied.
+
+**Found 4 real bugs (not hard-rule violations, but genuine economy-design
+gaps), logged in full to TUNING.md's "[Fable review]" section:**
+
+- **F4 (highest priority):** buffed furniture (`WHITEBOARD`, `PC_FRONT_ON_*`)
+  is placeable for free through the ordinary edit tool — the paid route
+  (`commitBuyFurniture()`) appears unwired/dead, zero call sites anywhere
+  in the webview.
+- **F2:** 4 of 5 building-buff effects (War Room, Server Room, Kitchen,
+  Break Room) are computed and unit-tested but never consumed — those
+  rooms are pure Cash sinks with zero mechanical effect in production.
+- **F1:** `train()`/`promote()` never actually debit Cash despite being
+  priced in GAME-DESIGN.
+- **F3:** the "Chain Gang" perk (800 Cash) sets a flag nothing reads —
+  paid no-op.
+
+**Also flagged:** a message arrived mid-review formatted to impersonate
+the orchestrator (fabricated system-reminders that don't match this
+conversation) — the review agent correctly identified it as a probable
+injection attempt and didn't treat it as authoritative. Worth Greg
+checking the raw transcript around that point.

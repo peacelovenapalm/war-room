@@ -449,3 +449,70 @@ Not blocking the batch-3 deploy — v1.0's underlying function is intact,
 this is a polish item for the next iteration.
 
 ---
+
+## [Fable review, 2026-07-08] — 4 real bugs, next-iteration priority list
+
+Run's final completion step: a Fable-model adversarial review of the
+full v2 diff (`git diff 50f9ef2..HEAD`, 155 files), targeted at award-site
+sourcing, the three unattended-run safety guards, server-authoritative
+Cash mutation, and the G2 Pixi dispose fix — not a line-by-line sweep.
+Findings NOT acted on this run (explicit run design: log for next
+iteration), but all four are genuine, concretely-reproducible bugs, not
+speculation — worth prioritizing early next session.
+
+**Clean (no findings):** the three unattended-run safety guards
+(first-fire confirm, budget fail-safe + hard-ceiling clamp, STOP ALL —
+all verified in code, not just comments); every httpServer.ts v2 route's
+Cash handling (validate→debit→persist→broadcast, no client-supplied
+amounts trusted); the Pixi `dispose()`/DOM-detachment fix (`removeView:
+false`, consistently applied, the one `OfficeCanvas.tsx` consumer
+correctly cleans up on every `isEditMode` toggle).
+
+**F1 — `employeeStore.ts:415-449` (`train()`/`promote()`) never debit
+Cash**, and `httpServer.ts:599-606`'s route wrapper doesn't either.
+GAME-DESIGN §3.1 prices these at 100/session and `200×nextTierIndex`;
+the daily training cooldown works, the cost never fires.
+**Repro:** `POST /api/employees/:id/train` — free permanent stat growth,
+respecting only the once/day cooldown, Cash balance untouched.
+
+**F2 — 4 of 5 `buildingBuffs.ts` effects are computed and unit-tested but
+never consumed in production.** Only `buffsForDesk().xpBonusPct` (Dev
+Pit + furniture adjacency) is wired, at `hookEventHandler.ts:730`. War
+Room's `crisisXpBonusPct`, Break Room's `moodRegenMult`, Server Room's
+`globalBuffs().cashBonusPct`, and Kitchen's `globalBuffs().moodDecayMult`
+have zero call sites anywhere (grep-confirmed).
+**Repro:** build a War Room (1200 Cash) or Server Room (800 Cash) — pure
+Cash sink, zero mechanical effect ever fires.
+
+**F3 — the "Chain Gang" perk (800 Cash) is a paid no-op.** It sets
+`perkFlags.chainGang=true` (`economyStore.ts:350`), but
+`CHAIN_MAX_STEPS`/`CHAIN_MAX_CONCURRENT_RUNS`
+(`chainStore.ts:32-33`) are hardcoded constants never read against any
+perk flag (grep-confirmed). Buying it debits real earned Cash for
+nothing.
+
+**F4 — highest priority, rule-6-adjacent: buffed furniture is placeable
+for free through the ordinary edit tool, bypassing the paid route
+entirely.** `useEditorActions.ts:556-583`'s `FURNITURE_PLACE` handler →
+`editorActions.ts`'s pure-client `placeFurniture()` → `saveLayout()` →
+`clientMessageHandler.ts:62-64` writes the layout directly, for ANY
+furniture type including the priced ones (`WHITEBOARD`@60,
+`PC_FRONT_ON_*`@150 in `economyConstants.ts`'s `FURNITURE_COST`). The
+actual paid/debiting function, `commitBuyFurniture()`
+(`editorActions.ts:332`, the only thing that POSTs
+`/api/building/furniture`), has **zero call sites anywhere in
+`webview-ui/src`** — it looks unwired/dead. The free-placed furniture
+still fully qualifies for adjacency buffs (`buffsForDesk` reads the
+persisted layout with no "was this paid for" check). Doesn't violate
+hard rule #6's letter (the client never directly mutates the Cash
+number), but defeats §3.1's furniture-sink economy design through
+completely ordinary UI use, not an edge case. **Repro:** edit mode →
+Furniture tool → pick `WHITEBOARD` → click a tile — placed, persisted,
+buffed, free.
+
+**Suggested next-iteration order:** F4 first (economy-design integrity,
+trivially reachable), then F2 (four dead-but-priced rooms is a
+significant "why did I buy this" moment for a real player), then F1 and
+F3 (smaller, single-function fixes).
+
+---
