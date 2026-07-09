@@ -610,7 +610,11 @@ function App() {
         />
       </HudStack>
 
-      <ChainBuilderPanel isOpen={isChainsOpen} onClose={() => setIsChainsOpen(false)} />
+      <ChainBuilderPanel
+        isOpen={isChainsOpen}
+        onClose={() => setIsChainsOpen(false)}
+        economy={economy}
+      />
 
       <StandingOrdersPanel
         isOpen={isStandingOrdersOpen}

@@ -1,6 +1,7 @@
 import { useEffect, useState } from 'react';
 
-import { CHAIN_MAX_STEPS, type ChainStepDefInput, validateStepTemplatesClient } from '../chain.js';
+import { chainMaxSteps, type ChainStepDefInput, validateStepTemplatesClient } from '../chain.js';
+import type { EconomySnapshotClient } from '../hooks/useExtensionMessages.js';
 import { Button } from './ui/Button.js';
 import { Modal } from './ui/Modal.js';
 
@@ -13,6 +14,11 @@ interface ChainDefSummary {
 interface ChainBuilderPanelProps {
   isOpen: boolean;
   onClose: () => void;
+  /** Perk state (F3 follow-up) — null on initial load, before the first
+   *  economyUpdate arrives. Degrades to the base step cap (8) whenever
+   *  this is null or Chain Gang isn't in purchasedPerks; never fail-open
+   *  to the perked cap (12) on unknown/missing perk state. */
+  economy: EconomySnapshotClient | null;
 }
 
 function emptyStep(): ChainStepDefInput {
@@ -23,7 +29,7 @@ function emptyStep(): ChainStepDefInput {
  * multi-step dispatch chain and run it. Live results (per-step status,
  * substituted prompts) render in ChainTray.tsx, not here — this panel is
  * definition-authoring + a RUN button only. */
-export function ChainBuilderPanel({ isOpen, onClose }: ChainBuilderPanelProps) {
+export function ChainBuilderPanel({ isOpen, onClose, economy }: ChainBuilderPanelProps) {
   const [defs, setDefs] = useState<ChainDefSummary[]>([]);
   const [name, setName] = useState('');
   const [steps, setSteps] = useState<ChainStepDefInput[]>([emptyStep(), emptyStep()]);
@@ -40,16 +46,24 @@ export function ChainBuilderPanel({ isOpen, onClose }: ChainBuilderPanelProps) {
     if (isOpen) loadDefs();
   }, [isOpen]);
 
+  // Single source of truth for the effective cap — canSave, handleAddStep,
+  // and the "+ ADD STEP" button's disabled/variant all read this SAME
+  // value below, never CHAIN_MAX_STEPS directly (F3 finding: a
+  // step-count-gated-but-perk-unaware cap one layer removed from the
+  // server fix).
+  const hasChainGang = economy?.purchasedPerks.includes('chainGang') ?? false;
+  const maxSteps = chainMaxSteps(hasChainGang);
+
   const templateCheck = validateStepTemplatesClient(steps);
   const canSave =
     name.trim() !== '' &&
     steps.length > 0 &&
-    steps.length <= CHAIN_MAX_STEPS &&
+    steps.length <= maxSteps &&
     steps.every((s) => s.prompt.trim() !== '') &&
     templateCheck.ok;
 
   const handleAddStep = () => {
-    if (steps.length >= CHAIN_MAX_STEPS) return;
+    if (steps.length >= maxSteps) return;
     setSteps((prev) => [...prev, emptyStep()]);
   };
 
@@ -175,10 +189,10 @@ export function ChainBuilderPanel({ isOpen, onClose }: ChainBuilderPanelProps) {
 
           <div className="flex justify-between gap-6 pt-2">
             <Button
-              variant={steps.length < CHAIN_MAX_STEPS ? 'default' : 'disabled'}
+              variant={steps.length < maxSteps ? 'default' : 'disabled'}
               size="sm"
               onClick={handleAddStep}
-              disabled={steps.length >= CHAIN_MAX_STEPS}
+              disabled={steps.length >= maxSteps}
             >
               + ADD STEP
             </Button>

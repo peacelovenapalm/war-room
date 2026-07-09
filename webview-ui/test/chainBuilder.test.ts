@@ -6,7 +6,10 @@
 import { describe, expect, it } from 'vitest';
 
 import {
+  CHAIN_MAX_STEPS,
+  CHAIN_MAX_STEPS_CHAIN_GANG,
   CHAIN_RUN_STATUS_CHIPS,
+  chainMaxSteps,
   chainRunChipLabel,
   type ChainRunClient,
   pruneChainRuns,
@@ -152,5 +155,69 @@ describe('upsertChainRun / pruneChainRuns', () => {
     const receivedAtById = { a: now - 61_000, b: now - 61_000 };
     const pruned = pruneChainRuns(runs, now, receivedAtById);
     expect(pruned.map((r) => r.id)).toEqual(['b']);
+  });
+});
+
+describe('chainMaxSteps (F3 follow-up — Chain Gang perk threading into ChainBuilderPanel)', () => {
+  it('is the base 8-step cap without Chain Gang', () => {
+    expect(chainMaxSteps(false)).toBe(CHAIN_MAX_STEPS);
+    expect(chainMaxSteps(false)).toBe(8);
+  });
+
+  it('raises to 12 with Chain Gang owned', () => {
+    expect(chainMaxSteps(true)).toBe(CHAIN_MAX_STEPS_CHAIN_GANG);
+    expect(chainMaxSteps(true)).toBe(12);
+  });
+
+  // Mirrors ChainBuilderPanel.tsx's own derivation exactly:
+  //   const hasChainGang = economy?.purchasedPerks.includes('chainGang') ?? false;
+  // economy=null (initial load, perk state not yet known) must degrade to
+  // the BASE cap — never fail-open to the perked cap.
+  function hasChainGangFromEconomy(economy: { purchasedPerks: string[] } | null): boolean {
+    return economy?.purchasedPerks.includes('chainGang') ?? false;
+  }
+
+  // Mirrors ChainBuilderPanel.tsx's handleAddStep guard exactly:
+  //   if (steps.length >= maxSteps) return;
+  // Returns false when the hard-return fires (no step added).
+  function wouldAddStep(currentStepCount: number, maxSteps: number): boolean {
+    return !(currentStepCount >= maxSteps);
+  }
+
+  it('without Chain Gang (or economy=null): "+ ADD STEP" hard-returns at 8, button stays disabled at 8', () => {
+    for (const economy of [{ purchasedPerks: [] }, null]) {
+      const maxSteps = chainMaxSteps(hasChainGangFromEconomy(economy));
+      expect(maxSteps).toBe(8);
+      expect(wouldAddStep(7, maxSteps)).toBe(true); // 7 -> 8 still allowed
+      expect(wouldAddStep(8, maxSteps)).toBe(false); // hard-returns at 8 (pre-fix bug, both perked and unperked)
+      expect(wouldAddStep(11, maxSteps)).toBe(false); // nowhere near the perked 12 cap
+      expect(8 >= maxSteps).toBe(true); // button's disabled={steps.length >= maxSteps}
+    }
+  });
+
+  it('with Chain Gang owned: building past 8 up to 12 is allowed, button not disabled, canSave accepts 9-12 steps', () => {
+    const maxSteps = chainMaxSteps(hasChainGangFromEconomy({ purchasedPerks: ['chainGang'] }));
+    expect(maxSteps).toBe(12);
+
+    // This is exactly the case the verifier's F3 finding named as broken:
+    // 8 steps already built, perk owned — "+ ADD STEP" must NOT hard-return
+    // and the button must NOT be disabled.
+    expect(wouldAddStep(8, maxSteps)).toBe(true);
+    expect(8 >= maxSteps).toBe(false); // button's disabled bound
+
+    expect(wouldAddStep(11, maxSteps)).toBe(true); // 11 -> 12 still allowed
+    expect(wouldAddStep(12, maxSteps)).toBe(false); // hard cap at 12, matches server's CHAIN_MAX_STEPS_CHAIN_GANG
+
+    // canSave's `steps.length <= maxSteps` bound
+    expect(9 <= maxSteps).toBe(true);
+    expect(12 <= maxSteps).toBe(true);
+    expect(13 <= maxSteps).toBe(false);
+  });
+
+  it('owning an unrelated perk does not raise the chain step cap', () => {
+    const maxSteps = chainMaxSteps(
+      hasChainGangFromEconomy({ purchasedPerks: ['secondShift', 'nightShiftForeman'] }),
+    );
+    expect(maxSteps).toBe(8);
   });
 });

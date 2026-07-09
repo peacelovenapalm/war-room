@@ -117,6 +117,12 @@ export interface EconomySnapshotClient {
   vacationMode: boolean;
   bayCount: number;
   ledger: Array<{ ts: number; delta: number; currency: 'cash' | 'reputation'; reason: string }>;
+  /** Mirrors server/src/economyStore.ts's EconomySnapshot.purchasedPerks
+   *  (PerkId[] — see server/src/economyConstants.ts's PERK_IDS, e.g.
+   *  'chainGang'). Kept as the raw id list rather than a single derived
+   *  boolean since more than one perk consumer may need this (F3 follow-up:
+   *  ChainBuilderPanel is the first). */
+  purchasedPerks: string[];
 }
 
 /** Rolling client-side window — WorldEventBanner.tsx only ever shows the
@@ -847,6 +853,7 @@ export function useExtensionMessages(
           vacationMode: msg.vacationMode as boolean,
           bayCount: msg.bayCount as number,
           ledger: (msg.ledger as EconomySnapshotClient['ledger']) ?? [],
+          purchasedPerks: Array.isArray(msg.purchasedPerks) ? (msg.purchasedPerks as string[]) : [],
         });
       } else if (msg.type === 'chainRunUpdate') {
         const run = msg.run as ChainRunClient;

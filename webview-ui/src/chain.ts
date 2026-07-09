@@ -65,9 +65,26 @@ export interface ChainStepDefInput {
   continueOnError?: boolean;
 }
 
-/** Mirrors server/src/chainStore.ts's CHAIN_MAX_STEPS — a client-side hint
- *  only, the server validates for real. */
+/** Mirrors server/src/chainStore.ts's CHAIN_MAX_STEPS/
+ *  CHAIN_MAX_STEPS_CHAIN_GANG — client-side hints only, the server's own
+ *  chainMaxSteps() validates for real (F3 follow-up: these used to be a
+ *  flat, perk-unaware constant — see chainMaxSteps() below for the
+ *  perk-aware effective cap; nothing should read CHAIN_MAX_STEPS directly
+ *  once a perk state is available). */
 export const CHAIN_MAX_STEPS = 8;
+/** Chain Gang perk (800 Cash) cap — mirrors server/src/chainStore.ts's
+ *  CHAIN_MAX_STEPS_CHAIN_GANG. */
+export const CHAIN_MAX_STEPS_CHAIN_GANG = 12;
+
+/** Effective client-side step cap for the given perk ownership — 8 base,
+ *  12 with Chain Gang. Mirrors server/src/chainStore.ts's chainMaxSteps()
+ *  (same name, deliberately, for grep-ability across client/server) — this
+ *  is a UX hint only, the server enforces the real cap. `hasChainGang`
+ *  must default to false when perk state is unknown (economy still
+ *  loading) — never fail-open to the perked cap. */
+export function chainMaxSteps(hasChainGang: boolean): number {
+  return hasChainGang ? CHAIN_MAX_STEPS_CHAIN_GANG : CHAIN_MAX_STEPS;
+}
 
 interface ChainRunStatusSpec {
   glyph: string;
