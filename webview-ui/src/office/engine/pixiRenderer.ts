@@ -697,7 +697,11 @@ export function renderBayGhost(
   border.clear();
   border.visible = true;
   dashedRect(border, x, y, w, h, 2, 2, VOID_TILE_OUTLINE_COLOR);
-  label.text = `LOCKED\n$${bounds.cost}`;
+  // Pixi re-rasterizes the text texture on every `.text` write, even when
+  // the value is unchanged — guard against reassigning it every frame
+  // (this pegged the render loop's CPU when tested against a real browser).
+  const nextText = `LOCKED\n$${bounds.cost}`;
+  if (label.text !== nextText) label.text = nextText;
   label.style.stroke = { color: OVERLAY_GLYPH_OUTLINE_COLOR, width: 2 };
   label.position.set(x + w / 2, y + h / 2);
   label.visible = true;
