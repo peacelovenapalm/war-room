@@ -5,6 +5,7 @@ import { LAYOUT_SAVE_DEBOUNCE_MS, ZOOM_MAX, ZOOM_MIN } from '../constants.js';
 import type { ExpandDirection } from '../office/editor/editorActions.js';
 import {
   canPlaceFurniture,
+  commitBuyFurniture,
   commitExpandOffice,
   commitRoomTag,
   commitSell,
@@ -14,6 +15,7 @@ import {
   moveFurniture,
   paintTile,
   placeFurniture,
+  PRICED_FURNITURE_TYPES,
   removeFurniture,
   rotateFurniture,
   toggleFurnitureState,
@@ -476,8 +478,37 @@ export function useEditorActions(
     [getOfficeState, applyEdit],
   );
 
+  // ── Server-authoritative build actions (G2, GAME-DESIGN §5.7) ─────────
+  // Cash is server-authoritative — never a local optimistic mutation. Each
+  // handler POSTs, then applies the SERVER's returned layout on {ok:true}
+  // (rebuildFromLayout only — no saveLayout round-trip, the server already
+  // persisted it) or shows `reason` on {ok:false}. Not pushed onto the
+  // undo stack: undoing a Cash spend without a matching server-side refund
+  // would silently desync Cash from the layout (documented scope decision).
+  const [buildActionMessage, setBuildActionMessage] = useState<string | null>(null);
+  const buildMessageTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+
+  const showBuildMessage = useCallback((message: string) => {
+    if (buildMessageTimerRef.current) clearTimeout(buildMessageTimerRef.current);
+    setBuildActionMessage(message);
+    buildMessageTimerRef.current = setTimeout(
+      () => setBuildActionMessage(null),
+      BUILD_MESSAGE_DISPLAY_MS,
+    );
+  }, []);
+
+  const applyServerLayout = useCallback(
+    (layout: OfficeLayout) => {
+      const os = getOfficeState();
+      os.rebuildFromLayout(layout);
+      setLastSavedLayout(layout);
+      setEditorTick((n) => n + 1);
+    },
+    [getOfficeState, setLastSavedLayout],
+  );
+
   const handleEditorTileAction = useCallback(
-    (col: number, row: number) => {
+    async (col: number, row: number) => {
       const os = getOfficeState();
       let layout = os.getLayout();
       let effectiveCol = col;
@@ -572,6 +603,18 @@ export function useEditorActions(
         } else {
           const placementRow = getWallPlacementRow(type, row);
           if (!canPlaceFurniture(layout, type, col, placementRow)) return;
+          if (PRICED_FURNITURE_TYPES.has(type)) {
+            // Priced furniture must debit Cash via the paid API — the
+            // free client-side write below is for unpriced types only
+            // (KICKOFF v1.1 item F4).
+            const result = await commitBuyFurniture(type, col, placementRow);
+            if (result.ok) {
+              applyServerLayout(result.layout);
+            } else {
+              showBuildMessage(result.reason);
+            }
+            return;
+          }
           const uid = `f-${Date.now()}-${Math.random().toString(36).slice(2, 6)}`;
           const placed: PlacedFurniture = { uid, type, col, row: placementRow };
           if (editorState.pickedFurnitureColor) {
@@ -634,7 +677,7 @@ export function useEditorActions(
         setEditorTick((n) => n + 1);
       }
     },
-    [getOfficeState, editorState, applyEdit, maybeExpand],
+    [getOfficeState, editorState, applyEdit, maybeExpand, applyServerLayout, showBuildMessage],
   );
 
   const handleEditorEraseAction = useCallback(
@@ -651,35 +694,6 @@ export function useEditorActions(
       }
     },
     [getOfficeState, applyEdit],
-  );
-
-  // ── Server-authoritative build actions (G2, GAME-DESIGN §5.7) ─────────
-  // Cash is server-authoritative — never a local optimistic mutation. Each
-  // handler POSTs, then applies the SERVER's returned layout on {ok:true}
-  // (rebuildFromLayout only — no saveLayout round-trip, the server already
-  // persisted it) or shows `reason` on {ok:false}. Not pushed onto the
-  // undo stack: undoing a Cash spend without a matching server-side refund
-  // would silently desync Cash from the layout (documented scope decision).
-  const [buildActionMessage, setBuildActionMessage] = useState<string | null>(null);
-  const buildMessageTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
-
-  const showBuildMessage = useCallback((message: string) => {
-    if (buildMessageTimerRef.current) clearTimeout(buildMessageTimerRef.current);
-    setBuildActionMessage(message);
-    buildMessageTimerRef.current = setTimeout(
-      () => setBuildActionMessage(null),
-      BUILD_MESSAGE_DISPLAY_MS,
-    );
-  }, []);
-
-  const applyServerLayout = useCallback(
-    (layout: OfficeLayout) => {
-      const os = getOfficeState();
-      os.rebuildFromLayout(layout);
-      setLastSavedLayout(layout);
-      setEditorTick((n) => n + 1);
-    },
-    [getOfficeState, setLastSavedLayout],
   );
 
   const handleRoomTypeChange = useCallback(

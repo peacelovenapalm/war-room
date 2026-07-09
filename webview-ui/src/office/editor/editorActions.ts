@@ -336,3 +336,17 @@ export function commitBuyFurniture(
 ): Promise<BuildActionResult> {
   return postBuild('/api/building/furniture', { type, col, row });
 }
+
+/** Furniture types that cost Cash to place (KICKOFF v1.1 item F4) — must
+ *  match server/src/economyConstants.ts's FURNITURE_COST keys exactly.
+ *  The ordinary free-placement edit tool must route these through
+ *  commitBuyFurniture()/the paid API instead of the client-only layout
+ *  write; unpriced types keep the existing free path. */
+export const PRICED_FURNITURE_TYPES = new Set<string>([
+  'PC_FRONT_ON_1',
+  'PC_FRONT_ON_2',
+  'PC_FRONT_ON_3',
+  'WHITEBOARD',
+  'COFFEE_TABLE',
+  'COFFEE',
+]);
