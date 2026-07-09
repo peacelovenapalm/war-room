@@ -10,6 +10,14 @@
  * entries to adopted agents and broadcasts `agentPollState`; `state:"blocked"`
  * renders as the loudest ⚠ NEEDS INPUT badge (SHAPE + TEXT — colorblind rule).
  *
+ * Also (v2 mechanic G3, GAME-DESIGN.md §7.4): each tick reads
+ * ~/.pixel-agents/rate-limit-snapshot.json (written by
+ * bin/rate-limit-snapshot-hook.mjs, a separate statusline hook — tolerant
+ * of the file being absent, since the hook may not be wired yet) and
+ * forwards it to POST /api/budget/report. This is a completely separate
+ * concern from the agents poll above — a failure here never skips the
+ * agents-poll half of the tick, and vice versa.
+ *
  * Failure policy: a malformed CLI payload or an unreachable server SKIPS the
  * tick with a ⚠ log line. The poller never crashes on bad data.
  *
@@ -26,16 +34,20 @@
  */
 
 import { exec } from 'node:child_process';
+import * as fs from 'node:fs';
 import * as os from 'node:os';
+import * as path from 'node:path';
 import { promisify } from 'node:util';
 
 import { normalizeAgents } from './lib/normalize-agents.mjs';
+import { readSnapshotFile } from './lib/rate-limit-snapshot.mjs';
 
 const execAsync = promisify(exec);
 
 const EXEC_TIMEOUT_MS = 20_000;
 const POST_TIMEOUT_MS = 10_000;
 const MIN_INTERVAL_MS = 2_000;
+const BUDGET_SNAPSHOT_FILE = path.join(os.homedir(), '.pixel-agents', 'rate-limit-snapshot.json');
 
 // ── Config ──────────────────────────────────────────────────────
 
@@ -140,6 +152,36 @@ async function tick(cfg) {
   );
 }
 
+/** Budget snapshot forward (v2 mechanic G3, §7.4) — a separate concern
+ *  from the agents-poll tick above; never throws, tolerant of the
+ *  snapshot file being absent (no hook wired yet is expected, not an
+ *  error worth logging every tick). */
+async function forwardBudgetSnapshot(cfg) {
+  const result = readSnapshotFile(BUDGET_SNAPSHOT_FILE, fs);
+  if (!result.ok) {
+    if (result.reason !== 'absent') {
+      log(`⚠ budget snapshot unreadable: ${result.reason}`);
+    }
+    return;
+  }
+  try {
+    const res = await fetch(`${cfg.url}/api/budget/report`, {
+      method: 'POST',
+      headers: {
+        'content-type': 'application/json',
+        authorization: `Bearer ${cfg.token}`,
+      },
+      body: JSON.stringify({ rate_limits: result.snapshot }),
+      signal: AbortSignal.timeout(POST_TIMEOUT_MS),
+    });
+    if (!res.ok) {
+      log(`⚠ budget report failed — server responded ${res.status}`);
+    }
+  } catch (err) {
+    log(`⚠ budget report failed: ${shortErr(err)}`);
+  }
+}
+
 // ── Main loop ───────────────────────────────────────────────────
 
 function log(msg) {
@@ -168,6 +210,7 @@ async function main() {
   // setTimeout chain (not setInterval) so slow ticks never overlap.
   for (;;) {
     await tick(cfg);
+    await forwardBudgetSnapshot(cfg);
     if (cfg.once) return;
     await new Promise((resolve) => setTimeout(resolve, cfg.intervalMs));
   }
