@@ -423,3 +423,29 @@ needed, no manifest schema change, no rebuild-pipeline change. Delete the
 three `*-TEMP.png` files once replaced.
 
 ---
+
+## [G6] Third data point on the HUD-overlap bug class — REVIEW-ON-RETURN
+
+Independently spotted by the orchestrator reviewing `g6-mobile.png`
+directly (not reported by G6's own sub-agent, whose touch-target work was
+correct and thoroughly verified — this is a separate, narrower finding):
+at the iPhone 14 viewport, the STOP ALL control visually crowds the
+STREAK HUD text, the "Instant Detection Active" toast partially covers
+the NIGHT SHIFT status line beneath it, and the bottom toolbar's
+"SOUND: ON" label gets cut off by the "v1.3" version tag overlapping it.
+None of these break function (STOP ALL's own hit target is still intact
+per G6's 44px audit) or violate the colorblind hard rule — this is
+purely visual crowding, not a shape/color signal failure.
+
+This is now the **third independent instance** of the same bug class:
+G5's WorldEventBanner/ProgressionHUD overlap (fixed, `d8b18df`), Greg's
+own item 6 above ("progress tracker overlaps the zoom + button"), and
+now this. Reinforces item 6's recommendation: this needs a dedicated
+HUD/overlay layout pass (consistent z-index + reserved vertical rhythm
+for stacked top-anchored elements: HUD bar → toasts → world-event banner
+→ status chips) across every absolutely-positioned overlay, not more
+one-off `top-N` fixes as each collision is separately discovered.
+Not blocking the batch-3 deploy — v1.0's underlying function is intact,
+this is a polish item for the next iteration.
+
+---

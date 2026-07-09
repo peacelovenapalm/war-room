@@ -1650,3 +1650,43 @@ numbers) reads by shape+text alone.
 No deploy at G5 (batches with G6's batch-3). Proceed to G6 (Phone/PWA)
 once ready; the deferred Track 2 job in TUNING.md is available for a
 future session with Greg present.
+
+### 2026-07-08 (later) — G6 Phone/PWA ✓ DONE (code), orchestrator-verified
+
+G6 (final build milestone) done: `vite-plugin-pwa` install with iOS meta
+tags + TEMP placeholder icons (G5 shipped no generated art — documented
+fallback), responsive bottom-sheet/scroll-strip pass, `touchCamera.ts`
+extracted from G0's inline pinch/pan math + tested, and a real 44px
+touch-target audit that found and fixed 3 genuine bugs (Modal's
+flex-shrunk close button, ~13 hand-rolled controls not routed through the
+shared Button component, BottomToolbar label overlap from missing
+`shrink-0`).
+
+Orchestrator independently verified: commits real (`dc2de12`..`e381145`),
+server 512/512 (unchanged, no server files), webview 264/264 (was 255,
++9 touchCamera.test.ts), check-types/lint/build all clean. Most
+safety-critical claim re-verified at the byte level, not just trusted:
+grepped the actual built `dist/webview/sw.js` and confirmed real
+`registerRoute(/^\/api\//, NetworkOnly, "GET"|"POST")` entries — `/api/*`
+genuinely never served from cache. `StopAllControl` confirmed mounted
+unconditionally in `App.tsx` (one responsive dashboard, not a separate
+phone view).
+
+**Orchestrator's own finding reviewing `g6-mobile.png` directly:** the
+mobile screenshot itself shows real HUD-overlap crowding (STOP ALL vs
+STREAK text, a toast covering NIGHT SHIFT status, "SOUND: ON" cut off by
+the version tag) — a third independent instance of the same overlap bug
+class G5 fixed once and Greg separately flagged live (his item 6). Not a
+functional break or colorblind-rule violation, not blocking; logged to
+TUNING.md recommending a dedicated HUD-layout pass next iteration rather
+than continuing to fix collisions one at a time.
+
+No Lighthouse run this session (judged out of scope for a verification
+action requiring a new package fetch) — substituted real headless-browser
+checks of the same underlying signals (manifest 200+valid, SW reaches
+`active`, offline-fetch to `/api/*` genuinely rejects). Screenshots:
+`.planning/evidence/g6-mobile.png` + `-grayscale.png`.
+
+All 7 milestones (G0-G6) now code/test complete. Proceeding to the
+BATCH-3 deploy (final), then completion: Bark push + final handoff +
+Fable review pass.
