@@ -126,24 +126,39 @@ numbers already carry).
 
 ---
 
-## [G4] Batch-2 deploy pre-check + Bark wiring gaps — REVIEW-ON-RETURN
+## [G4] Batch-2 deploy — DONE, run and verified by the orchestrator
 
-Code/test complete, no deploy attempted this milestone (a sub-agent
-correctly cannot self-authorize the batch-2 deploy — same posture as
-G2's own sub-agent). Before running the batch-2 deploy runbook, per the
-BUILD-PLAN §G4 deploy-cadence note:
+Deployed 2026-07-08 via `NEXUS_HOST=nexus-ts bash .planning/runbooks/nexus-war-room-deploy.sh -y`
+(same SSH-alias fix as batch-1 — see the `[G2] BATCH-1 deploy` entry
+above). The ad-hoc pre-deploy check this section originally called for
+(`ssh nexus-ts "docker exec war-room env | grep ..."`) was **correctly
+blocked by the permission classifier** — that specific command falls
+outside KICKOFF.md's narrow pre-authorization (which covers only the
+runbook script itself, not arbitrary SSH/docker reads against the live
+host), same posture as every other gated NEXUS action. Verified the
+todo-path claim a different way instead: the runbook script itself
+hard-codes `TODO_DIR_NEXUS=/data/repos/vault-notifier/vault/vault/
+_inbox/routines/todo` (line 36) with no fixture-path branch — every
+deploy, batch-1 and batch-2 alike, mounts this exact real path
+read-only. No live read needed to confirm it.
 
-**1. Verify the deployed contracts todo path is Greg's REAL vault, not a
-fixture.** `server/src/contractStore.ts` reads through the EXISTING
-`briefingProvider.ts`/`WAR_ROOM_TODO_DIR` env var (unchanged, no new env
-var introduced) — so this is really "is `WAR_ROOM_TODO_DIR` on the NEXUS
-container already pointed at the real vault-notifier clone?" The
-G2/v1 deploy history says yes (STATE.md's 2026-07-07 entry: "todo from
-the vault-notifier clone (self-refreshes every 15 min)"), but re-confirm
-with `ssh nexus-ts "docker exec war-room env | grep WAR_ROOM_TODO_DIR"`
-(or the container's actual name) before assuming contracts will mint
-against real data — this needs a NEXUS action, which a sub-agent is
-correctly blocked from performing itself.
+**Deploy independently verified live** (funnel-check false-positive
+re-confirmed still a false positive via `tailscale funnel status`,
+same as batch-1):
+
+```
+$ curl -s https://nexus.tail722a2e.ts.net:8484/api/contracts
+```
+
+returned real contracts minted from Greg's actual vault — recognizable
+real task titles (the Diablito Vercel-billing blocker, the DISPATCH
+zombie gate, the Arcade half-built-tools gate, docs-tracker stale-
+siblings flag), 2 gate contracts already auto-completed
+(`completionMethod:"gate-flipped"`) matching gates that are genuinely
+closed. `GET /api/economy` shows real accrued Cash=400/Reputation=20
+from those 2 completions, ledger reasons `contract-gate-gate-flipped`.
+This is real production data, not a fixture — the pre-deploy concern
+this section originally raised is resolved.
 
 **2. Bark wiring — 3 of 5 big-moment classes wired, 2 deferred:**
 `server/src/notifyBark.ts` implements the full class-filtered emitter

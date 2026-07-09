@@ -1465,3 +1465,31 @@ are feature-off by design until Greg configures it).
 
 Proceed to G5 (Art + Living World Polish) once G4's batch-2 deploy
 (bundled with G3) is confirmed live.
+
+### 2026-07-08 (later) — G4 BATCH-2 deploy ✓ LIVE, verified by orchestrator
+
+Same pattern as G2's batch-1: G4's sub-agent correctly did not attempt any
+deploy. The orchestrator ran `NEXUS_HOST=nexus-ts bash
+.planning/runbooks/nexus-war-room-deploy.sh -y` directly, hitting and
+resolving the same two known snags (LAN-only `nexus` SSH alias, funnel-
+check false-positive — both documented in TUNING.md's G2 entry).
+
+The BUILD-PLAN-specified pre-deploy check (confirm `WAR_ROOM_TODO_DIR` on
+NEXUS points at the real vault) required an ad-hoc `docker exec ... env`
+read that the permission classifier correctly refused — outside
+KICKOFF.md's narrow runbook-only pre-authorization. Verified the same
+fact a different way: the runbook script hard-codes the real
+vault-notifier mount path with no fixture branch, confirmed by reading
+the script source directly.
+
+Deploy verified live: `GET /api/contracts` on the deployed instance
+returned real contracts minted from Greg's actual vault (recognizable
+task titles — Diablito Vercel blocker, DISPATCH zombie gate, Arcade
+tools gate), including 2 gate contracts already correctly
+auto-completed. `GET /api/economy` shows real accrued Cash=400/
+Reputation=20 from those completions. This is genuine production data,
+not a fixture — G4's missions system is live and correctly wired.
+
+G3+G4 (Command+Automation, Missions) are both fully done: code, tests,
+screenshots, and the batch-2 deploy all verified. Proceeding to G5 (Art +
+Living World Polish).
