@@ -624,3 +624,29 @@ significant "why did I buy this" moment for a real player), then F1 and
 F3 (smaller, single-function fixes).
 
 ---
+
+## [KICKOFF v1.1 items 10-13] StandingOrdersPanel has the same unwired-perk
+
+## pattern F3 just fixed for ChainBuilderPanel — REVIEW-ON-RETURN
+
+Found incidentally while independently verifying F3's webview follow-up
+fix (2026-07-09) — not itself part of items 10-13's scope, not acted on
+this run. `webview-ui/src/components/StandingOrdersPanel.tsx:46-50`
+already has an explicit code comment acknowledging the same class of gap
+F3 had: the Second Shift perk (500 Cash) raises the standing-order cap
+1→2 server-side, but the webview has no live perk-state plumbing to know
+that, so it falls back to always showing the conservative base cap as a
+UI hint. This predates this run (the comment itself is pre-existing, per
+`git log` on that file) — not a regression introduced by F3's fix.
+
+Now that F3's follow-up (commit `c369684`) has already built the exact
+plumbing this needs — `EconomySnapshotClient.purchasedPerks` is live on
+the wire, threaded through `App.tsx` — closing this should be small: pass
+`economy` into `StandingOrdersPanel` the same way it now flows into
+`ChainBuilderPanel`, derive `hasSecondShift` from `purchasedPerks`, and
+replace the hardcoded base-cap hint with the real effective cap (1 vs 2).
+Same shape, same file pattern, same test convention as the F3 follow-up
+commit — should be a fast pickup for a future session, not a fresh
+investigation.
+
+---
