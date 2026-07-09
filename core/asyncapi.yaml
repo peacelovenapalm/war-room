@@ -660,9 +660,12 @@ components:
         run in progress; focus: terminal fronted). `denied` = a runner
         (or the server, for an unknown/expired id) refused — a decision,
         never an HTTP error. `expired` = no runner answered within the
-        TTL. `exited` = the spawned dispatch process ended (dispatch only).
+        TTL. `exited` = the spawned dispatch process ended on its own
+        (dispatch only). `killed` = the dispatch was explicitly ended via
+        the worker session kill mechanic (KICKOFF v1.1 item 3) — a DISTINCT
+        terminal status, never conflated with a natural `exited`.
       type: string
-      enum: [ringing, answered, denied, expired, exited]
+      enum: [ringing, answered, denied, expired, exited, killed]
 
     EmployeeScores:
       description: >-
@@ -923,7 +926,7 @@ components:
 
     ChainStepStatusValue:
       type: string
-      enum: [pending, running, exited, denied, expired]
+      enum: [pending, running, exited, denied, expired, killed]
 
     ChainRunStatusValue:
       type: string
@@ -974,6 +977,12 @@ components:
           type: string
         stoppedByKillSwitch:
           type: boolean
+        haltReason:
+          type: string
+          description: >-
+            Set when a killed dispatch (KICKOFF v1.1 item 3) halted this
+            run — distinct from stoppedByKillSwitch, which is STOP ALL's
+            own provenance flag.
         createdAt:
           type: integer
         updatedAt:

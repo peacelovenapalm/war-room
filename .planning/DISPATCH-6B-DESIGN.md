@@ -79,3 +79,75 @@ machine, cwd, prompt, requestedBy }` → stored with a UUID, TTL ~10 min.
    telemetry isn't wired renders blind).
 3. A runbook for the dispatch runner (install/uninstall + allowlist editing),
    following the ntfy-kill.sh pattern.
+
+## Amendment (KICKOFF v1.1 item 3, 2026-07-09) — worker session kill: the
+
+## FIRST server->runner IMPERATIVE
+
+Everything above this line describes a runner-POLLS-and-DECIDES model: the
+server only ever queues a request; the runner alone decides whether to act,
+against its own local allowlist. Worker session kill breaks that pattern —
+it is the first case where the server tells a runner to act on something
+ALREADY RUNNING, not just approve/deny something new. This is explicitly
+Greg's spec: "when I click a button on the worker, I should be able to end
+their session," reach = any worker with a known pid, not just runner-spawned
+dispatches.
+
+**Stop-instruction channel.** `POST /api/dispatch/poll`'s response gained a
+second array alongside `pending`: `stop: StopInstruction[]`
+(`server/src/dispatchStore.ts`), drained (popped, at-most-once delivery) for
+that machine on every poll. Two targeting kinds, NEVER conflated on the
+wire or in code:
+
+- `{ kind: 'dispatch', id }` — kill a child THIS runner itself spawned via
+  the existing dispatch queue.
+- `{ kind: 'pid', id, pid }` — kill an OBSERVED session (any worker with a
+  known pid, including one this runner never spawned — e.g. an interactive
+  terminal Greg is watching in the office).
+
+**Containment guarantee 1 — dispatch-id kill is registry-only, no
+exceptions.** The runner (`bin/dispatch-runner.mjs`) keeps an in-memory
+`state.children` Map, keyed by dispatch id, populated in `runDispatch()`
+right after a real `spawn()` and cleared unconditionally on that same
+child's own `'exit'` event. A `{kind:'dispatch'}` stop instruction is
+honored ONLY if its `id` is a live entry in that Map. No match reports a
+`'not-found'` outcome (`dispatchStore.ts`'s `reportStatus` treats this as
+audit-only — it never invents a state transition for a dispatch the runner
+didn't actually touch) — the runner NEVER falls back to a raw
+`process.kill(pid)` on an unregistered id. This registry is per-process,
+per-machine: a runner only ever knows about dispatches it itself spawned
+since it started.
+
+**Containment guarantee 2 — observed-pid kill is verification-gated, no
+exceptions.** A `{kind:'pid'}` stop instruction is honored ONLY after the
+runner's own `verifyClaudeProcess(pid)` confirms locally (via
+`ps -p <pid> -o command=`) that the target is actually a claude process —
+a verification failure denies with a reason (2xx + `{decision:'denied',
+reason}`, the same "deny is a decision, not an error" posture point 3 of
+this doc already established for dispatch/focus). The runner NEVER signals
+a raw, unverified pid off the wire, and this check is NEVER skipped even if
+the same pid happens to also be present in the dispatch registry — the two
+containment mechanisms are deliberately kept independent, with no
+cross-shortcut between them (confirmed by a 2026-07-09 adversarial review
+panel, 4 independent reviewers, distinct lenses: spoofing/cross-machine
+targeting, registry containment, STOP-ALL regression, guardrail
+weakening — all four returned PASS).
+
+**Terminal semantics.** A killed dispatch gets a DISTINCT terminal status
+(`'killed'`, never conflated with a natural `'exited'`) on both the
+dispatch record and, if it belonged to a chain step, on the step itself
+(`ChainStepStatus` gained `'killed'`). A killed chain step halts its own
+run via a new single-run `chainStore.haltRun(runId, reason, now)` — the
+same terminal, never-resumed semantics STOP ALL's `haltAllRunning()`
+already uses, scoped to one run instead of every running run; the two
+halt paths are independent and don't interact (STOP ALL still halts every
+OTHER running run correctly after an individual kill has already
+happened).
+
+**Still true, unchanged by this amendment:** the server never shells out
+(the runner builds and sends every signal locally); the allowlist governs
+NEW work only (dispatch/focus) and is deliberately NOT consulted for kill
+at all — kill's containment is these two independent mechanisms instead;
+full audit trail on both ends (server: dispatch/pid-kill audit log; runner:
+its own append-only audit log, `kill-signal-sent`/`pid-killed`/
+`pid-kill-denied`/etc.).

@@ -121,6 +121,13 @@ export class ChainOrchestrator {
     return this.chains.haltAllRunning(now);
   }
 
+  /** Targeted single-run halt (KICKOFF v1.1 item 3) — called when a killed
+   *  dispatch belonged to a chain step (see onDispatchUpdate's 'killed'
+   *  branch below), never directly by an HTTP route. */
+  haltRun(runId: string, reason: string, now: number = Date.now()): ChainRun | undefined {
+    return this.chains.haltRun(runId, reason, now);
+  }
+
   private enqueueStep(
     runId: string,
     stepIndex: number,
@@ -199,6 +206,21 @@ export class ChainOrchestrator {
       // Bug-fix #2: expired === denied for chain purposes — terminal, no retry.
       this.chains.recordStepResult(runId, stepIndex, 'expired', {}, now);
       this.chains.failRun(runId, 'step-expired', now);
+      return;
+    }
+    if (broadcast.status === 'killed') {
+      // KICKOFF v1.1 item 3: a killed dispatch is NOT a failure (it wasn't
+      // given the chance to finish or misbehave) — it halts its run with
+      // the same terminal, never-resumed semantics STOP ALL uses, scoped to
+      // this one run. Never retried, same as denied/expired/failed exits.
+      this.chains.recordStepResult(
+        runId,
+        stepIndex,
+        'killed',
+        { exitCode: broadcast.exitCode, resultTail: broadcast.resultTail },
+        now,
+      );
+      this.chains.haltRun(runId, 'step-killed', now);
       return;
     }
     if (broadcast.status === 'exited') {

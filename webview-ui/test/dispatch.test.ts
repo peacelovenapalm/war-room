@@ -11,6 +11,7 @@ import { describe, expect, it } from 'vitest';
 import {
   buildCopyIdLine,
   canFocusAgent,
+  canKillAgent,
   detectSendFailures,
   dismissDispatchEntry,
   DISPATCH_EFFORT_VALUES,
@@ -24,6 +25,7 @@ import {
   type DispatchEntry,
   hasViewableResult,
   joinRootSubpath,
+  machineHasLiveRunner,
   machineSupportsFocus,
   type PendingSend,
   promptRemaining,
@@ -75,6 +77,11 @@ describe('shouldAutoClear', () => {
   it('clears EXITED past the auto-clear age', () => {
     expect(shouldAutoClear('exited', 61_000)).toBe(true);
   });
+
+  it('clears KILLED past the auto-clear age, same as EXITED (KICKOFF v1.1 item 3)', () => {
+    expect(shouldAutoClear('killed', 61_000)).toBe(true);
+    expect(shouldAutoClear('killed', 59_000)).toBe(false);
+  });
 });
 
 describe('dispatchChipLabel', () => {
@@ -105,6 +112,12 @@ describe('dispatchChipLabel', () => {
   it('renders EXITED without a code plainly', () => {
     expect(dispatchChipLabel({ status: 'exited', reason: undefined, exitCode: undefined })).toBe(
       '■ EXITED',
+    );
+  });
+
+  it('renders a distinct KILLED chip, never the EXITED glyph/word (KICKOFF v1.1 item 3)', () => {
+    expect(dispatchChipLabel({ status: 'killed', reason: undefined, exitCode: undefined })).toBe(
+      '✕ KILLED',
     );
   });
 });
@@ -239,6 +252,50 @@ describe('canFocusAgent (drawer FOCUS button eligibility)', () => {
 
   it('is false with neither pid nor machine', () => {
     expect(canFocusAgent(undefined, machines, undefined)).toBe(false);
+  });
+});
+
+describe('machineHasLiveRunner (KICKOFF v1.1 item 3 — kill is NOT gated by the focus flag)', () => {
+  const machines = [
+    { machine: 'MACBOOK', providers: ['claude'], roots: ['/x'], focus: true },
+    { machine: 'MINI', providers: ['claude'], roots: ['/y'], focus: false },
+  ];
+
+  it('is true for ANY live runner, focus-capable or not', () => {
+    expect(machineHasLiveRunner(machines, 'MACBOOK')).toBe(true);
+    expect(machineHasLiveRunner(machines, 'MINI')).toBe(true); // focus:false, still a live runner
+  });
+
+  it('is false for a machine with no runner at all', () => {
+    expect(machineHasLiveRunner(machines, 'NEXUS')).toBe(false);
+  });
+
+  it('is false when no machine is given', () => {
+    expect(machineHasLiveRunner(machines, undefined)).toBe(false);
+  });
+});
+
+describe('canKillAgent (drawer KILL button eligibility — KICKOFF v1.1 item 3)', () => {
+  const machines = [
+    { machine: 'MACBOOK', providers: ['claude'], roots: ['/x'], focus: true },
+    { machine: 'MINI', providers: ['claude'], roots: ['/y'], focus: false },
+  ];
+
+  it('is true with both a pid and ANY live runner, even one without focus enabled', () => {
+    expect(canKillAgent(4242, machines, 'MACBOOK')).toBe(true);
+    expect(canKillAgent(4242, machines, 'MINI')).toBe(true);
+  });
+
+  it('is false with a runner but no pid ("NO PID -- use COPY ID")', () => {
+    expect(canKillAgent(undefined, machines, 'MACBOOK')).toBe(false);
+  });
+
+  it('is false with a pid but no runner at all on that machine', () => {
+    expect(canKillAgent(4242, machines, 'NEXUS')).toBe(false);
+  });
+
+  it('is false with neither pid nor machine', () => {
+    expect(canKillAgent(undefined, machines, undefined)).toBe(false);
   });
 });
 

@@ -282,3 +282,53 @@ describe('STOP ALL mid-chain', () => {
     expect(dispatch.pendingFor('MACBOOK')).toHaveLength(0); // step 2 never enqueued
   });
 });
+
+describe('Worker session kill (KICKOFF v1.1 item 3)', () => {
+  it('a killed dispatch step halts ITS run (not failed) with a distinct step status, and never enqueues a next step', () => {
+    orchestrator.start();
+    const defResult = chains.createDef({
+      name: 'pipeline',
+      steps: [step('s1', 'first'), step('s2', 'second')],
+    });
+    if (!defResult.ok) throw new Error('unreachable');
+    const started = orchestrator.startRun(defResult.def.id);
+    if (!started.ok) throw new Error('unreachable');
+
+    const pending = dispatch.pendingFor('MACBOOK');
+    expect(pending).toHaveLength(1);
+    const id = pending[0].id;
+    dispatch.decide(id, 'accept');
+    dispatch.reportStatus(id, { event: 'killed', exitCode: -1 });
+
+    const run = chains.getRun(started.run.id)!;
+    expect(run.status).toBe('halted'); // terminal, STOP ALL's own semantics — never 'failed'
+    expect(run.haltReason).toBe('step-killed');
+    expect(run.steps[0].status).toBe('killed'); // distinct step status, never 'exited'
+    expect(dispatch.pendingFor('MACBOOK')).toHaveLength(0); // step 2 never enqueued
+  });
+
+  it('killing one run never touches a SEPARATE concurrent run, and STOP ALL still halts everything afterward', () => {
+    orchestrator.start();
+    const defA = chains.createDef({ name: 'x', steps: [step('s1', 'a', { machine: 'MACBOOK' })] });
+    const defB = chains.createDef({ name: 'y', steps: [step('s1', 'b', { machine: 'MINI' })] });
+    if (!defA.ok || !defB.ok) throw new Error('unreachable');
+
+    const runA = orchestrator.startRun(defA.def.id);
+    const runB = orchestrator.startRun(defB.def.id);
+    if (!runA.ok || !runB.ok) throw new Error('unreachable');
+
+    const pendingA = dispatch.pendingFor('MACBOOK');
+    expect(pendingA).toHaveLength(1);
+    dispatch.decide(pendingA[0].id, 'accept');
+    dispatch.reportStatus(pendingA[0].id, { event: 'killed', exitCode: -1 });
+
+    expect(chains.getRun(runA.run.id)?.status).toBe('halted');
+    expect(chains.getRun(runB.run.id)?.status).toBe('running'); // untouched by A's kill
+
+    // Adversarial-review check (c): STOP ALL still halts everything
+    // end-to-end even after an individual kill has already happened.
+    orchestrator.haltAll();
+    expect(chains.getRun(runB.run.id)?.status).toBe('halted');
+    expect(chains.getRun(runA.run.id)?.status).toBe('halted'); // already-halted A is untouched, still halted
+  });
+});

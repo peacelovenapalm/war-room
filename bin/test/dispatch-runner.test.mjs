@@ -8,7 +8,7 @@
  * token/allowlist) are exercised as real subprocess runs.
  */
 
-import { execFileSync } from 'node:child_process';
+import { execFileSync, spawn as spawnReal } from 'node:child_process';
 import { EventEmitter } from 'node:events';
 import * as fs from 'node:fs';
 import * as http from 'node:http';
@@ -18,7 +18,7 @@ import { afterEach, beforeEach, test } from 'node:test';
 import * as assert from 'node:assert/strict';
 import { fileURLToPath } from 'node:url';
 
-import { attemptFocus, tick } from '../dispatch-runner.mjs';
+import { attemptFocus, tick, verifyClaudeProcess } from '../dispatch-runner.mjs';
 
 const RUNNER_PATH = path.join(
   path.dirname(fileURLToPath(import.meta.url)),
@@ -76,11 +76,11 @@ function startStubServer(handler) {
   });
 }
 
-function stubHandler({ pending = [] } = {}) {
+function stubHandler({ pending = [], stop = [] } = {}) {
   return (req, res) => {
     res.writeHead(200, { 'content-type': 'application/json' });
     if (req.url === '/api/dispatch/poll') {
-      res.end(JSON.stringify({ pending }));
+      res.end(JSON.stringify({ pending, stop }));
     } else {
       res.end(JSON.stringify({ ok: true }));
     }
@@ -113,7 +113,7 @@ test('tick: advertises the current allowlist on every poll', async () => {
   const { server, captured, port } = await startStubServer(stubHandler({ pending: [] }));
   const cfg = baseCfg(port);
   const allowlist = { providers: ['claude'], roots: [tmpDir], focus: false };
-  await tick(cfg, { handled: new Set() }, { readAllowlist: () => allowlist });
+  await tick(cfg, { handled: new Set(), children: new Map() }, { readAllowlist: () => allowlist });
   server.close();
 
   const pollReq = captured.find((c) => c.url === '/api/dispatch/poll');
@@ -136,7 +136,7 @@ test('tick: denies a dispatch request outside the allowlisted roots', async () =
   const { server, captured, port } = await startStubServer(stubHandler({ pending: [item] }));
   const cfg = baseCfg(port);
   const allowlist = { providers: ['claude'], roots: [tmpDir], focus: false };
-  await tick(cfg, { handled: new Set() }, { readAllowlist: () => allowlist });
+  await tick(cfg, { handled: new Set(), children: new Map() }, { readAllowlist: () => allowlist });
   server.close();
 
   const decision = captured.find((c) => c.url === '/api/dispatch/req-1/decision');
@@ -153,7 +153,7 @@ test('tick: a corrupt/vanished allowlist denies every pending request', async ()
   // readAllowlist deps override simulates the real function's vanish/corrupt fallback.
   await tick(
     cfg,
-    { handled: new Set() },
+    { handled: new Set(), children: new Map() },
     { readAllowlist: () => ({ providers: [], roots: [], focus: false }) },
   );
   server.close();
@@ -177,7 +177,7 @@ test('tick: accepts a valid dispatch request, spawns it, and reports started + e
   const spawned = [];
   await tick(
     cfg,
-    { handled: new Set() },
+    { handled: new Set(), children: new Map() },
     {
       readAllowlist: () => allowlist,
       spawn: (cmd, args, opts) => {
@@ -221,7 +221,7 @@ test('tick: exited status carries a resultTail read from the per-run log', async
   const allowlist = { providers: ['claude'], roots: [tmpDir], focus: false };
   await tick(
     cfg,
-    { handled: new Set() },
+    { handled: new Set(), children: new Map() },
     {
       readAllowlist: () => allowlist,
       spawn: () => {
@@ -265,7 +265,7 @@ test('tick: a missing/unreadable log file yields an undefined resultTail, never 
   const allowlist = { providers: ['claude'], roots: [tmpDir], focus: false };
   await tick(
     cfg,
-    { handled: new Set() },
+    { handled: new Set(), children: new Map() },
     { readAllowlist: () => allowlist, spawn: () => fakeChild(0) },
   );
   await new Promise((resolve) => setTimeout(resolve, 150));
@@ -285,7 +285,7 @@ test('tick: focus reports its outcome AS the decision (accept/deny), never a sep
   const allowlist = { providers: [], roots: [], focus: true };
   await tick(
     cfg,
-    { handled: new Set() },
+    { handled: new Set(), children: new Map() },
     {
       readAllowlist: () => allowlist,
       attemptFocus: async () => ({ ok: true }),
@@ -307,7 +307,7 @@ test('tick: focus denies when the allowlist does not grant focus', async () => {
   const cfg = baseCfg(port);
   await tick(
     cfg,
-    { handled: new Set() },
+    { handled: new Set(), children: new Map() },
     {
       readAllowlist: () => ({ providers: [], roots: [], focus: false }),
       attemptFocus: async () => ({ ok: true }), // must not even be consulted
@@ -325,7 +325,7 @@ test('tick: idempotency — a request already in state.handled is never re-decid
   const { server, captured, port } = await startStubServer(stubHandler({ pending: [item] }));
   const cfg = baseCfg(port);
   const allowlist = { providers: ['claude'], roots: [tmpDir], focus: false };
-  const state = { handled: new Set(['req-6']) }; // pre-seeded as already handled
+  const state = { handled: new Set(['req-6']), children: new Map() }; // pre-seeded as already handled
   let spawnCalls = 0;
   await tick(cfg, state, {
     readAllowlist: () => allowlist,
@@ -347,7 +347,7 @@ test('tick: an unreachable server skips the tick without throwing', async () => 
   await assert.doesNotReject(() =>
     tick(
       cfg,
-      { handled: new Set() },
+      { handled: new Set(), children: new Map() },
       { readAllowlist: () => ({ providers: [], roots: [], focus: false }) },
     ),
   );
@@ -359,7 +359,7 @@ test('tick: appends an audit line for a denied request', async () => {
   const cfg = baseCfg(port);
   await tick(
     cfg,
-    { handled: new Set() },
+    { handled: new Set(), children: new Map() },
     { readAllowlist: () => ({ providers: ['claude'], roots: [tmpDir], focus: false }) },
   );
   server.close();
@@ -396,4 +396,291 @@ test('attemptFocus: reports a failed osascript invocation as a deny reason, not 
   const result = await attemptFocus({ pid: 123 }, failingExec);
   assert.equal(result.ok, false);
   assert.match(result.reason, /focus-failed/);
+});
+
+// ── Worker session kill (KICKOFF v1.1 item 3) ────────────────────
+
+test('runDispatch: registers the spawned child in the live-children registry, and clears it on exit', async () => {
+  const item = {
+    id: 'req-registry',
+    action: 'dispatch',
+    provider: 'claude',
+    cwd: tmpDir,
+    prompt: 'hi',
+  };
+  const { server, port } = await startStubServer(stubHandler({ pending: [item] }));
+  const cfg = baseCfg(port);
+  const allowlist = { providers: ['claude'], roots: [tmpDir], focus: false };
+  const state = { handled: new Set(), children: new Map() };
+  let child;
+  await tick(cfg, state, {
+    readAllowlist: () => allowlist,
+    spawn: () => {
+      child = new EventEmitter();
+      child.pid = 4242;
+      child.stdout = new EventEmitter();
+      child.stderr = new EventEmitter();
+      return child; // deliberately never auto-exits — this test drives it
+    },
+  });
+
+  assert.equal(state.children.has('req-registry'), true);
+  assert.equal(state.children.get('req-registry').killRequested, false);
+
+  child.emit('exit', 0);
+  await new Promise((resolve) => setTimeout(resolve, 50));
+  server.close();
+
+  assert.equal(state.children.has('req-registry'), false);
+});
+
+test('worker session kill: a stop instruction for a REGISTERED dispatch id sends SIGTERM and reports a DISTINCT "killed" status, never "exited" — the other concurrent dispatch is unaffected', async () => {
+  const itemA = {
+    id: 'req-kill-a',
+    action: 'dispatch',
+    provider: 'claude',
+    cwd: tmpDir,
+    prompt: 'a',
+  };
+  const itemB = {
+    id: 'req-kill-b',
+    action: 'dispatch',
+    provider: 'claude',
+    cwd: tmpDir,
+    prompt: 'b',
+  };
+  const pollResponses = [
+    { pending: [itemA, itemB], stop: [] },
+    { pending: [], stop: [{ kind: 'dispatch', id: 'req-kill-a' }] },
+  ];
+  let pollCount = 0;
+  const captured = [];
+  const server = http.createServer((req, res) => {
+    let body = '';
+    req.on('data', (c) => (body += c));
+    req.on('end', () => {
+      const parsedBody = body ? JSON.parse(body) : {};
+      captured.push({ url: req.url, method: req.method, body: parsedBody });
+      res.writeHead(200, { 'content-type': 'application/json' });
+      if (req.url === '/api/dispatch/poll') {
+        const resp = pollResponses[Math.min(pollCount, pollResponses.length - 1)];
+        pollCount++;
+        res.end(JSON.stringify(resp));
+      } else {
+        res.end(JSON.stringify({ ok: true }));
+      }
+    });
+  });
+  await new Promise((resolve) => server.listen(0, '127.0.0.1', resolve));
+  const port = server.address().port;
+  const cfg = baseCfg(port);
+  const allowlist = { providers: ['claude'], roots: [tmpDir], focus: false };
+  const state = { handled: new Set(), children: new Map() };
+
+  const children = {};
+  const spawnImpl = (_cmd, args) => {
+    const child = new EventEmitter();
+    child.pid = args[args.length - 1] === 'a' ? 1111 : 2222;
+    child.stdout = new EventEmitter();
+    child.stderr = new EventEmitter();
+    child.kill = (signal) => {
+      child.killedWith = signal;
+    };
+    children[child.pid] = child;
+    return child;
+  };
+
+  // Tick 1: spawns and registers both concurrent dispatches.
+  await tick(cfg, state, { readAllowlist: () => allowlist, spawn: spawnImpl });
+  assert.equal(state.children.size, 2);
+
+  // Tick 2: the poll response now carries a stop instruction for A only.
+  await tick(cfg, state, { readAllowlist: () => allowlist, spawn: spawnImpl });
+
+  const childA = children[1111];
+  const childB = children[2222];
+  assert.equal(childA.killedWith, 'SIGTERM');
+  assert.equal(childB.killedWith, undefined, 'the OTHER concurrent dispatch must be untouched');
+
+  // The OS actually terminating A is what triggers the terminal report —
+  // never reported before the process really exits.
+  childA.emit('exit', null);
+  await new Promise((resolve) => setTimeout(resolve, 50));
+
+  const killedStatus = captured.find(
+    (c) => c.url === '/api/dispatch/req-kill-a/status' && c.body.event === 'killed',
+  );
+  assert.ok(killedStatus, 'expected a distinct "killed" status POST for the killed dispatch');
+  assert.equal(
+    captured.some((c) => c.url === '/api/dispatch/req-kill-a/status' && c.body.event === 'exited'),
+    false,
+    'a killed dispatch must never ALSO report "exited"',
+  );
+
+  // B completes normally, unaffected by A's kill.
+  childB.emit('exit', 0);
+  await new Promise((resolve) => setTimeout(resolve, 50));
+  const exitedStatusB = captured.find(
+    (c) => c.url === '/api/dispatch/req-kill-b/status' && c.body.event === 'exited',
+  );
+  assert.ok(exitedStatusB, 'the other concurrent dispatch must complete normally as "exited"');
+
+  server.close();
+});
+
+test('worker session kill: a stop instruction for an UNREGISTERED dispatch id is a no-op reported as "not-found" — never a raw process.kill(pid) fallback', async () => {
+  const { server, captured, port } = await startStubServer(
+    stubHandler({ pending: [], stop: [{ kind: 'dispatch', id: 'ghost-dispatch' }] }),
+  );
+  const cfg = baseCfg(port);
+  const state = { handled: new Set(), children: new Map() };
+  await tick(cfg, state, { readAllowlist: () => ({ providers: [], roots: [], focus: false }) });
+  server.close();
+
+  const status = captured.find((c) => c.url === '/api/dispatch/ghost-dispatch/status');
+  assert.ok(status, 'expected a status POST reporting the not-found outcome');
+  assert.equal(status.body.event, 'killed');
+  assert.equal(status.body.killOutcome, 'not-found');
+});
+
+test('worker session kill (observed pid): denies and NEVER signals when process verification fails', async () => {
+  const { server, captured, port } = await startStubServer(
+    stubHandler({ pending: [], stop: [{ kind: 'pid', id: 'pk-1', pid: 9999 }] }),
+  );
+  const cfg = baseCfg(port);
+  const state = { handled: new Set(), children: new Map() };
+  let killCalled = false;
+  await tick(cfg, state, {
+    readAllowlist: () => ({ providers: [], roots: [], focus: false }),
+    verifyClaudeProcess: async () => ({ ok: false, reason: 'not-a-claude-process' }),
+    killImpl: () => {
+      killCalled = true;
+    },
+  });
+  server.close();
+
+  assert.equal(killCalled, false, 'must never signal an unverified pid');
+  const status = captured.find((c) => c.url === '/api/pid-kills/pk-1/status');
+  assert.ok(status);
+  assert.equal(status.body.event, 'denied');
+  assert.equal(status.body.reason, 'not-a-claude-process');
+});
+
+test('worker session kill (observed pid): signals SIGTERM and reports "killed" once verification passes', async () => {
+  const { server, captured, port } = await startStubServer(
+    stubHandler({ pending: [], stop: [{ kind: 'pid', id: 'pk-2', pid: 8888 }] }),
+  );
+  const cfg = baseCfg(port);
+  const state = { handled: new Set(), children: new Map() };
+  let killedPid;
+  let killedSignal;
+  await tick(cfg, state, {
+    readAllowlist: () => ({ providers: [], roots: [], focus: false }),
+    verifyClaudeProcess: async () => ({ ok: true }),
+    killImpl: (pid, signal) => {
+      killedPid = pid;
+      killedSignal = signal;
+    },
+  });
+  server.close();
+
+  assert.equal(killedPid, 8888);
+  assert.equal(killedSignal, 'SIGTERM');
+  const status = captured.find((c) => c.url === '/api/pid-kills/pk-2/status');
+  assert.ok(status);
+  assert.equal(status.body.event, 'killed');
+});
+
+// ── verifyClaudeProcess (real `ps`, real processes — no mocking) ─
+
+test('verifyClaudeProcess: denies a pid that does not exist', async () => {
+  const result = await verifyClaudeProcess(999_999);
+  assert.equal(result.ok, false);
+});
+
+test('verifyClaudeProcess: denies an invalid pid without invoking ps', async () => {
+  let execCalled = false;
+  const result = await verifyClaudeProcess(-1, async () => {
+    execCalled = true;
+    return { stdout: '' };
+  });
+  assert.equal(result.ok, false);
+  assert.equal(result.reason, 'invalid-pid');
+  assert.equal(execCalled, false);
+});
+
+test('verifyClaudeProcess: denies a REAL running process whose command line does not mention "claude"', async () => {
+  // stdio 'ignore' — a plain sleep with no children of its own, but keeping
+  // this consistent with the other real-process tests below avoids any
+  // pipe-fd-holds-the-test-runner-open surprise.
+  const child = spawnReal('sleep', ['5'], { stdio: 'ignore' });
+  try {
+    const result = await verifyClaudeProcess(child.pid);
+    assert.equal(result.ok, false);
+    assert.equal(result.reason, 'not-a-claude-process');
+  } finally {
+    child.kill('SIGKILL');
+  }
+});
+
+test('verifyClaudeProcess: accepts a REAL running process whose command line mentions "claude"', async () => {
+  // `exec -a NAME` renames THIS SAME process's argv[0] (no bash-wraps-sleep
+  // parent/child pair) — no real claude binary needed, `ps -o command=`
+  // shows the bounded "claude" token, and there is no separate child to
+  // orphan if this process is signaled. stdio 'ignore': spawning a plain
+  // script here with inherited pipes would otherwise hold this test file's
+  // node process open until the spawned process's own fd is closed.
+  const child = spawnReal('bash', ['-c', 'exec -a claude-fake-session sleep 5'], {
+    stdio: 'ignore',
+  });
+  try {
+    const result = await verifyClaudeProcess(child.pid);
+    assert.equal(result.ok, true);
+  } finally {
+    child.kill('SIGKILL');
+  }
+});
+
+test('worker session kill (observed pid) END-TO-END: a real claude-like process is ACTUALLY terminated — verified via a fresh process probe, not just the HTTP response', async () => {
+  // Same `exec -a` + stdio:'ignore' rationale as above — this test drives a
+  // REAL SIGTERM through the REAL runner code path (no verify/kill mocks),
+  // so a hung/orphaned child here would hang the whole suite for the
+  // process's full lifetime (this exact bug was caught once already: an
+  // earlier version of this test used a bash-wraps-sleep script with
+  // inherited pipes and blocked the poller test suite for a full 300s).
+  const child = spawnReal('bash', ['-c', 'exec -a claude-observed-session sleep 300'], {
+    stdio: 'ignore',
+  });
+  await new Promise((resolve) => setTimeout(resolve, 150)); // let it actually start
+
+  const { server, captured, port } = await startStubServer(
+    stubHandler({ pending: [], stop: [{ kind: 'pid', id: 'observed-1', pid: child.pid }] }),
+  );
+  const cfg = baseCfg(port);
+  const state = { handled: new Set(), children: new Map() };
+
+  // Deliberately NOT mocking verifyClaudeProcess/killImpl — this exercises
+  // the REAL `ps`-based verification and a REAL SIGTERM against a REAL pid.
+  await tick(cfg, state, { readAllowlist: () => ({ providers: [], roots: [], focus: false }) });
+  server.close();
+
+  const status = captured.find((c) => c.url === '/api/pid-kills/observed-1/status');
+  assert.ok(status, 'expected a pid-kill status POST');
+  assert.equal(status.body.event, 'killed');
+
+  await new Promise((resolve) => setTimeout(resolve, 300));
+  let stillAlive = true;
+  try {
+    process.kill(child.pid, 0); // existence probe (signal 0) — throws ESRCH once gone
+  } catch {
+    stillAlive = false;
+  }
+  assert.equal(stillAlive, false, 'the real process must actually be dead, not just reported so');
+});
+
+test('worker session kill (observed pid): an UNKNOWN pid has no server/runner path at all — the UI disables the button instead (nothing to test at this layer)', () => {
+  // Documented no-op: see AgentDrawer.tsx's disabled-button state and
+  // KICKOFF v1.1 item 3's explicit "don't build a server/runner path for
+  // this case" instruction.
+  assert.ok(true);
 });

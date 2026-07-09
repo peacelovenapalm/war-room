@@ -247,7 +247,13 @@ export interface DispatchUpdate {
 
 export type DispatchActionValue = 'dispatch' | 'focus';
 
-export type DispatchStatusValue = 'ringing' | 'answered' | 'denied' | 'expired' | 'exited';
+export type DispatchStatusValue =
+  | 'ringing'
+  | 'answered'
+  | 'denied'
+  | 'expired'
+  | 'exited'
+  | 'killed';
 
 export interface EmployeeSnapshot {
   type: 'employeeSnapshot';
@@ -357,6 +363,7 @@ export interface ChainRun {
   steps: ChainStepRun[];
   failReason?: string;
   stoppedByKillSwitch?: boolean;
+  haltReason?: string;
   createdAt: number;
   updatedAt: number;
 }
@@ -374,7 +381,13 @@ export interface ChainStepRun {
   finishedAt?: number;
 }
 
-export type ChainStepStatusValue = 'pending' | 'running' | 'exited' | 'denied' | 'expired';
+export type ChainStepStatusValue =
+  | 'pending'
+  | 'running'
+  | 'exited'
+  | 'denied'
+  | 'expired'
+  | 'killed';
 
 export interface StandingOrderUpdate {
   type: 'standingOrderUpdate';

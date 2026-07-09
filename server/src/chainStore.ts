@@ -65,7 +65,7 @@ export interface ChainDef {
   updatedAt: number;
 }
 
-export type ChainStepStatus = 'pending' | 'running' | 'exited' | 'denied' | 'expired';
+export type ChainStepStatus = 'pending' | 'running' | 'exited' | 'denied' | 'expired' | 'killed';
 
 export interface ChainStepRun {
   stepId: string;
@@ -93,6 +93,9 @@ export interface ChainRun {
   /** Set by STOP ALL (§7.5) — re-enable/resume semantics don't apply to a
    *  halted RUN (only to standing orders), but this flags provenance. */
   stoppedByKillSwitch?: boolean;
+  /** Set by haltRun() (KICKOFF v1.1 item 3 — a killed dispatch halts its own
+   *  chain run, same terminal semantics as STOP ALL but scoped to one run). */
+  haltReason?: string;
   createdAt: number;
   updatedAt: number;
 }
@@ -292,7 +295,7 @@ export class ChainStore {
   recordStepResult(
     runId: string,
     stepIndex: number,
-    status: 'exited' | 'denied' | 'expired',
+    status: 'exited' | 'denied' | 'expired' | 'killed',
     opts: { exitCode?: number; resultTail?: string } = {},
     now: number = Date.now(),
   ): ChainRun | undefined {
@@ -363,6 +366,23 @@ export class ChainStore {
     if (halted.length > 0) this.persistRuns();
     for (const run of halted) this.emit(run);
     return halted;
+  }
+
+  /** Targeted single-run halt (KICKOFF v1.1 item 3): a killed dispatch that
+   *  belonged to a chain step halts THAT run, same terminal semantics as
+   *  haltAllRunning (never resumed, in-flight work already spent) but
+   *  scoped to one run instead of every running run. A no-op (not an error)
+   *  if the run is unknown or already non-running. */
+  haltRun(runId: string, reason: string, now: number = Date.now()): ChainRun | undefined {
+    const run = this.ensureRunsLoaded().get(runId);
+    if (!run || run.status !== 'running') return undefined;
+    run.status = 'halted';
+    run.haltReason = reason;
+    run.updatedAt = now;
+    this.persistRuns();
+    this.audit('run-halted', run);
+    this.emit(run);
+    return run;
   }
 
   private emit(run: ChainRun): void {

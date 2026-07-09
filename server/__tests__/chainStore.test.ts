@@ -165,6 +165,31 @@ describe('ChainStore run lifecycle', () => {
     expect(s.getRun(run2.id)?.status).toBe('completed'); // untouched
   });
 
+  it('haltRun (KICKOFF v1.1 item 3) halts ONLY the targeted run and records a reason — never touches other running runs', () => {
+    const s = new ChainStore(defsPath, runsPath, auditPath);
+    const defResult = s.createDef({ name: 'x', steps: [step('s1', 'a')] });
+    if (!defResult.ok) throw new Error('unreachable');
+    const run1 = s.createRun(defResult.def);
+    const run2 = s.createRun(defResult.def);
+    const halted = s.haltRun(run1.id, 'step-killed');
+    expect(halted?.status).toBe('halted');
+    expect(halted?.haltReason).toBe('step-killed');
+    expect(s.getRun(run1.id)?.status).toBe('halted');
+    expect(s.getRun(run2.id)?.status).toBe('running'); // the OTHER run is untouched
+  });
+
+  it('haltRun is a no-op (not an error) for an unknown or already non-running run', () => {
+    const s = new ChainStore(defsPath, runsPath, auditPath);
+    expect(s.haltRun('nonexistent', 'x')).toBeUndefined();
+
+    const defResult = s.createDef({ name: 'x', steps: [step('s1', 'a')] });
+    if (!defResult.ok) throw new Error('unreachable');
+    const run = s.createRun(defResult.def);
+    s.completeRun(run.id);
+    expect(s.haltRun(run.id, 'too-late')).toBeUndefined();
+    expect(s.getRun(run.id)?.status).toBe('completed'); // unchanged, not overwritten to halted
+  });
+
   it('persists runs across a fresh instance pointed at the same files', () => {
     const s1 = new ChainStore(defsPath, runsPath, auditPath);
     const defResult = s1.createDef({ name: 'x', steps: [step('s1', 'a')] });

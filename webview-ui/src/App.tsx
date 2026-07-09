@@ -240,6 +240,17 @@ function App() {
     setDrawerAgentId((prev) => (prev === focusId ? null : focusId));
   }, []);
 
+  // e2e-only: drives the exact same path a real canvas click on an agent
+  // sprite takes (TriagePanel's onOpenAgent below is this same function) —
+  // avoids the pixel-hunting/geometry-brittle alternative of hit-testing
+  // the Pixi canvas directly (same tradeoff testHooks.ts's selectAgent
+  // already makes for the canvas's own selection state).
+  useEffect(() => {
+    if (!isE2E) return;
+    if (!window.__pixelAgentsTestHooks) window.__pixelAgentsTestHooks = {};
+    window.__pixelAgentsTestHooks.openAgentDrawer = handleClick;
+  }, [handleClick]);
+
   const handleDispatchTodo = useCallback((prompt: string) => {
     setCallPrefill({ prompt });
     setIsCallOpen(true);

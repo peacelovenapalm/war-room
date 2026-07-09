@@ -443,6 +443,171 @@ describe('DispatchStore persistence', () => {
   });
 });
 
+describe('DispatchStore worker session kill (KICKOFF v1.1 item 3)', () => {
+  it('requestStop queues a stop instruction ONLY for an in-flight (answered) record', () => {
+    const s = new DispatchStore(statePath, auditPath);
+    const enq = s.enqueue({
+      action: 'dispatch',
+      machine: 'MACBOOK',
+      provider: 'claude',
+      cwd: '/x',
+      prompt: 'p',
+    });
+    if (!enq.ok) throw new Error('unreachable');
+
+    // Still ringing — nothing spawned yet, nothing to stop.
+    expect(s.requestStop(enq.record.id)).toEqual({ ok: false, reason: 'not-in-flight' });
+    expect(s.drainStopsFor('MACBOOK')).toEqual([]);
+
+    s.decide(enq.record.id, 'accept', { pid: 111 });
+    expect(s.requestStop(enq.record.id)).toEqual({ ok: true });
+    expect(s.drainStopsFor('MACBOOK')).toEqual([{ kind: 'dispatch', id: enq.record.id }]);
+    // Drained — a second read is empty (at-most-once delivery).
+    expect(s.drainStopsFor('MACBOOK')).toEqual([]);
+  });
+
+  it('requestStop on an unknown id is a rejected decision, not a thrown error', () => {
+    const s = new DispatchStore(statePath, auditPath);
+    expect(s.requestStop('does-not-exist')).toEqual({ ok: false, reason: 'unknown-id' });
+  });
+
+  it('requestStop on an already-terminal record is rejected — nothing left to stop', () => {
+    const s = new DispatchStore(statePath, auditPath);
+    const enq = s.enqueue({
+      action: 'dispatch',
+      machine: 'MACBOOK',
+      provider: 'claude',
+      cwd: '/x',
+      prompt: 'p',
+    });
+    if (!enq.ok) throw new Error('unreachable');
+    s.decide(enq.record.id, 'accept', {});
+    s.reportStatus(enq.record.id, { event: 'exited', exitCode: 0 });
+    expect(s.requestStop(enq.record.id)).toEqual({ ok: false, reason: 'not-in-flight' });
+  });
+
+  it('reportStatus("killed") transitions an answered record to the DISTINCT terminal "killed" status, never "exited"', () => {
+    const s = new DispatchStore(statePath, auditPath);
+    const enq = s.enqueue({
+      action: 'dispatch',
+      machine: 'MACBOOK',
+      provider: 'claude',
+      cwd: '/x',
+      prompt: 'p',
+    });
+    if (!enq.ok) throw new Error('unreachable');
+    s.decide(enq.record.id, 'accept', {});
+    s.reportStatus(enq.record.id, { event: 'killed', exitCode: -1 });
+    const recent = s.getRecent();
+    const record = recent.find((r) => r.id === enq.record.id);
+    expect(record?.status).toBe('killed');
+    expect(s.getActive()).toHaveLength(0); // killed is terminal — no longer "active"
+  });
+
+  it('reportStatus("killed", killOutcome:"not-found") is audit-only — never invents a state transition', () => {
+    const s = new DispatchStore(statePath, auditPath);
+    const enq = s.enqueue({
+      action: 'dispatch',
+      machine: 'MACBOOK',
+      provider: 'claude',
+      cwd: '/x',
+      prompt: 'p',
+    });
+    if (!enq.ok) throw new Error('unreachable');
+    s.decide(enq.record.id, 'accept', {});
+    s.reportStatus(enq.record.id, { event: 'killed', killOutcome: 'not-found' });
+    const recent = s.getRecent();
+    expect(recent.find((r) => r.id === enq.record.id)?.status).toBe('answered'); // unchanged
+  });
+
+  it('reportStatus("killed") never overwrites an already-terminal record (race: natural exit beat the stop instruction)', () => {
+    const s = new DispatchStore(statePath, auditPath);
+    const enq = s.enqueue({
+      action: 'dispatch',
+      machine: 'MACBOOK',
+      provider: 'claude',
+      cwd: '/x',
+      prompt: 'p',
+    });
+    if (!enq.ok) throw new Error('unreachable');
+    s.decide(enq.record.id, 'accept', {});
+    s.reportStatus(enq.record.id, { event: 'exited', exitCode: 0 });
+    s.reportStatus(enq.record.id, { event: 'killed', exitCode: -1 });
+    const recent = s.getRecent();
+    expect(recent.find((r) => r.id === enq.record.id)?.status).toBe('exited'); // unchanged
+  });
+
+  it('requestPidKill validates machine + pid, and reportPidKillStatus/getPidKillStatus round-trip', () => {
+    const s = new DispatchStore(statePath, auditPath);
+    expect(s.requestPidKill('', 123).ok).toBe(false);
+    expect(s.requestPidKill('MACBOOK', -1).ok).toBe(false);
+    expect(s.requestPidKill('MACBOOK', 1.5).ok).toBe(false);
+
+    const result = s.requestPidKill('MACBOOK', 4242);
+    expect(result.ok).toBe(true);
+    if (!result.ok) throw new Error('unreachable');
+
+    expect(s.getPidKillStatus(result.id)).toEqual({ found: true, status: 'pending' });
+    expect(s.drainStopsFor('MACBOOK')).toEqual([{ kind: 'pid', id: result.id, pid: 4242 }]);
+
+    s.reportPidKillStatus(result.id, 'killed', undefined);
+    expect(s.getPidKillStatus(result.id)).toEqual({
+      found: true,
+      status: 'killed',
+      reason: undefined,
+    });
+  });
+
+  it('reportPidKillStatus/getPidKillStatus honor a denial with its reason', () => {
+    const s = new DispatchStore(statePath, auditPath);
+    const result = s.requestPidKill('MACBOOK', 4242);
+    if (!result.ok) throw new Error('unreachable');
+    s.reportPidKillStatus(result.id, 'denied', 'not-a-claude-process');
+    expect(s.getPidKillStatus(result.id)).toEqual({
+      found: true,
+      status: 'denied',
+      reason: 'not-a-claude-process',
+    });
+  });
+
+  it('getPidKillStatus on an unknown id is honestly { found: false }, never a throw', () => {
+    const s = new DispatchStore(statePath, auditPath);
+    expect(s.getPidKillStatus('ghost')).toEqual({ found: false });
+  });
+
+  it('reportPidKillStatus on an unknown id is a safe no-op, still { ok: true }', () => {
+    const s = new DispatchStore(statePath, auditPath);
+    expect(s.reportPidKillStatus('ghost', 'killed', undefined)).toEqual({ ok: true });
+  });
+
+  it('drainStopsFor keeps each machine independent — draining one never affects another', () => {
+    const s = new DispatchStore(statePath, auditPath);
+    const enqA = s.enqueue({
+      action: 'dispatch',
+      machine: 'MACBOOK',
+      provider: 'claude',
+      cwd: '/x',
+      prompt: 'a',
+    });
+    const enqB = s.enqueue({
+      action: 'dispatch',
+      machine: 'MINI',
+      provider: 'claude',
+      cwd: '/x',
+      prompt: 'b',
+    });
+    if (!enqA.ok || !enqB.ok) throw new Error('unreachable');
+    s.decide(enqA.record.id, 'accept', {});
+    s.decide(enqB.record.id, 'accept', {});
+    s.requestStop(enqA.record.id);
+    s.requestStop(enqB.record.id);
+
+    expect(s.drainStopsFor('MACBOOK')).toEqual([{ kind: 'dispatch', id: enqA.record.id }]);
+    // MINI's own stop instruction is still queued — untouched by MACBOOK's drain.
+    expect(s.drainStopsFor('MINI')).toEqual([{ kind: 'dispatch', id: enqB.record.id }]);
+  });
+});
+
 describe('DispatchStore audit log', () => {
   it('appends an append-only JSONL line for enqueue, decision, status, and expiry', () => {
     const s = new DispatchStore(statePath, auditPath);

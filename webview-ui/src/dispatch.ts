@@ -22,7 +22,14 @@ export type DispatchProvider = (typeof DISPATCH_PROVIDERS)[number];
  *  UI-level filter only, applied against whatever a runner advertises. */
 export const DISPATCH_UI_PROVIDERS: readonly DispatchProvider[] = ['claude', 'codex'];
 
-export const DISPATCH_STATUSES = ['ringing', 'answered', 'denied', 'expired', 'exited'] as const;
+export const DISPATCH_STATUSES = [
+  'ringing',
+  'answered',
+  'denied',
+  'expired',
+  'exited',
+  'killed',
+] as const;
 export type DispatchStatusValue = (typeof DISPATCH_STATUSES)[number];
 
 export type DispatchActionValue = 'dispatch' | 'focus';
@@ -105,6 +112,9 @@ export const DISPATCH_STATUS_CHIPS: Record<DispatchStatusValue, DispatchStatusSp
   denied: { glyph: '⊘', word: 'DENIED' },
   expired: { glyph: '○', word: 'EXPIRED' },
   exited: { glyph: '■', word: 'EXITED' },
+  // KICKOFF v1.1 item 3 (worker session kill) — a distinct terminal status,
+  // never conflated with a natural EXITED.
+  killed: { glyph: '✕', word: 'KILLED' },
 };
 
 /** Mirrors DispatchBroadcast (core/src/messages.ts DispatchUpdate) — the shape
@@ -281,6 +291,32 @@ export function canFocusAgent(
   machine: string | undefined,
 ): boolean {
   return pid !== undefined && machineSupportsFocus(machines, machine);
+}
+
+/** True when `machine` has ANY live runner advertisement — unlike
+ *  machineSupportsFocus, kill isn't gated by the allowlist's `focus` flag
+ *  (a runner honors a stop instruction unconditionally; see
+ *  dispatchStore.ts's StopInstruction doc for the two containment
+ *  mechanisms that gate it instead). */
+export function machineHasLiveRunner(
+  machines: DispatchMachine[],
+  machine: string | undefined,
+): boolean {
+  if (!machine) return false;
+  return machines.some((m) => m.machine === machine);
+}
+
+/** Drawer KILL button eligibility (KICKOFF v1.1 item 3 — reach: any worker
+ *  with a known pid, not just runner-spawned dispatches). Needs a real pid
+ *  AND a live runner on that machine to have any chance of delivering the
+ *  stop instruction — pure so the two honest disabled states ("NO PID" vs
+ *  "NO RUNNER") are unit-testable without a rendering harness. */
+export function canKillAgent(
+  pid: number | undefined,
+  machines: DispatchMachine[],
+  machine: string | undefined,
+): boolean {
+  return pid !== undefined && machineHasLiveRunner(machines, machine);
 }
 
 // ── Send-failure detection ──────────────────────────────────────────

@@ -1,6 +1,6 @@
 import { useEffect, useState } from 'react';
 
-import { buildCopyIdLine, canFocusAgent, type DispatchMachine } from '../dispatch.js';
+import { buildCopyIdLine, canFocusAgent, canKillAgent, type DispatchMachine } from '../dispatch.js';
 import { deriveVisualState, STATE_CHIPS } from '../office/agentState.js';
 import { formatAge } from '../office/crisis.js';
 import type { OfficeState } from '../office/engine/officeState.js';
@@ -12,6 +12,18 @@ import { Modal } from './ui/Modal.js';
 
 /** Refresh cadence for the FOCUS availability check while the drawer is open. */
 const REFRESH_INTERVAL_MS = 10_000;
+
+/** Cadence for polling the KILL outcome (KICKOFF v1.1 item 3) — the actual
+ *  kill happens on the target machine's NEXT poll tick (~5s by default),
+ *  after which the runner reports back; this just needs to catch that
+ *  report reasonably promptly, not in real time. */
+const KILL_POLL_INTERVAL_MS = 1_000;
+/** Give up waiting for a runner report after this long and show an honest
+ *  "no response" denial rather than spinning forever (e.g. the machine's
+ *  runner went offline mid-request). */
+const KILL_RESULT_TIMEOUT_MS = 15_000;
+
+type KillPhase = 'idle' | 'confirm' | 'pending' | 'killed' | 'denied';
 
 interface AgentDrawerProps {
   agentId: number | null;
@@ -51,6 +63,14 @@ export function AgentDrawer({
   // not be called directly in render — react-hooks/purity).
   const [now, setNow] = useState(() => Date.now());
 
+  // Worker session kill (KICKOFF v1.1 item 3): two-step confirm (mirrors
+  // StopAllControl's pattern), then a transient 'pending' state while the
+  // target machine's runner is polled and reports back, landing on a
+  // terminal 'killed' or 'denied'.
+  const [killPhase, setKillPhase] = useState<KillPhase>('idle');
+  const [killReason, setKillReason] = useState<string | undefined>(undefined);
+  const [killRequestId, setKillRequestId] = useState<string | null>(null);
+
   const isOpen = agentId !== null;
 
   useEffect(() => {
@@ -82,7 +102,47 @@ export function AgentDrawer({
 
   useEffect(() => {
     setCopied(false);
+    setKillPhase('idle');
+    setKillReason(undefined);
+    setKillRequestId(null);
   }, [agentId]);
+
+  // Poll the pid-kill outcome (no WS broadcast for this ephemeral,
+  // in-memory-only lifecycle — see PidKillRecord's doc in dispatchStore.ts).
+  useEffect(() => {
+    if (killPhase !== 'pending' || !killRequestId) return;
+    let cancelled = false;
+    const startedAt = Date.now();
+    const interval = setInterval(() => {
+      void fetch(`/api/agents/kill/${killRequestId}`)
+        .then(async (res) => {
+          if (!res.ok) return null;
+          return (await res.json()) as { status: 'pending' | 'killed' | 'denied'; reason?: string };
+        })
+        .then((body) => {
+          if (cancelled) return;
+          if (body?.status === 'killed') {
+            setKillPhase('killed');
+          } else if (body?.status === 'denied') {
+            setKillPhase('denied');
+            setKillReason(body.reason);
+          } else if (Date.now() - startedAt > KILL_RESULT_TIMEOUT_MS) {
+            setKillPhase('denied');
+            setKillReason('no response from runner');
+          }
+        })
+        .catch(() => {
+          if (!cancelled && Date.now() - startedAt > KILL_RESULT_TIMEOUT_MS) {
+            setKillPhase('denied');
+            setKillReason('no response from runner');
+          }
+        });
+    }, KILL_POLL_INTERVAL_MS);
+    return () => {
+      cancelled = true;
+      clearInterval(interval);
+    };
+  }, [killPhase, killRequestId]);
 
   if (agentId === null) return null;
   const ch = officeState.characters.get(agentId);
@@ -102,6 +162,10 @@ export function AgentDrawer({
   // never send a request we know the runner will deny.
   const pid = ch.pid;
   const canFocus = canFocusAgent(pid, machines, ch.machine);
+  // Worker session kill (KICKOFF v1.1 item 3): same reach as FOCUS's pid
+  // requirement, but gated on ANY live runner rather than one specifically
+  // advertising focus support — see canKillAgent's doc.
+  const canKill = canKillAgent(pid, machines, ch.machine);
   const copyLine = buildCopyIdLine(ch.machine, ch.cwd, ch.sessionId);
 
   const handleFocus = () => {
@@ -117,6 +181,34 @@ export function AgentDrawer({
 
   const handleCopy = () => {
     void navigator.clipboard.writeText(copyLine).then(() => setCopied(true));
+  };
+
+  const handleKill = () => {
+    if (!canKill || !ch.machine || pid === undefined) return;
+    if (killPhase === 'idle') {
+      setKillPhase('confirm');
+      return;
+    }
+    if (killPhase !== 'confirm') return; // pending/killed/denied — nothing left to click
+    setKillPhase('pending');
+    void fetch('/api/agents/kill', {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ machine: ch.machine, pid }),
+    })
+      .then((res) => res.json())
+      .then((body: { ok: boolean; id?: string; reason?: string }) => {
+        if (body.ok && body.id) {
+          setKillRequestId(body.id);
+        } else {
+          setKillPhase('denied');
+          setKillReason(body.reason ?? 'request rejected');
+        }
+      })
+      .catch(() => {
+        setKillPhase('denied');
+        setKillReason('request failed');
+      });
   };
 
   return (
@@ -149,6 +241,20 @@ export function AgentDrawer({
           </div>
         )}
 
+        {!canKill && (
+          <div className="text-sm text-warning mb-8" data-testid="kill-disabled-reason">
+            {pid === undefined
+              ? '⚠ NO PID — use COPY ID'
+              : `⚠ NO RUNNER on ${ch.machine ?? 'this machine'} — KILL unavailable`}
+          </div>
+        )}
+
+        {killPhase === 'denied' && (
+          <div className="text-sm text-warning mb-8" data-testid="kill-denied-reason">
+            {`⊘ KILL DENIED${killReason ? ` — ${killReason}` : ''}`}
+          </div>
+        )}
+
         <div className="flex justify-end gap-6">
           <Button variant="default" onClick={handleCopy}>
             {copied ? 'Copied ✓' : 'Copy ID'}
@@ -160,6 +266,24 @@ export function AgentDrawer({
             title={pid === undefined ? 'No PID available — use Copy ID instead' : undefined}
           >
             Focus
+          </Button>
+          <Button
+            variant={
+              killPhase === 'confirm'
+                ? 'accent'
+                : canKill && (killPhase === 'idle' || killPhase === 'denied')
+                  ? 'default'
+                  : 'disabled'
+            }
+            onClick={handleKill}
+            disabled={!canKill || killPhase === 'pending' || killPhase === 'killed'}
+            title={pid === undefined ? 'No PID available — use Copy ID instead' : undefined}
+            data-testid="kill-control"
+          >
+            {killPhase === 'confirm' && '⚠ CONFIRM'}
+            {killPhase === 'pending' && '⏳ KILLING…'}
+            {killPhase === 'killed' && '✕ KILLED'}
+            {(killPhase === 'idle' || killPhase === 'denied') && '✕ Kill'}
           </Button>
         </div>
       </div>

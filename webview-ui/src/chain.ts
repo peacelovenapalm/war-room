@@ -11,7 +11,14 @@
 export const CHAIN_RUN_STATUSES = ['running', 'completed', 'failed', 'halted'] as const;
 export type ChainRunStatusValue = (typeof CHAIN_RUN_STATUSES)[number];
 
-export const CHAIN_STEP_STATUSES = ['pending', 'running', 'exited', 'denied', 'expired'] as const;
+export const CHAIN_STEP_STATUSES = [
+  'pending',
+  'running',
+  'exited',
+  'denied',
+  'expired',
+  'killed',
+] as const;
 export type ChainStepStatusValue = (typeof CHAIN_STEP_STATUSES)[number];
 
 export interface ChainStepRunClient {
@@ -33,6 +40,9 @@ export interface ChainRunClient {
   steps: ChainStepRunClient[];
   failReason?: string;
   stoppedByKillSwitch?: boolean;
+  /** Set when a killed dispatch halted this run (KICKOFF v1.1 item 3) —
+   *  distinct from stoppedByKillSwitch, which is STOP ALL's own provenance flag. */
+  haltReason?: string;
   createdAt: number;
   updatedAt: number;
 }
@@ -69,11 +79,14 @@ export const CHAIN_RUN_STATUS_CHIPS: Record<ChainRunStatusValue, ChainRunStatusS
 /** One line of tray chip text, e.g. "◎ RUNNING (step 2/3)",
  *  "⊘ FAILED — denied: path-not-allowlisted", "■ HALTED". */
 export function chainRunChipLabel(
-  run: Pick<ChainRunClient, 'status' | 'currentStep' | 'steps' | 'failReason'>,
+  run: Pick<ChainRunClient, 'status' | 'currentStep' | 'steps' | 'failReason' | 'haltReason'>,
 ): string {
   const { glyph, word } = CHAIN_RUN_STATUS_CHIPS[run.status];
   if (run.status === 'failed' && run.failReason) {
     return `${glyph} ${word} — ${run.failReason}`;
+  }
+  if (run.status === 'halted' && run.haltReason) {
+    return `${glyph} ${word} — ${run.haltReason}`;
   }
   if (run.status === 'running') {
     return `${glyph} ${word} (step ${run.currentStep + 1}/${run.steps.length})`;

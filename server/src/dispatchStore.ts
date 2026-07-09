@@ -65,7 +65,46 @@ export type DispatchEffort = (typeof DISPATCH_EFFORT_VALUES)[number];
 const DISPATCH_MODEL_PATTERN = /^[a-zA-Z0-9._/-]{1,64}$/;
 
 export type DispatchAction = 'dispatch' | 'focus';
-export type DispatchStatus = 'ringing' | 'answered' | 'denied' | 'expired' | 'exited';
+export type DispatchStatus = 'ringing' | 'answered' | 'denied' | 'expired' | 'exited' | 'killed';
+
+/** A queued instruction attached to the NEXT poll response for the target
+ *  machine (KICKOFF v1.1 item 3 — the first server->runner IMPERATIVE
+ *  channel; everything before this was runner-polls-and-decides). Two
+ *  distinct, never-conflated targeting kinds:
+ *   - 'dispatch': kill a child THIS runner itself spawned, identified by the
+ *     dispatch queue id — the runner honors this ONLY if `id` is in its own
+ *     in-memory live-children registry (bin/dispatch-runner.mjs). No
+ *     registry match => a reported 'not-found' outcome, NEVER a raw
+ *     process.kill(pid) fallback.
+ *   - 'pid': kill an OBSERVED session (any worker with a known pid,
+ *     including one this runner never spawned) — the runner honors this
+ *     ONLY after locally verifying the target pid is actually a claude
+ *     process (name/cmdline check via `ps`). A verification failure denies
+ *     with a reason, never a raw signal on an unverified target.
+ *  Delivered at-most-once (drained on read, same fire-and-forget tolerance
+ *  as the rest of this file's best-effort POSTs) — a lost delivery just
+ *  means the human can click kill again. */
+export type StopInstruction =
+  | { kind: 'dispatch'; id: string }
+  | { kind: 'pid'; id: string; pid: number };
+
+export type PidKillStatus = 'pending' | 'killed' | 'denied';
+
+/** An observed-session kill request (mechanic: worker session kill, reach =
+ *  "any worker with a known pid", not just runner-spawned dispatches). Kept
+ *  in-memory only (not persisted) — a transient user action, same tolerance
+ *  as the frontend's own ephemeral send-failure tracking; a lost record on
+ *  server restart just means an in-flight kill request's outcome is no
+ *  longer queryable, not that anything unsafe happened. */
+interface PidKillRecord {
+  id: string;
+  machine: string;
+  pid: number;
+  status: PidKillStatus;
+  reason?: string;
+  createdAt: number;
+  updatedAt: number;
+}
 
 /** One dispatch queue entry, persisted in full (including the prompt) on the
  *  server's own machine — separate from the WS broadcast plane, which only
@@ -202,6 +241,13 @@ export class DispatchStore {
   private readonly machines = new Map<string, DispatchMachineAdvertisement>();
   private listeners: Array<(broadcast: DispatchBroadcast) => void> = [];
 
+  /** Stop instructions queued per machine — drained (popped) by the poll
+   *  route, never persisted (see StopInstruction doc). */
+  private readonly stopQueue = new Map<string, StopInstruction[]>();
+  /** Observed-session pid-kill requests, keyed by their own generated id
+   *  (there is no dispatch record to key against) — in-memory only. */
+  private readonly pidKillRequests = new Map<string, PidKillRecord>();
+
   private explicitPath: string | undefined;
   private resolvedPath: string | undefined;
   private usingDefaultPath = false;
@@ -337,6 +383,98 @@ export class DispatchStore {
   }
 
   /**
+   * Queue a stop instruction for the in-flight dispatch's machine. Only a
+   * record actually `answered` (a runner accepted it and it's presumed
+   * running) is stoppable — `ringing` has nothing spawned yet, and a
+   * terminal record has nothing left to stop. Attached to that machine's
+   * NEXT poll response; the runner decides FOR REAL whether it's actually in
+   * its own registry (this method only queues the request, it never touches
+   * the runner's containment guarantee).
+   */
+  requestStop(id: string): { ok: true } | { ok: false; reason: string } {
+    const record = this.ensureLoaded().get(id);
+    if (!record) return { ok: false, reason: 'unknown-id' };
+    if (record.status !== 'answered') return { ok: false, reason: 'not-in-flight' };
+    const queue = this.stopQueue.get(record.machine) ?? [];
+    if (!queue.some((s) => s.kind === 'dispatch' && s.id === id)) {
+      queue.push({ kind: 'dispatch', id });
+    }
+    this.stopQueue.set(record.machine, queue);
+    this.audit('stop-requested', record);
+    return { ok: true };
+  }
+
+  /** Queue an observed-session pid-kill request (reach: any worker with a
+   *  known pid, not just runner-spawned dispatches — no dispatch record
+   *  exists for these, hence the separate PidKillRecord/id scheme). */
+  requestPidKill(
+    machine: string,
+    pid: number,
+    now: number = Date.now(),
+  ): { ok: true; id: string } | { ok: false; reason: string } {
+    if (typeof machine !== 'string' || machine.trim() === '') {
+      return { ok: false, reason: 'missing-machine' };
+    }
+    if (!Number.isInteger(pid) || pid <= 0) {
+      return { ok: false, reason: 'invalid-pid' };
+    }
+    const id = randomUUID();
+    const record: PidKillRecord = {
+      id,
+      machine,
+      pid,
+      status: 'pending',
+      createdAt: now,
+      updatedAt: now,
+    };
+    this.pidKillRequests.set(id, record);
+    const queue = this.stopQueue.get(machine) ?? [];
+    queue.push({ kind: 'pid', id, pid });
+    this.stopQueue.set(machine, queue);
+    this.auditPidKill('pid-kill-requested', record);
+    return { ok: true, id };
+  }
+
+  /** Runner-reported outcome of a pid-kill instruction. Unknown ids are a
+   *  safe no-op (still `{ ok: true }`, same "deny is a decision" posture as
+   *  the dispatch decision plane). */
+  reportPidKillStatus(
+    id: string,
+    event: 'killed' | 'denied',
+    reason: string | undefined,
+    now: number = Date.now(),
+  ): { ok: true } {
+    const record = this.pidKillRequests.get(id);
+    if (!record) {
+      // Unknown id (e.g. a duplicate/late report) — safe no-op, still 2xx.
+      return { ok: true };
+    }
+    record.status = event;
+    record.reason = reason;
+    record.updatedAt = now;
+    this.auditPidKill('pid-kill-status', record);
+    return { ok: true };
+  }
+
+  /** Webview-facing lookup for the AgentDrawer's kill-outcome poll. */
+  getPidKillStatus(
+    id: string,
+  ): { found: true; status: PidKillStatus; reason?: string } | { found: false } {
+    const record = this.pidKillRequests.get(id);
+    if (!record) return { found: false };
+    return { found: true, status: record.status, reason: record.reason };
+  }
+
+  /** Drain (pop + clear) this machine's queued stop instructions — at-most-
+   *  once delivery, attached to the poll response that carries `pending`. */
+  drainStopsFor(machine: string): StopInstruction[] {
+    const queue = this.stopQueue.get(machine);
+    if (!queue || queue.length === 0) return [];
+    this.stopQueue.delete(machine);
+    return queue;
+  }
+
+  /**
    * Runner decision on a queued request. Deny AND unknown/already-decided
    * ids are all `{ ok: true }` — the decision plane never 403/404s.
    */
@@ -370,10 +508,23 @@ export class DispatchStore {
     return { ok: true };
   }
 
-  /** Runner-reported lifecycle event (spawn started / process exited). */
+  /** Runner-reported lifecycle event (spawn started / process exited /
+   *  explicitly killed via the stop channel). A 'killed' event with
+   *  `killOutcome` set (the runner's registry had no matching entry) is
+   *  audit-only — it must NEVER downgrade or invent a state transition for
+   *  a dispatch the runner didn't actually touch; only a bare `event:
+   *  'killed'` (the runner really signaled its own registered child) moves
+   *  the record to the distinct terminal `killed` status, and only from
+   *  `answered` (never re-terminalizes an already-terminal record). */
   reportStatus(
     id: string,
-    input: { event: 'started' | 'exited'; pid?: number; exitCode?: number; resultTail?: string },
+    input: {
+      event: 'started' | 'exited' | 'killed';
+      pid?: number;
+      exitCode?: number;
+      resultTail?: string;
+      killOutcome?: 'not-found';
+    },
     now: number = Date.now(),
   ): { ok: true } {
     const records = this.ensureLoaded();
@@ -384,6 +535,24 @@ export class DispatchStore {
     }
     if (input.event === 'started') {
       if (input.pid !== undefined) record.pid = input.pid;
+    } else if (input.event === 'killed') {
+      if (input.killOutcome === 'not-found') {
+        // Informational only — the runner never signaled anything (the id
+        // wasn't in its registry). The record's real status stands.
+        this.audit('kill-not-found', record);
+        return { ok: true };
+      }
+      if (record.status !== 'answered') {
+        // Already terminal by some other path (e.g. a natural exit raced
+        // the stop instruction) — never overwrite a settled terminal state.
+        this.audit('kill-already-terminal', record);
+        return { ok: true };
+      }
+      record.status = 'killed';
+      if (input.exitCode !== undefined) record.exitCode = input.exitCode;
+      if (typeof input.resultTail === 'string') {
+        record.resultTail = input.resultTail.slice(-DISPATCH_RESULT_TAIL_MAX_CHARS);
+      }
     } else {
       record.status = 'exited';
       if (input.exitCode !== undefined) record.exitCode = input.exitCode;
@@ -536,6 +705,20 @@ export class DispatchStore {
   }
 
   private audit(event: string, record: DispatchRecord): void {
+    if (process.env.VITEST && this.explicitAuditPath === undefined) return;
+    try {
+      const line = JSON.stringify({ ts: new Date().toISOString(), event, ...record });
+      const target = this.auditPath();
+      fs.mkdirSync(path.dirname(target), { recursive: true });
+      fs.appendFileSync(target, `${line}\n`, 'utf8');
+    } catch {
+      /* audit-log loss must never crash the server */
+    }
+  }
+
+  /** Same append-only audit log as `audit()`, for pid-kill lifecycle events
+   *  (a PidKillRecord, not a DispatchRecord — no dispatch id involved). */
+  private auditPidKill(event: string, record: PidKillRecord): void {
     if (process.env.VITEST && this.explicitAuditPath === undefined) return;
     try {
       const line = JSON.stringify({ ts: new Date().toISOString(), event, ...record });

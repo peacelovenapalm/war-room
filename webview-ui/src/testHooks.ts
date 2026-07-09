@@ -33,6 +33,10 @@ declare global {
       selectAgent?: (id: number) => void;
       setCrisis?: (id: number, since: number) => void;
       getPixiInitCount?: () => number;
+      /** e2e-only (KICKOFF v1.1 item 3): drives the exact path a real
+       *  canvas click on an agent takes (App.tsx wires this to handleClick,
+       *  not this module — see App.tsx's own useEffect for why). */
+      openAgentDrawer?: (id: number) => void;
     };
   }
 }
@@ -135,7 +139,13 @@ export function installTestHooks(officeStateRef: { current: OfficeState | null }
     preferredSeatId,
     skipSpawnEffect,
     folderName,
+    ...rest
   ) {
+    // Forward the FULL argument list (...rest — machine/provider/sessionId/
+    // cwd/pid) — a fixed-arity re-declaration here previously dropped
+    // everything past folderName in e2e mode only (production never called
+    // this wrapper), silently leaving ch.machine/ch.pid undefined for every
+    // e2e-driven agent regardless of what the real caller passed.
     origAddAgent.call(
       this,
       id,
@@ -144,6 +154,7 @@ export function installTestHooks(officeStateRef: { current: OfficeState | null }
       preferredSeatId,
       skipSpawnEffect,
       folderName,
+      ...rest,
     );
     const ch = this.characters.get(id);
     hooks.addAgentLog?.push({

@@ -105,6 +105,7 @@ export async function createHttpServer(options: HttpServerOptions): Promise<Http
   registerHookRoute(app, options);
   registerPollRoute(app, options);
   registerDispatchRoutes(app, options);
+  registerAgentKillRoutes(app, options);
   registerEmployeeRoutes(app);
   registerEconomyRoutes(app);
   registerBuildingRoutes(app, options);
@@ -448,9 +449,27 @@ function registerDispatchRoutes(app: FastifyInstance, options: HttpServerOptions
         : [];
       const focus = body.focus === true;
       dispatchStore.recordAdvertisement(machine, { providers, roots, focus });
-      reply.send({ pending: dispatchStore.pendingFor(machine) });
+      reply.send({
+        pending: dispatchStore.pendingFor(machine),
+        // KICKOFF v1.1 item 3 — the first server->runner IMPERATIVE channel
+        // (everything above is runner-polls-and-decides). Drained here, at
+        // most once: the runner is expected to act on each entry THIS same
+        // tick and report the outcome back (see StopInstruction's doc for
+        // the two distinct, never-conflated targeting kinds).
+        stop: dispatchStore.drainStopsFor(machine),
+      });
     },
   );
+
+  // POST /api/dispatch/:id/kill -- webview-initiated (unauthenticated, same
+  // trust level as the other player-action routes below -- the server is
+  // tailnet-only). Only QUEUES a stop instruction for that dispatch's
+  // machine; the runner's own registry is the real containment boundary
+  // (see dispatchStore.requestStop's doc) -- this route can't force
+  // anything, it can only ask.
+  app.post<{ Params: { id: string } }>('/api/dispatch/:id/kill', async (request, reply) => {
+    reply.send(dispatchStore.requestStop(request.params.id));
+  });
 
   // POST /api/dispatch/:id/decision -- runner decision (Bearer). Deny AND an
   // unknown/already-decided id are BOTH 2xx -- a decision, never an HTTP error.
@@ -472,25 +491,33 @@ function registerDispatchRoutes(app: FastifyInstance, options: HttpServerOptions
   );
 
   // POST /api/dispatch/:id/status -- runner-reported lifecycle event (Bearer):
-  // spawn started (attaches pid) or the process exited (terminal, carries exitCode).
+  // spawn started (attaches pid), the process exited on its own (terminal,
+  // carries exitCode), or the runner explicitly killed it via the stop
+  // channel (KICKOFF v1.1 item 3 -- a DISTINCT terminal status, never
+  // conflated with a natural 'exited').
   app.post<{ Params: { id: string }; Body: Record<string, unknown> }>(
     '/api/dispatch/:id/status',
     { preHandler: bearerAuth(options.token) },
     async (request, reply) => {
       const body = request.body ?? {};
-      const event = body.event === 'started' || body.event === 'exited' ? body.event : undefined;
+      const event =
+        body.event === 'started' || body.event === 'exited' || body.event === 'killed'
+          ? body.event
+          : undefined;
       if (!event) {
-        reply.code(400).send({ error: 'expected body { event: "started" | "exited" }' });
+        reply.code(400).send({ error: 'expected body { event: "started" | "exited" | "killed" }' });
         return;
       }
       const pid = typeof body.pid === 'number' ? body.pid : undefined;
       const exitCode = typeof body.exitCode === 'number' ? body.exitCode : undefined;
       const resultTail = typeof body.resultTail === 'string' ? body.resultTail : undefined;
+      const killOutcome = body.killOutcome === 'not-found' ? body.killOutcome : undefined;
       const result = dispatchStore.reportStatus(request.params.id, {
         event,
         pid,
         exitCode,
         resultTail,
+        killOutcome,
       });
       // Dispatch-driven Cash/XP (v1 mechanic #6b Cash, v2 mechanic G3
       // employee XP — GAME-DESIGN §7.3's "employeeWorkCompleted" integration
@@ -516,6 +543,68 @@ function registerDispatchRoutes(app: FastifyInstance, options: HttpServerOptions
         }
       }
       reply.send(result);
+    },
+  );
+}
+
+// ── Observed-session pid-kill (KICKOFF v1.1 item 3) ─────────────
+
+/**
+ * Worker session kill's OBSERVED-SESSION path (reach: any worker with a
+ * known pid, not just runner-spawned dispatches — the AgentDrawer kill
+ * button always targets by (machine, pid), since that is the one thing the
+ * drawer actually has for every agent, dispatched or not). Deliberately
+ * separate from registerDispatchRoutes' dispatch-id kill route above —
+ * different targeting semantics, never conflated (see StopInstruction's
+ * doc in dispatchStore.ts). The runner is the ONLY thing that verifies the
+ * target pid is actually a claude process before signaling it; this route
+ * only queues the request.
+ */
+function registerAgentKillRoutes(app: FastifyInstance, options: HttpServerOptions): void {
+  app.post<{ Body: Record<string, unknown> }>('/api/agents/kill', async (request, reply) => {
+    const body = request.body ?? {};
+    // Normalized the same way the runner's own X-Machine header is
+    // (sanitizeMachineLabel) — the webview reads ch.machine straight from
+    // hook telemetry, which is already this shape in practice, but
+    // normalizing here too closes a silent-stranding gap (a body machine
+    // string that doesn't exactly match the runner's own uppercased key
+    // would otherwise queue against a key the runner's poll never drains).
+    const machine = sanitizeMachineLabel(body.machine);
+    const pid = typeof body.pid === 'number' ? body.pid : undefined;
+    if (!machine || pid === undefined) {
+      reply.send({ ok: false, reason: 'missing-machine-or-pid' });
+      return;
+    }
+    reply.send(dispatchStore.requestPidKill(machine, pid));
+  });
+
+  // Webview-facing poll for the AgentDrawer's kill-outcome feedback (no WS
+  // broadcast for this ephemeral, in-memory-only lifecycle — see
+  // PidKillRecord's doc in dispatchStore.ts).
+  app.get<{ Params: { id: string } }>('/api/agents/kill/:id', async (request, reply) => {
+    const result = dispatchStore.getPidKillStatus(request.params.id);
+    if (!result.found) {
+      reply.code(404).send({ found: false });
+      return;
+    }
+    reply.send(result);
+  });
+
+  // POST /api/pid-kills/:id/status -- runner-reported outcome (Bearer), same
+  // auth tier as /api/dispatch/:id/status (machine telemetry, not a player
+  // action).
+  app.post<{ Params: { id: string }; Body: Record<string, unknown> }>(
+    '/api/pid-kills/:id/status',
+    { preHandler: bearerAuth(options.token) },
+    async (request, reply) => {
+      const body = request.body ?? {};
+      const event = body.event === 'killed' || body.event === 'denied' ? body.event : undefined;
+      if (!event) {
+        reply.code(400).send({ error: 'expected body { event: "killed" | "denied" }' });
+        return;
+      }
+      const reason = typeof body.reason === 'string' ? body.reason : undefined;
+      reply.send(dispatchStore.reportPidKillStatus(request.params.id, event, reason));
     },
   );
 }

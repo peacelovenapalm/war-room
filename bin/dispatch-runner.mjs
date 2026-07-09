@@ -37,6 +37,24 @@
  * runner never crashes on bad data, and never spawns without an explicit
  * accept decision already having been posted.
  *
+ * Worker session kill (KICKOFF v1.1 item 3 — the first server->runner
+ * IMPERATIVE channel; everything above is runner-polls-and-decides). Every
+ * poll response also carries `stop: StopInstruction[]` (dispatchStore.ts's
+ * doc has the full shape) — processed this SAME tick, after `pending`:
+ *   - `{kind:'dispatch', id}`: kill a child THIS runner itself spawned.
+ *     ONLY honored if `id` is in `state.children` (this process's own
+ *     in-memory live-children registry, populated in runDispatch() and
+ *     cleared on that child's own 'exit'). No match => reported outcome
+ *     'not-found', NEVER a raw process.kill(pid) fallback — the registry IS
+ *     the containment boundary, no exceptions.
+ *   - `{kind:'pid', id, pid}`: kill an OBSERVED session (any worker with a
+ *     known pid, including one this runner never spawned). ONLY honored
+ *     after `verifyClaudeProcess(pid)` confirms the target is actually a
+ *     claude process (via `ps`) — a verification failure denies with a
+ *     reason, NEVER a raw signal on an unverified target, regardless of
+ *     whether the pid happens to also be in the dispatch registry (the two
+ *     containment rules are never cross-shortcut).
+ *
  * Config (env, overridable by flags):
  *   WAR_ROOM_URL                  server base URL  (default http://127.0.0.1:3141)
  *   WAR_ROOM_TOKEN                bearer token     (REQUIRED)
@@ -192,6 +210,25 @@ async function postStatus(cfg, id, body, fetchImpl) {
   }
 }
 
+/** Report an observed-session pid-kill outcome (KICKOFF v1.1 item 3's
+ *  separate, non-dispatch-id lifecycle — see verifyClaudeProcess/
+ *  processPidKillStop below). Best-effort, same tolerance as postStatus. */
+async function postPidKillStatus(cfg, id, event, reason, fetchImpl) {
+  try {
+    await fetchImpl(`${cfg.url}/api/pid-kills/${id}/status`, {
+      method: 'POST',
+      headers: {
+        'content-type': 'application/json',
+        authorization: `Bearer ${cfg.token}`,
+      },
+      body: JSON.stringify({ event, reason }),
+      signal: AbortSignal.timeout(POST_TIMEOUT_MS),
+    });
+  } catch (err) {
+    log(`⚠ pid-kill status POST failed for ${id} (${shortErr(err)})`);
+  }
+}
+
 // ── Focus (best-effort, macOS AppleScript) ─────────────────────
 
 /**
@@ -215,6 +252,42 @@ export async function attemptFocus(item, execImpl = execAsync) {
   } catch (err) {
     return { ok: false, reason: `focus-failed: ${shortErr(err)}` };
   }
+}
+
+// ── Worker session kill: observed-session pid verification ──────
+
+/** The containment gate for the OBSERVED-SESSION kill path (KICKOFF v1.1
+ *  item 3): the runner must NEVER signal a raw, unverified pid off the
+ *  wire. `pid` is already validated as a positive integer by the caller
+ *  (processPidKillStop) — interpolated into a shell command here only as a
+ *  number, never as untrusted string content, same posture as attemptFocus's
+ *  own osascript interpolation. Injectable `execImpl` (defaults to the same
+ *  `execAsync` attemptFocus uses) so this is unit-testable without a real
+ *  process, and re-usable in tests against a REAL process for the positive
+ *  case. Deny-by-default: any lookup failure (process gone, `ps` error, a
+ *  command line that doesn't mention "claude") denies with a reason, never
+ *  a guess. */
+export async function verifyClaudeProcess(pid, execImpl = execAsync) {
+  if (!Number.isInteger(pid) || pid <= 0) {
+    return { ok: false, reason: 'invalid-pid' };
+  }
+  let stdout;
+  try {
+    ({ stdout } = await execImpl(`ps -p ${pid} -o command=`, { timeout: FOCUS_TIMEOUT_MS }));
+  } catch (err) {
+    // A nonzero exit from `ps -p` (process doesn't exist) lands here too —
+    // an honest "not found" rather than treating a lookup error as license
+    // to signal anyway.
+    return { ok: false, reason: `verify-failed: ${shortErr(err)}` };
+  }
+  const command = (stdout ?? '').trim();
+  if (!command) {
+    return { ok: false, reason: 'process-not-found' };
+  }
+  if (!/\bclaude\b/i.test(command)) {
+    return { ok: false, reason: 'not-a-claude-process' };
+  }
+  return { ok: true };
 }
 
 // ── Spawn (dispatch action) ─────────────────────────────────────
@@ -262,7 +335,7 @@ function readResultTail(logPath) {
   }
 }
 
-function runDispatch(cfg, item, argv, deps) {
+function runDispatch(cfg, item, argv, state, deps) {
   const spawnImpl = deps.spawn ?? spawn;
   ensureLogDir(cfg);
   const logPath = path.join(cfg.logDir, `${item.id}.log`);
@@ -284,6 +357,14 @@ function runDispatch(cfg, item, argv, deps) {
     stdio: ['ignore', 'pipe', 'pipe'],
   });
 
+  // Worker session kill (KICKOFF v1.1 item 3): THIS is the containment
+  // boundary for the dispatch-id stop path — a stop instruction is honored
+  // ONLY for an id present in this registry, never a raw pid off the wire.
+  // Registered here (right after a real spawn), cleared unconditionally on
+  // 'exit' below (whether that exit was self-caused or the result of a stop
+  // instruction's SIGTERM).
+  state.children.set(item.id, { child, killRequested: false });
+
   child.stdout?.on('data', (chunk) => logStream?.write(chunk));
   child.stderr?.on('data', (chunk) => logStream?.write(chunk));
 
@@ -291,6 +372,9 @@ function runDispatch(cfg, item, argv, deps) {
   audit(cfg, 'started', { id: item.id, pid: child.pid, provider: item.provider, cwd: item.cwd });
 
   child.on('exit', (code) => {
+    const registryEntry = state.children.get(item.id);
+    const wasKilled = registryEntry?.killRequested === true;
+    state.children.delete(item.id);
     const exitCode = typeof code === 'number' ? code : -1;
     // Read the tail AFTER the log stream settles — reading immediately on
     // 'exit' can race the write stream's buffered data. Guards against
@@ -301,8 +385,11 @@ function runDispatch(cfg, item, argv, deps) {
       if (reported) return;
       reported = true;
       const resultTail = readResultTail(logPath);
-      void postStatus(cfg, item.id, { event: 'exited', exitCode, resultTail }, deps.fetch ?? fetch);
-      audit(cfg, 'exited', { id: item.id, pid: child.pid, exitCode, resultTail });
+      // A DISTINCT terminal status for an explicit kill — never conflated
+      // with a natural exit (KICKOFF v1.1 item 3's explicit requirement).
+      const event = wasKilled ? 'killed' : 'exited';
+      void postStatus(cfg, item.id, { event, exitCode, resultTail }, deps.fetch ?? fetch);
+      audit(cfg, event, { id: item.id, pid: child.pid, exitCode, resultTail });
     };
     if (logStream) {
       logStream.once('finish', reportExited);
@@ -313,9 +400,84 @@ function runDispatch(cfg, item, argv, deps) {
     }
   });
   child.on('error', (err) => {
+    state.children.delete(item.id);
     log(`⚠ spawn error for ${item.id}: ${shortErr(err)}`);
     audit(cfg, 'spawn-error', { id: item.id, reason: shortErr(err) });
   });
+}
+
+// ── Worker session kill: stop-instruction processing ─────────────
+
+/** Dispatch-id kill: registry-only, no exceptions. `state.children` is THIS
+ *  process's own in-memory live-children map — it only knows about
+ *  dispatches THIS runner itself spawned since it started. No match =>
+ *  'not-found', reported honestly, never a raw process.kill(pid) fallback. */
+async function processDispatchStop(cfg, state, id, deps) {
+  const fetchImpl = deps.fetch ?? fetch;
+  const entry = state.children.get(id);
+  if (!entry) {
+    await postStatus(cfg, id, { event: 'killed', killOutcome: 'not-found' }, fetchImpl);
+    audit(cfg, 'stop-not-found', { id });
+    return;
+  }
+  entry.killRequested = true;
+  try {
+    entry.child.kill('SIGTERM');
+    audit(cfg, 'kill-signal-sent', { id, pid: entry.child.pid });
+  } catch (err) {
+    // The child's own 'exit' handler still fires and reports the terminal
+    // status either way — this is a best-effort audit line, not the report.
+    audit(cfg, 'kill-signal-error', { id, pid: entry.child.pid, reason: shortErr(err) });
+  }
+  // The actual 'killed' status POST happens in runDispatch's exit handler
+  // once the process actually exits — never reported twice.
+}
+
+/** Observed-session kill: verification-gated, no exceptions — see
+ *  verifyClaudeProcess's doc. Never skips verification even if `pid`
+ *  happens to also be a registered dispatch child; the two containment
+ *  rules are never cross-shortcut. */
+async function processPidKillStop(cfg, instr, deps) {
+  const fetchImpl = deps.fetch ?? fetch;
+  const verify = deps.verifyClaudeProcess ?? verifyClaudeProcess;
+  const execImpl = deps.execForVerify ?? execAsync;
+  const killImpl = deps.killImpl ?? ((pid, signal) => process.kill(pid, signal));
+  const verified = await verify(instr.pid, execImpl);
+  if (!verified.ok) {
+    await postPidKillStatus(cfg, instr.id, 'denied', verified.reason, fetchImpl);
+    audit(cfg, 'pid-kill-denied', { id: instr.id, pid: instr.pid, reason: verified.reason });
+    return;
+  }
+  try {
+    killImpl(instr.pid, 'SIGTERM');
+    await postPidKillStatus(cfg, instr.id, 'killed', undefined, fetchImpl);
+    audit(cfg, 'pid-killed', { id: instr.id, pid: instr.pid });
+  } catch (err) {
+    const reason = `kill-failed: ${shortErr(err)}`;
+    await postPidKillStatus(cfg, instr.id, 'denied', reason, fetchImpl);
+    audit(cfg, 'pid-kill-failed', { id: instr.id, pid: instr.pid, reason });
+  }
+}
+
+/** Dispatch one poll tick's `stop` array — never throws (each instruction is
+ *  independently try/caught so one bad entry can't skip the rest). */
+async function processStopInstructions(cfg, state, stopInstructions, deps) {
+  for (const instr of stopInstructions) {
+    if (!instr || typeof instr.kind !== 'string') continue;
+    try {
+      if (instr.kind === 'dispatch' && typeof instr.id === 'string') {
+        await processDispatchStop(cfg, state, instr.id, deps);
+      } else if (
+        instr.kind === 'pid' &&
+        typeof instr.id === 'string' &&
+        Number.isInteger(instr.pid)
+      ) {
+        await processPidKillStop(cfg, instr, deps);
+      }
+    } catch (err) {
+      log(`⚠ stop instruction ${instr?.id ?? '?'} failed: ${shortErr(err)}`);
+    }
+  }
 }
 
 // ── One item ─────────────────────────────────────────────────────
@@ -357,7 +519,7 @@ async function handleItem(cfg, item, allowlist, state, deps) {
   await postDecision(cfg, item.id, 'accept', {}, fetchImpl);
   audit(cfg, 'accepted', { id: item.id, provider: item.provider, cwd: item.cwd });
   state.handled.add(item.id);
-  runDispatch(cfg, item, argv, deps);
+  runDispatch(cfg, item, argv, state, deps);
 }
 
 // ── Tick ────────────────────────────────────────────────────────
@@ -407,6 +569,14 @@ export async function tick(cfg, state, deps = {}) {
   if (pending.length > 0 || handledCount > 0) {
     log(`✓ tick — ${pending.length} pending, ${handledCount} newly handled`);
   }
+
+  // Worker session kill (KICKOFF v1.1 item 3) — processed AFTER pending,
+  // same tick, so a stop targeting a dispatch this very tick just spawned
+  // still finds it in the registry.
+  const stopInstructions = Array.isArray(body?.stop) ? body.stop : [];
+  if (stopInstructions.length > 0) {
+    await processStopInstructions(cfg, state, stopInstructions, deps);
+  }
 }
 
 // ── Main loop ───────────────────────────────────────────────────
@@ -441,7 +611,7 @@ async function main() {
   process.on('unhandledRejection', (err) => log(`⚠ unhandled rejection: ${shortErr(err)}`));
   process.on('uncaughtException', (err) => log(`⚠ uncaught exception: ${shortErr(err)}`));
 
-  const state = { handled: new Set() };
+  const state = { handled: new Set(), children: new Map() };
   // setTimeout chain (not setInterval) so slow ticks never overlap.
   for (;;) {
     await tick(cfg, state);

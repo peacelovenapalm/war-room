@@ -53,6 +53,8 @@ export const DISPATCH_STATUS_HELP: Record<DispatchStatusValue, string> = {
   expired:
     'Nobody’s runner answered within the 10-minute TTL — the machine is probably offline or has no runner installed.',
   exited: 'The dispatched process finished; the exit code (0 = clean) is shown alongside.',
+  killed:
+    "You ended this session from the agent drawer's KILL button — a DISTINCT status from EXITED, since the process was stopped rather than finishing on its own. If it was a chain step, the whole run halts.",
 };
 
 function dispatchEntries(): HelpEntry[] {
@@ -351,6 +353,11 @@ export const HELP_SECTIONS: HelpSection[] = [
         glyph: '⧉',
         word: 'COPY ID',
         text: "Always works, no runner required: copies a one-line machine + project dir + session id to your clipboard — the honest fallback when FOCUS can't reach a machine.",
+      },
+      {
+        glyph: '✕',
+        word: 'KILL',
+        text: 'Ends this worker\'s session for real — any worker with a known pid, not just one you dispatched yourself. Two-step confirm (⚠ CONFIRM, then click again). The machine\'s runner verifies the pid is actually a claude process before signaling it, and never signals a raw unverified pid off the wire; disabled with "⚠ NO PID" when no process-id telemetry exists yet.',
       },
     ],
   },
