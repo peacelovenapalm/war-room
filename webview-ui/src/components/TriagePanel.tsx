@@ -12,6 +12,8 @@ const ALL_CLEAR_MS = 4_000;
 
 interface TriagePanelProps {
   officeState: OfficeState;
+  /** Opens the same agent drawer a normal agent click would (App.tsx handleClick). */
+  onOpenAgent: (agentId: number) => void;
 }
 
 /** One-line cause for a burning agent (waitingFor beats local fallbacks). */
@@ -35,7 +37,7 @@ function causeFor(officeState: OfficeState, id: number): string | undefined {
  * deal with next. Colorblind hard rule: every signal is SHAPE + TEXT; the
  * board must read fully in grayscale.
  */
-export function TriagePanel({ officeState }: TriagePanelProps) {
+export function TriagePanel({ officeState, onOpenAgent }: TriagePanelProps) {
   const [now, setNow] = useState(0);
   const [collapsed, setCollapsed] = useState(false);
   const allClearUntilRef = useRef(0);
@@ -103,20 +105,35 @@ export function TriagePanel({ officeState }: TriagePanelProps) {
       </button>
       <div className="triage-panel__rows">
         {rows.map((row) => (
-          <TriageRowView key={row.rowKey} row={row} officeState={officeState} />
+          <TriageRowView
+            key={row.rowKey}
+            row={row}
+            officeState={officeState}
+            onOpenAgent={onOpenAgent}
+          />
         ))}
       </div>
     </div>
   );
 }
 
-function TriageRowView({ row, officeState }: { row: TriageRow; officeState: OfficeState }) {
+function TriageRowView({
+  row,
+  officeState,
+  onOpenAgent,
+}: {
+  row: TriageRow;
+  officeState: OfficeState;
+  onOpenAgent: (agentId: number) => void;
+}) {
   return (
     <div
-      className={`triage-row ${row.loud ? 'triage-row--loud' : ''}`}
+      className={`triage-row triage-row--clickable ${row.loud ? 'triage-row--loud' : ''}`}
       data-testid="triage-row"
       data-kind={row.kind}
       data-stage={row.stage ?? 'debris'}
+      onClick={() => onOpenAgent(row.agentId)}
+      title="Open this agent"
     >
       <span className="triage-row__stage">
         {row.glyph} {row.word}
@@ -129,7 +146,10 @@ function TriageRowView({ row, officeState }: { row: TriageRow; officeState: Offi
       {row.debrisKey && (
         <button
           className="triage-row__clear"
-          onClick={() => officeState.acknowledgeDebris(row.debrisKey!)}
+          onClick={(e) => {
+            e.stopPropagation();
+            officeState.acknowledgeDebris(row.debrisKey!);
+          }}
           title="Acknowledge — clear this debris"
         >
           CLEAR

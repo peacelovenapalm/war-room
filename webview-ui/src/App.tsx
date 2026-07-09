@@ -430,7 +430,7 @@ function App() {
           />
 
           {/* TRIAGE incident board (v1): auto-appears when a crisis exists */}
-          <TriagePanel officeState={officeState} />
+          <TriagePanel officeState={officeState} onOpenAgent={handleClick} />
 
           {/* World event banner (v2 mechanic G5, GAME-DESIGN §6.3): ambient
               flavor only, dismissable, auto-hides — never competes with the

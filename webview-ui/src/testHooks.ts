@@ -30,6 +30,7 @@ declare global {
         parentToolId?: string;
       }>;
       selectAgent?: (id: number) => void;
+      setCrisis?: (id: number, since: number) => void;
     };
   }
 }
@@ -71,6 +72,17 @@ export function installTestHooks(officeStateRef: { current: OfficeState | null }
   hooks.selectAgent = (id) => {
     const os = officeStateRef.current;
     if (os) os.selectedAgentId = id;
+  };
+
+  // Marks a character as having an active crisis (v1 crisis layer) — the
+  // same `ch.crisis` field the server's crisis broadcast sets. Lets e2e
+  // drive the TRIAGE board deterministically instead of reproducing the
+  // full server-side crisis-escalation timing, same tradeoff selectAgent
+  // makes for the canvas hit-test.
+  hooks.setCrisis = (id, since) => {
+    const os = officeStateRef.current;
+    const ch = os?.characters.get(id);
+    if (ch) ch.crisis = { since };
   };
 
   // Point-in-time snapshot of every live pet. Pets render only on the canvas

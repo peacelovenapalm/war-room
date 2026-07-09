@@ -306,6 +306,12 @@
   .triage-row:last-child {
     border-bottom: 0;
   }
+  .triage-row--clickable {
+    cursor: pointer;
+  }
+  .triage-row--clickable:hover {
+    background: var(--color-btn-hover);
+  }
   .triage-row--loud {
     background: #ffffff;
     color: #000000;
