@@ -1112,15 +1112,39 @@ real tokens"), zero hits in actual reward-computation code.
 Screenshots: `.planning/evidence/g2-build-mode.png` + `-grayscale.png` —
 the room palette (5 buttons, glyph+text: Dev Pit/Server Room/Break
 Room/War Room/Kitchen), Sell tool, Expand Office button showing the exact
-live `bayCost(1)=$775`, and the EconomyHUD (`$1850 ★42`) against real
-seeded economy/employee data. Grayscale fully legible — every signal is
-shape+text, colorblind rule holds. The office canvas itself renders blank
-in this specific capture (camera/viewport quirk under the
-software-rendering flags forced to work around the screenshot hang, not
-reproduced in the earlier non-edit-mode captures which show the office
-correctly) — a cosmetic capture artifact, not a functional gap; the
-non-edit-mode office view (same session) renders furniture/floor
-correctly with the EconomyHUD overlaid.
+live `bayCost(1)=$775`, the LOCKED $775 bay-ghost text, the grid overlay,
+the full office (furniture/floor/walls) rendering correctly, and the
+EconomyHUD (`$1850 ★42`) against real seeded economy/employee data.
+Grayscale fully legible.
+
+**CORRECTION (superseding the first pass of this entry): the office
+canvas going blank in edit mode was a REAL, SEVERE regression, not a
+capture artifact — it was mis-diagnosed on the first pass.** Team-lead
+review of the initial screenshot pair caught it (the canvas region was
+genuinely empty, not a camera-framing issue) and sent it back before
+deploying. Root cause: `pixiApp.ts`'s `dispose()` called
+`app.destroy(true, {...})` — Pixi's `removeView: true` shorthand, which
+physically removes the `<canvas>` element from the DOM. `OfficeCanvas.tsx`'s
+main effect disposes and recreates the whole Pixi app on every
+`isEditMode`/`_editorTick` change (pre-existing architecture, unchanged
+since before G0's PixiJS swap). Under the old canvas2d engine this was
+harmless — nothing there owned DOM insertion. Under Pixi, `destroy(true)`
+silently orphans the canvas node on the FIRST dispose; the next
+`startPixiApp()` call re-initializes onto a detached element React never
+re-inserts, leaving the office permanently blank the instant edit mode
+(or any other `_editorTick`-triggering action) is entered — **latent
+since G0**, since nothing exercised a dispose+recreate cycle in a
+screenshot test until this session's build-mode capture was the first
+attempt to screenshot edit mode since the PixiJS migration. Verified via
+a real-browser repro (`document.querySelectorAll('canvas').length`: 1 →
+0 the instant edit mode is entered, before the fix; stays 1 after).
+Fixed by passing `{ removeView: false }` to both `destroy()` call sites
+in `pixiApp.ts` (commit `ef5dfa8`) — Pixi tears down its own
+renderer/ticker/texture resources but leaves the canvas DOM node alone,
+since React owns its lifecycle via the ref, not Pixi. Re-verified: full
+gate list green again (server 393/393, webview 206/206, check-types/
+lint/build clean), evidence screenshots re-captured showing the office
+rendering correctly in edit mode.
 
 **BATCH-1 DEPLOY: GATED, NOT RUN.** The full gate list is green and the
 deploy was otherwise ready. Invoking
