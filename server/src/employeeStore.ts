@@ -667,7 +667,12 @@ export class EmployeeStore {
         const { level } = computeLevel(emp.xp, EMPLOYEE_LEVEL_CURVE);
         emp.xp = xpForLevel(Math.max(1, Math.floor(level / 2)), EMPLOYEE_LEVEL_CURVE);
         emp.status = 'quit';
-        this.appendLedger(emp.id, { ts: now, event: 'quit', level, mood: emp.mood });
+        // KICKOFF v1.1 item 6: quits are a real state-consistency mutation
+        // like every other verb here (recordTurn/train/fire/...) — must go
+        // through finish() (persist + ledger + broadcast), not just append
+        // to the ledger. A quit that never persists/broadcasts is silently
+        // invisible to the office view and to a fresh page load.
+        this.finish(emp, now, 'quit', { level, mood: emp.mood });
       }
     }
   }

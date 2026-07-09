@@ -344,6 +344,66 @@ describe('EmployeeStore quit mechanic (deterministic, mulberry32)', () => {
     }
     expect(last.status).not.toBe('quit');
   });
+
+  // KICKOFF v1.1 item 6: applyUpkeep's quit roll used to only appendLedger()
+  // directly — it never called finish() like every other mutation here, so
+  // it silently skipped persist() and the onChange() broadcast. A quit that
+  // never persists/broadcasts is invisible to the office view and lost on a
+  // fresh page load (state re-read from disk would show 'active' forever).
+  it('a quit roll persists to disk and fires the onChange broadcast — not just the ledger', () => {
+    const store = new EmployeeStore(statePath, ledgerDir);
+    // recordTurn auto-onboards candidate -> active after 3 turns — the quit
+    // roll only ever fires for an 'active' employee, so drive past that
+    // threshold before forcing mood=0 (same reason the "halves XP" test
+    // above calls recordTurn well past 3 times).
+    let emp = store.recordTurn('MACBOOK', '/proj', 'proj', { outputTokensCumulative: 100 }, DAY1);
+    for (let i = 0; i < 3; i++) {
+      emp = store.recordTurn(
+        'MACBOOK',
+        '/proj',
+        'proj',
+        { outputTokensCumulative: 100 + i * 50 },
+        DAY1 + i * 1000,
+      );
+    }
+    expect(emp.status).toBe('active');
+    const data = JSON.parse(fs.readFileSync(statePath, 'utf8'));
+    // persist() is throttled (PERSIST_THROTTLE_MS) and these recordTurn calls
+    // land within the same throttle window, so the on-disk snapshot can lag
+    // the in-memory 'active' transition just asserted above — force status
+    // explicitly rather than depend on persist-timing luck.
+    data.employees[emp.id].status = 'active';
+    data.employees[emp.id].mood = 0;
+    data.employees[emp.id].lastMoodCheckDate = null;
+    fs.writeFileSync(statePath, JSON.stringify(data), 'utf8');
+
+    const store2 = new EmployeeStore(statePath, ledgerDir);
+    const broadcasts: Array<{ id: string; status: string }> = [];
+    store2.onChange((snapshot) => broadcasts.push({ id: snapshot.id, status: snapshot.status }));
+
+    let quitEmployee;
+    for (let day = 1; day <= QUIT_GRACE_DAYS + 30; day++) {
+      const now = DAY1 + day * ONE_DAY_MS;
+      const all = store2.getAll(now);
+      const found = all.find((e) => e.id === emp.id);
+      if (found?.status === 'quit') {
+        quitEmployee = found;
+        break;
+      }
+    }
+    expect(quitEmployee).toBeDefined();
+
+    // Broadcast: onChange must have fired with this employee's quit snapshot
+    // — not just silently updated in-memory state.
+    expect(broadcasts.some((b) => b.id === emp.id && b.status === 'quit')).toBe(true);
+
+    // Persist: a FRESH store instance reading the SAME file must see the
+    // quit too — proves persist() actually wrote it, not just that the
+    // in-memory object we already hold happens to show 'quit'.
+    const rereadStore = new EmployeeStore(statePath, ledgerDir);
+    const reread = rereadStore.getById(emp.id, DAY1 + (QUIT_GRACE_DAYS + 30) * ONE_DAY_MS);
+    expect(reread?.status).toBe('quit');
+  });
 });
 
 describe('EmployeeStore.break_ never blocks real work (GAME-DESIGN §4.6 hard rule)', () => {
