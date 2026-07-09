@@ -12,7 +12,7 @@ import type { ClaudeRateLimitSnapshot } from './budgetStore.js';
 import { budgetStore } from './budgetStore.js';
 import { globalBuffs } from './buildingBuffs.js';
 import { chainOrchestrator } from './chainOrchestrator.js';
-import { CHAIN_MAX_STEPS, type ChainStepDef, chainStore } from './chainStore.js';
+import { chainMaxSteps, type ChainStepDef, chainStore } from './chainStore.js';
 import type { AssetCache, SetHooksEnabledSideEffect } from './clientMessageHandler.js';
 import { handleClientMessage } from './clientMessageHandler.js';
 import { HOOK_API_PREFIX, MAX_HOOK_BODY_SIZE } from './constants.js';
@@ -853,16 +853,17 @@ function registerChainRoutes(app: FastifyInstance): void {
     const body = request.body ?? {};
     const name = typeof body.name === 'string' ? body.name : '';
     const steps = Array.isArray(body.steps) ? (body.steps as ChainStepDef[]) : [];
-    if (steps.length > CHAIN_MAX_STEPS) {
+    const perkFlags = economyStore.getPerkFlags();
+    if (steps.length > chainMaxSteps(perkFlags)) {
       reply.send({ ok: false, reason: 'too-many-steps' });
       return;
     }
-    const result = chainStore.createDef({ name, steps });
+    const result = chainStore.createDef({ name, steps }, perkFlags);
     reply.send(result);
   });
 
   app.post<{ Params: { id: string } }>('/api/chains/defs/:id/run', async (request, reply) => {
-    const result = chainOrchestrator.startRun(request.params.id);
+    const result = chainOrchestrator.startRun(request.params.id, economyStore.getPerkFlags());
     reply.send(result);
   });
 }

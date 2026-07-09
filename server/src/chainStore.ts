@@ -11,7 +11,15 @@
  * survival) at ~/.pixel-agents/chain-defs.json + chain-runs.json, sharing
  * one append-only audit log at chain-audit.jsonl.
  *
- * CHAIN_MAX_STEPS=8, CHAIN_MAX_CONCURRENT_RUNS=3. CHAIN_STEP_TIMEOUT_MS is
+ * Base caps: CHAIN_MAX_STEPS=8, CHAIN_MAX_CONCURRENT_RUNS=3, raised by the
+ * Chain Gang perk to 12/5 (GAME-DESIGN §7.4 perk table). Chain routes never
+ * import economyStore directly; callers resolve perkFlags and pass it in
+ * per-call (same one-way-layering rule as standingOrderStore.ts's
+ * AutomationPerkFlags/standingOrderCap) — chainMaxSteps()/
+ * chainMaxConcurrentRuns() compute the effective cap at the point of
+ * enforcement (createDef / ChainOrchestrator.startRun), never baked in at
+ * module load, so a perk purchased mid-session takes effect immediately.
+ * CHAIN_STEP_TIMEOUT_MS is
  * strictly LESS than dispatchStore.ts's DISPATCH_TTL_MS (500_000 < 600_000)
  * — the chain's own timeout must trip before the dispatch-level TTL sweep,
  * or a chain could sit stuck in `running` for 5 extra minutes with a stale
@@ -24,17 +32,35 @@ import * as os from 'os';
 import * as path from 'path';
 
 import { LAYOUT_FILE_DIR } from './constants.js';
+import type { AutomationPerkFlags } from './standingOrderStore.js';
 
 const CHAIN_DEFS_FILE_NAME = 'chain-defs.json';
 const CHAIN_RUNS_FILE_NAME = 'chain-runs.json';
 const CHAIN_AUDIT_FILE_NAME = 'chain-audit.jsonl';
 
+/** Un-perked defaults — never overwritten globally by a perk purchase. */
 export const CHAIN_MAX_STEPS = 8;
 export const CHAIN_MAX_CONCURRENT_RUNS = 3;
+/** Chain Gang perk (800 Cash) caps — GAME-DESIGN §7.4 perk table. */
+export const CHAIN_MAX_STEPS_CHAIN_GANG = 12;
+export const CHAIN_MAX_CONCURRENT_RUNS_CHAIN_GANG = 5;
 /** Strictly less than dispatchStore.ts's DISPATCH_TTL_MS (600_000) — see
  *  file header. Verified against dispatchStore.ts's live constant, not
  *  retyped from memory. */
 export const CHAIN_STEP_TIMEOUT_MS = 500_000;
+
+/** Effective per-def step cap for the given perk state — 8 base, 12 with
+ *  Chain Gang. Computed at the point of enforcement (see file header). */
+export function chainMaxSteps(perkFlags: AutomationPerkFlags): number {
+  return perkFlags.chainGang ? CHAIN_MAX_STEPS_CHAIN_GANG : CHAIN_MAX_STEPS;
+}
+
+/** Effective concurrent-running-run cap for the given perk state — 3 base,
+ *  5 with Chain Gang. Computed at the point of enforcement (see file
+ *  header). */
+export function chainMaxConcurrentRuns(perkFlags: AutomationPerkFlags): number {
+  return perkFlags.chainGang ? CHAIN_MAX_CONCURRENT_RUNS_CHAIN_GANG : CHAIN_MAX_CONCURRENT_RUNS;
+}
 
 export interface ChainStepDef {
   /** Stable within a def — referenced by {{stepK...}} templates (1-based
@@ -191,6 +217,7 @@ export class ChainStore {
 
   createDef(
     input: { name: string; steps: ChainStepDef[] },
+    perkFlags: AutomationPerkFlags = {},
     now: number = Date.now(),
   ): ChainDefResult {
     if (typeof input.name !== 'string' || input.name.trim() === '') {
@@ -199,7 +226,7 @@ export class ChainStore {
     if (!Array.isArray(input.steps) || input.steps.length === 0) {
       return { ok: false, reason: 'missing-steps' };
     }
-    if (input.steps.length > CHAIN_MAX_STEPS) {
+    if (input.steps.length > chainMaxSteps(perkFlags)) {
       return { ok: false, reason: 'too-many-steps' };
     }
     for (const step of input.steps) {

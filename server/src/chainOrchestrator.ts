@@ -30,14 +30,15 @@
  */
 
 import {
-  CHAIN_MAX_CONCURRENT_RUNS,
   CHAIN_STEP_TIMEOUT_MS,
+  chainMaxConcurrentRuns,
   type ChainRun,
   ChainStore,
   chainStore,
   renderStepPrompt,
 } from './chainStore.js';
 import { type DispatchBroadcast, DispatchStore, dispatchStore } from './dispatchStore.js';
+import type { AutomationPerkFlags } from './standingOrderStore.js';
 
 /** Subset of employeeStore's Employee record resolveEmployeeDefaults() reads
  *  (GAME-DESIGN §7.3) — kept as a narrow local type so this file doesn't
@@ -117,11 +118,19 @@ export class ChainOrchestrator {
   }
 
   /** Human-initiated kickoff (CallModal-equivalent conscious act) — never
-   *  budget-gated. Starts step 0 synchronously. */
-  startRun(chainId: string, now: number = Date.now()): ChainStartResult {
+   *  budget-gated. Starts step 0 synchronously. `perkFlags` (Chain Gang)
+   *  raises the concurrent-run cap 3 -> 5 — resolved by the caller
+   *  (httpServer.ts via economyStore.getPerkFlags()) and passed in per-call,
+   *  never imported here (same one-way-layering rule as
+   *  resolveEmployeeDefaults/isAutomationPaused above). */
+  startRun(
+    chainId: string,
+    perkFlags: AutomationPerkFlags = {},
+    now: number = Date.now(),
+  ): ChainStartResult {
     const def = this.chains.getDef(chainId);
     if (!def) return { ok: false, reason: 'unknown-chain' };
-    if (this.chains.countRunningRuns() >= CHAIN_MAX_CONCURRENT_RUNS) {
+    if (this.chains.countRunningRuns() >= chainMaxConcurrentRuns(perkFlags)) {
       return { ok: false, reason: 'concurrent-cap-exceeded' };
     }
     const run = this.chains.createRun(def, now);

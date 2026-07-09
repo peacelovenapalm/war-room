@@ -337,3 +337,42 @@ describe('Worker session kill (KICKOFF v1.1 item 3)', () => {
     expect(chains.getRun(runA.run.id)?.status).toBe('halted'); // already-halted A is untouched, still halted
   });
 });
+
+describe('Chain Gang perk (F3) — concurrent-run cap', () => {
+  it('base cap 3 blocks a 4th concurrent run; Chain Gang raises it to 5, which itself still enforces', () => {
+    orchestrator.start();
+    const def1 = chains.createDef({ name: 'c1', steps: [step('s1', 'a', { machine: 'M1' })] });
+    const def2 = chains.createDef({ name: 'c2', steps: [step('s1', 'a', { machine: 'M2' })] });
+    const def3 = chains.createDef({ name: 'c3', steps: [step('s1', 'a', { machine: 'M3' })] });
+    const def4 = chains.createDef({ name: 'c4', steps: [step('s1', 'a', { machine: 'M4' })] });
+    const def5 = chains.createDef({ name: 'c5', steps: [step('s1', 'a', { machine: 'M5' })] });
+    const def6 = chains.createDef({ name: 'c6', steps: [step('s1', 'a', { machine: 'M6' })] });
+    if (!def1.ok || !def2.ok || !def3.ok || !def4.ok || !def5.ok || !def6.ok) {
+      throw new Error('unreachable');
+    }
+
+    // Without the perk: 3 concurrent runs succeed, a 4th is blocked at the
+    // base cap (this half already passed on pre-fix code too).
+    expect(orchestrator.startRun(def1.def.id).ok).toBe(true);
+    expect(orchestrator.startRun(def2.def.id).ok).toBe(true);
+    expect(orchestrator.startRun(def3.def.id).ok).toBe(true);
+    const blockedNoPerk = orchestrator.startRun(def4.def.id);
+    expect(blockedNoPerk.ok).toBe(false);
+    if (blockedNoPerk.ok) throw new Error('unreachable');
+    expect(blockedNoPerk.reason).toBe('concurrent-cap-exceeded');
+
+    // With Chain Gang owned: the 4th and 5th concurrent runs are now
+    // permitted — this is the half that FAILS on pre-fix code, where
+    // CHAIN_MAX_CONCURRENT_RUNS=3 was a hardcoded constant never read
+    // against any perk flag.
+    expect(orchestrator.startRun(def4.def.id, { chainGang: true }).ok).toBe(true);
+    expect(orchestrator.startRun(def5.def.id, { chainGang: true }).ok).toBe(true);
+
+    // ...but the perk-raised ceiling (5) itself still enforces — a 6th
+    // concurrent run is blocked even with the perk owned.
+    const blockedWithPerk = orchestrator.startRun(def6.def.id, { chainGang: true });
+    expect(blockedWithPerk.ok).toBe(false);
+    if (blockedWithPerk.ok) throw new Error('unreachable');
+    expect(blockedWithPerk.reason).toBe('concurrent-cap-exceeded');
+  });
+});

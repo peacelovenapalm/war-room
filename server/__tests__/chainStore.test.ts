@@ -12,6 +12,8 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 import {
   CHAIN_MAX_STEPS,
+  chainMaxConcurrentRuns,
+  chainMaxSteps,
   type ChainStepDef,
   ChainStore,
   chainStore,
@@ -46,6 +48,25 @@ afterEach(() => {
 function step(id: string, prompt: string, extra: Partial<ChainStepDef> = {}): ChainStepDef {
   return { id, prompt, ...extra };
 }
+
+// F3: Chain Gang perk (800 Cash, GAME-DESIGN §7.4) raises the step cap
+// 8 -> 12 — mirrors standingOrderStore.test.ts's `standingOrderCap`
+// describe block for the equivalent perk-derived-cap-function pattern.
+describe('chainMaxSteps', () => {
+  it('base cap is 8; Chain Gang raises it to 12', () => {
+    expect(chainMaxSteps({})).toBe(8);
+    expect(chainMaxSteps({ chainGang: false })).toBe(8);
+    expect(chainMaxSteps({ chainGang: true })).toBe(12);
+  });
+});
+
+describe('chainMaxConcurrentRuns', () => {
+  it('base cap is 3; Chain Gang raises it to 5', () => {
+    expect(chainMaxConcurrentRuns({})).toBe(3);
+    expect(chainMaxConcurrentRuns({ chainGang: false })).toBe(3);
+    expect(chainMaxConcurrentRuns({ chainGang: true })).toBe(5);
+  });
+});
 
 describe('validateStepTemplates', () => {
   it('accepts a template referencing an earlier step', () => {
@@ -100,6 +121,28 @@ describe('ChainStore.createDef', () => {
     const steps = Array.from({ length: CHAIN_MAX_STEPS + 1 }, (_, i) => step(`s${i}`, `step ${i}`));
     const result = s.createDef({ name: 'too long', steps });
     expect(result.ok).toBe(false);
+  });
+
+  // F3 (Chain Gang perk, 800 Cash, GAME-DESIGN §7.4): raises the per-def
+  // step cap 8 -> 12. Without chainGang owned, the original 8-step cap
+  // still enforces — pre-fix code fails the first assertion below because
+  // CHAIN_MAX_STEPS was hardcoded and never read against any perk flag.
+  it('Chain Gang perk raises the step cap 8 -> 12; base cap still enforces without it', () => {
+    const s = new ChainStore(defsPath, runsPath, auditPath);
+    const nineSteps = Array.from({ length: 9 }, (_, i) => step(`s${i}`, `step ${i}`));
+    const twelveSteps = Array.from({ length: 12 }, (_, i) => step(`s${i}`, `step ${i}`));
+    const thirteenSteps = Array.from({ length: 13 }, (_, i) => step(`s${i}`, `step ${i}`));
+
+    // Without the perk: 9 steps (over the base 8) is still rejected.
+    expect(s.createDef({ name: 'no-perk', steps: nineSteps }, {}).ok).toBe(false);
+
+    // With Chain Gang owned: 9-12 steps is now permitted...
+    expect(s.createDef({ name: 'gang-9', steps: nineSteps }, { chainGang: true }).ok).toBe(true);
+    expect(s.createDef({ name: 'gang-12', steps: twelveSteps }, { chainGang: true }).ok).toBe(true);
+    // ...but the perk-raised ceiling (12) itself still enforces.
+    expect(s.createDef({ name: 'gang-13', steps: thirteenSteps }, { chainGang: true }).ok).toBe(
+      false,
+    );
   });
 
   it('rejects a def with a forward-referencing template', () => {
