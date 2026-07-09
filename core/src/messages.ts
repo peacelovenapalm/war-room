@@ -39,6 +39,7 @@ export type ServerMessage =
   | StandingOrderUpdate
   | BudgetUpdate
   | AutomationStopped
+  | WorldEventFired
   | LayoutLoaded
   | FurnitureAssetsLoaded
   | CharacterSpritesLoaded
@@ -434,6 +435,14 @@ export interface AutomationStopped {
   type: 'automationStopped';
   haltedOrderIds: string[];
   haltedRunIds: string[];
+}
+
+export interface WorldEventFired {
+  type: 'worldEventFired';
+  id: string;
+  glyph: string;
+  ts: number;
+  summary: string;
 }
 
 export interface LayoutLoaded {

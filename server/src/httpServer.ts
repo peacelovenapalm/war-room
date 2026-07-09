@@ -164,7 +164,7 @@ export async function createHttpServer(options: HttpServerOptions): Promise<Http
   // through the deps object built here.
   const liveTickTimer = setInterval(() => {
     if (liveSocketTracker.count <= 0) return;
-    worldEventStore.tick(Date.now(), {
+    const fired = worldEventStore.tick(Date.now(), {
       online: true,
       isVacationActive: () => economyStore.isVacationActive(),
       getGrime: () => economyStore.getSnapshot().grime,
@@ -174,6 +174,21 @@ export async function createHttpServer(options: HttpServerOptions): Promise<Http
       pickRandomEmployeeId: () => pickRandomEmployeeId(),
       nudgeEmployeeMoodBoost: (id, delta) => employeeStore.nudgeMoodBoost(id, delta),
     });
+    // Live visual layer (v2 mechanic G5) — the store's own event log already
+    // feeds the digest/Bark planes; this is the one addition that lets a
+    // connected screen render WorldEventBanner.tsx in real time. Cash/
+    // Reputation effects (e.g. flavor_bonus) are NOT inferred from this
+    // message — they arrive on their own economyUpdate broadcast, same as
+    // every other real-money change.
+    if (fired) {
+      options.store.broadcast({
+        type: 'worldEventFired',
+        id: fired.id,
+        glyph: fired.glyph,
+        ts: fired.ts,
+        summary: fired.summary,
+      });
+    }
   }, LIVE_TICK_INTERVAL_MS);
   liveTickTimer.unref?.();
   app.addHook('onClose', () => clearInterval(liveTickTimer));

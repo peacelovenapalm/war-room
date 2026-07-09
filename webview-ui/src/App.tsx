@@ -28,6 +28,7 @@ import { TriagePanel } from './components/TriagePanel.js';
 import { Modal } from './components/ui/Modal.js';
 import { UnlocksPanel } from './components/UnlocksPanel.js';
 import { VersionIndicator } from './components/VersionIndicator.js';
+import { WorldEventBanner } from './components/WorldEventBanner.js';
 import { ZoomControls } from './components/ZoomControls.js';
 import {
   detectSendFailures,
@@ -115,6 +116,7 @@ function App() {
     chainRunReceivedAtById,
     dismissChainRun,
     budget,
+    worldEvents,
   } = useExtensionMessages(getOfficeState, editor.setLastSavedLayout, isEditDirty);
 
   // Show migration notice once layout reset is detected
@@ -429,6 +431,11 @@ function App() {
 
           {/* TRIAGE incident board (v1): auto-appears when a crisis exists */}
           <TriagePanel officeState={officeState} />
+
+          {/* World event banner (v2 mechanic G5, GAME-DESIGN §6.3): ambient
+              flavor only, dismissable, auto-hides — never competes with the
+              TRIAGE board's real-crisis attention. */}
+          <WorldEventBanner events={worldEvents} />
 
           {/* PROGRESSION HUD (v1 mechanic #3): level + streak + XP bar, always visible */}
           <ProgressionHUD progression={progression} />

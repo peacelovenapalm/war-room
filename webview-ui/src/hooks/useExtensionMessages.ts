@@ -30,6 +30,7 @@ import { setWallSprites } from '../office/wallTiles.js';
 import { isE2E } from '../runtime.js';
 import type { StandingOrderClient } from '../standingOrders.js';
 import { transport } from '../transport/index.js';
+import type { WorldEventEntryClient } from '../worldEventBanner.js';
 
 export interface SubagentCharacter {
   id: number;
@@ -118,6 +119,10 @@ export interface EconomySnapshotClient {
   ledger: Array<{ ts: number; delta: number; currency: 'cash' | 'reputation'; reason: string }>;
 }
 
+/** Rolling client-side window — WorldEventBanner.tsx only ever shows the
+ *  latest undismissed one; this just bounds memory for a long session. */
+const WORLD_EVENT_CLIENT_CAP = 20;
+
 interface ExtensionMessageState {
   agents: number[];
   selectedAgent: number | null;
@@ -148,6 +153,7 @@ interface ExtensionMessageState {
   dismissChainRun: (id: string) => void;
   standingOrders: StandingOrderClient[];
   budget: BudgetSnapshotClient | null;
+  worldEvents: WorldEventEntryClient[];
 }
 
 function saveAgentSeats(os: OfficeState): void {
@@ -193,6 +199,7 @@ export function useExtensionMessages(
   const [chainRunReceivedAtById, setChainRunReceivedAtById] = useState<Record<string, number>>({});
   const [standingOrders, setStandingOrders] = useState<StandingOrderClient[]>([]);
   const [budget, setBudget] = useState<BudgetSnapshotClient | null>(null);
+  const [worldEvents, setWorldEvents] = useState<WorldEventEntryClient[]>([]);
 
   // Hydrate from GET /api/dispatch/recent once on mount — a page refresh
   // otherwise only gets the WS replay of NON-terminal entries (getActive),
@@ -866,6 +873,18 @@ export function useExtensionMessages(
         // chainRunUpdate/standingOrderUpdate broadcasts halt-all itself
         // triggers (halted runs/disabled orders each emit their own
         // update above).
+      } else if (msg.type === 'worldEventFired') {
+        // Live visual layer (G5) — purely cosmetic flavor, WorldEventBanner.tsx's
+        // raw material. Rolling window capped small; any real Cash/Reputation
+        // effect (e.g. flavor_bonus) arrives separately on economyUpdate, never
+        // inferred from this message.
+        const entry: WorldEventEntryClient = {
+          id: msg.id as string,
+          glyph: msg.glyph as string,
+          ts: msg.ts as number,
+          summary: msg.summary as string,
+        };
+        setWorldEvents((prev) => [...prev, entry].slice(-WORLD_EVENT_CLIENT_CAP));
       } else if (msg.type === 'officeExpanded' || msg.type === 'officeLayoutUpdated') {
         // Server-authoritative building mutation (G2, §5.7) — the acting
         // client already applied this locally on the route's {ok:true};
@@ -926,5 +945,6 @@ export function useExtensionMessages(
     dismissChainRun,
     standingOrders,
     budget,
+    worldEvents,
   };
 }

@@ -118,6 +118,8 @@ components:
         - $ref: '#/components/schemas/StandingOrderUpdate'
         - $ref: '#/components/schemas/BudgetUpdate'
         - $ref: '#/components/schemas/AutomationStopped'
+        # Living world (v2 mechanic G5 — GAME-DESIGN.md §6.3)
+        - $ref: '#/components/schemas/WorldEventFired'
         # Layout
         - $ref: '#/components/schemas/LayoutLoaded'
         # Assets
@@ -1149,6 +1151,35 @@ components:
           type: array
           items:
             type: string
+
+    WorldEventFired:
+      description: >-
+        One ambient world event fired (v2 mechanic G5, GAME-DESIGN §6.3) —
+        broadcast live from the coarse "live tick" (§2) whenever
+        worldEventStore.tick() rolls a hit, in addition to the store's own
+        event log (already consumed by GET /api/economy/summary's digest).
+        Purely cosmetic flavor for WorldEventBanner.tsx; the ONE currency
+        effect any of these events can have (flavor_bonus's capped Cash) is
+        carried separately by its own economyUpdate broadcast, never inferred
+        from this message. Every fictional world event renders through
+        SignalChip with real=false (§6.1) — this message is never used for a
+        real/observed fact.
+      type: object
+      additionalProperties: false
+      required: [type, id, glyph, ts, summary]
+      properties:
+        type:
+          const: worldEventFired
+        id:
+          type: string
+          description: One of the 12 WORLD_EVENTS ids (worldEventStore.ts).
+        glyph:
+          type: string
+        ts:
+          type: integer
+        summary:
+          type: string
+          description: Short flavor text — the same string digest.ts's narrative reuses.
 
     LayoutLoaded:
       description: |
