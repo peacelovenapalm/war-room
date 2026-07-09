@@ -403,3 +403,23 @@ hue-shift recolors; this entry exists so picking Track 2 back up doesn't
 require re-deriving the transport, asset list, or QA gate from scratch.
 
 ---
+
+## [G6] PWA icons are TEMP placeholders — REVIEW-ON-RETURN
+
+G5 Track 2 art generation never ran (see above), so there was no real art
+set to pull PWA icons from — G6's own doc explicitly sanctions this exact
+fallback ("otherwise placeholder squares labeled TEMP"). Generated three
+flat accent-colored square PNGs via `pngjs` (already a devDependency, no
+new install): `webview-ui/public/icons/icon-192-TEMP.png`,
+`icon-512-TEMP.png`, `apple-touch-icon-TEMP.png` (180×180). Referenced
+from `webview-ui/vite.config.ts`'s `VitePWA({ manifest: { icons: [...] } })`
+and `index.html`'s `<link rel="apple-touch-icon">`.
+
+**When Track 2 art generation eventually runs:** swap the three file
+paths in `vite.config.ts`'s manifest `icons` array and `index.html`'s
+`apple-touch-icon` href to the real generated assets (or export square
+192/512/180 crops of the office banner art) — no other code change
+needed, no manifest schema change, no rebuild-pipeline change. Delete the
+three `*-TEMP.png` files once replaced.
+
+---

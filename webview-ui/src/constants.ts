@@ -46,6 +46,11 @@ export const GHOST_PREVIEW_TINT_ALPHA = 0.25;
 export const SELECTION_DASH_PATTERN: [number, number] = [4, 3];
 export const BUTTON_MIN_RADIUS = 6;
 export const BUTTON_RADIUS_ZOOM_FACTOR = 3;
+/** Touch target floor (G6, BUILD-PLAN §G6 task 4): screen-space radius for
+ *  the canvas-drawn delete/rotate buttons on coarse-pointer (touch) input —
+ *  22px radius = 44px diameter, matching the DOM 44px touch-target floor.
+ *  Desktop mouse/trackpad keeps BUTTON_MIN_RADIUS unchanged. */
+export const MOBILE_BUTTON_MIN_RADIUS = 22;
 export const BUTTON_ICON_SIZE_FACTOR = 0.45;
 export const BUTTON_LINE_WIDTH_MIN = 1.5;
 export const BUTTON_LINE_WIDTH_ZOOM_FACTOR = 0.5;
@@ -53,6 +58,12 @@ export const BUBBLE_FADE_DURATION_SEC = 0.5;
 export const BUBBLE_SITTING_OFFSET_PX = 10;
 export const BUBBLE_VERTICAL_OFFSET_PX = 24;
 export const FALLBACK_FLOOR_COLOR = '#808080';
+
+// ── PWA manifest (G6) — mirrors index.css's --color-bg. Duplicated (never
+// imported) since vite.config.ts is a Node build script and can't read a
+// CSS custom property; same "single numeric authority, can't cross this
+// boundary" posture BAY_BASE_COST documents below for economyConstants.ts. ──
+export const THEME_BG_COLOR = '#1e1e2e';
 
 // ── Rendering - Overlay Colors (canvas, not CSS) ─────────────
 export const SEAT_OWN_COLOR = 'rgba(0, 127, 212, 0.35)';

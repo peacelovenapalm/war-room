@@ -4,6 +4,7 @@ import * as fs from 'fs';
 import * as path from 'path';
 import type { Plugin } from 'vite';
 import { defineConfig } from 'vite';
+import { VitePWA } from 'vite-plugin-pwa';
 
 import { buildAssetIndex, buildFurnitureCatalog } from '../core/src/assets/build.ts';
 import {
@@ -12,6 +13,7 @@ import {
   decodeAllFurniture,
   decodeAllWalls,
 } from '../core/src/assets/loader.ts';
+import { THEME_BG_COLOR } from './src/constants.ts';
 
 // ── Decoded asset cache (invalidated on file change) ─────────────────────────
 
@@ -106,7 +108,65 @@ function browserMockAssetsPlugin(): Plugin {
 }
 
 export default defineConfig({
-  plugins: [tailwindcss(), react(), browserMockAssetsPlugin()],
+  plugins: [
+    tailwindcss(),
+    react(),
+    browserMockAssetsPlugin(),
+    // PWA (G6, BUILD-PLAN §G6 task 1): installable, add-to-home-screen on
+    // iOS Safari. Icons are TEMP placeholders (public/icons/*-TEMP.png) —
+    // G5 Track 2 art generation was deferred (see TUNING.md); swap the
+    // manifest icon paths when real art lands, no other change needed.
+    VitePWA({
+      registerType: 'autoUpdate',
+      includeAssets: ['icons/apple-touch-icon-TEMP.png'],
+      manifest: {
+        name: 'War Room',
+        short_name: 'War Room',
+        description: 'Pixel-art office dashboard for your Claude Code agents.',
+        display: 'standalone',
+        background_color: THEME_BG_COLOR,
+        theme_color: THEME_BG_COLOR,
+        icons: [
+          { src: 'icons/icon-192-TEMP.png', sizes: '192x192', type: 'image/png' },
+          { src: 'icons/icon-512-TEMP.png', sizes: '512x512', type: 'image/png' },
+          {
+            src: 'icons/icon-512-TEMP.png',
+            sizes: '512x512',
+            type: 'image/png',
+            purpose: 'maskable',
+          },
+        ],
+      },
+      workbox: {
+        // Real game state lives behind /api/* and the /ws upgrade — a cached
+        // response would silently violate the no-fake-real-numbers hard
+        // rule (BUILD-PLAN §G6). Explicit NetworkOnly, matched before any
+        // broader runtime route, so this can never be shadowed later.
+        //
+        // /ws needs no rule: the Fetch API (and therefore a service worker's
+        // `fetch` event, which is workbox's only interception point) never
+        // sees WebSocket upgrade traffic — it is a different wire protocol,
+        // not a cacheable HTTP request/response. There is nothing a workbox
+        // rule could "leak" through even if misconfigured.
+        // workbox's registerRoute defaults to GET only — the server's /api/*
+        // surface is GET+POST (verified: `grep -oE "\.(get|post)\('/api"
+        // server/src/httpServer.ts` returns no other verbs), so both are
+        // listed explicitly rather than relying on the GET default.
+        runtimeCaching: [
+          {
+            urlPattern: /^\/api\//,
+            method: 'GET',
+            handler: 'NetworkOnly',
+          },
+          {
+            urlPattern: /^\/api\//,
+            method: 'POST',
+            handler: 'NetworkOnly',
+          },
+        ],
+      },
+    }),
+  ],
   build: {
     outDir: '../dist/webview',
     emptyOutDir: true,

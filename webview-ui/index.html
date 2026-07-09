@@ -3,8 +3,23 @@
   <head>
     <meta charset="UTF-8" />
     <link rel="icon" type="image/svg+xml" href="/vite.svg" />
-    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-    <title>webview-ui</title>
+    <!-- user-scalable=no: the office canvas has its own custom pinch-to-zoom
+         camera (touchCamera.ts) bound to the same 2-finger gesture as native
+         Safari page-zoom — running both at once double-zooms and fights the
+         camera's clamping. Disabling native viewport zoom is deliberate. -->
+    <meta
+      name="viewport"
+      content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover"
+    />
+    <meta name="theme-color" content="#1e1e2e" />
+    <!-- iOS Safari add-to-home-screen (G6, BUILD-PLAN §G6 task 1): Safari
+         ignores the web manifest's display/icons fields and needs its own
+         meta tags + apple-touch-icon link for standalone mode. -->
+    <meta name="apple-mobile-web-app-capable" content="yes" />
+    <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent" />
+    <meta name="apple-mobile-web-app-title" content="War Room" />
+    <link rel="apple-touch-icon" href="/icons/apple-touch-icon-TEMP.png" />
+    <title>War Room</title>
   </head>
   <body>
     <div id="root"></div>
