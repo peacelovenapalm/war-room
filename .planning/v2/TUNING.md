@@ -88,6 +88,86 @@ v1.0 ships. Not gating G6 or the batch-3 deploy.
 
 ---
 
+## [KICKOFF v1.1 item 9] FOCUS/osascript — macOS Automation/TCC consent, not a code bug — REVIEW-ON-RETURN
+
+Diagnosed live on Greg's MacBook (2026-07-09), per KICKOFF v1.1 item 9's
+mandate to capture real stderr before fixing anything. Two candidate root
+causes were named: (a) the pid targets the headless `claude` CLI process,
+which has no GUI window identity for System Events to front; (b) missing
+macOS Automation/TCC consent for the process invoking `osascript`, which
+is a GUI permission dialog only Greg can click through.
+
+**Reproduction:** ran the exact `osascript -e 'tell application "System
+Events" to set frontmost of (first process whose unix id is <pid>) to
+true'` shape against TWO targets — a real running headless `claude` CLI
+pid (matching the failure's target type) AND a real running GUI app pid
+(`Terminal.app`, PID 4213 at time of test). **Both produced the identical
+error after ~60s:**
+
+```
+execution error: System Events got an error: AppleEvent timed out. (-1712)
+```
+
+Root cause (a) predicts the GUI-app target succeeds while only the
+headless-CLI target fails, with a distinct error (e.g. "no such process").
+It did not — both hung identically for ~60 seconds before timing out.
+This rules out (a) and confirms (b): the process invoking `osascript` has
+never been granted Automation consent to control "System Events", so
+macOS queues a consent dialog that never gets displayed/dismissed in this
+context, and the underlying AppleEvent IPC call blocks until its own
+~60s native timeout fires.
+
+**Why Greg's reported error looked different (`Command failed: osascript
+-e '...'` with no detail):** `attemptFocus`'s `execAsync` call uses
+`FOCUS_TIMEOUT_MS = 5_000` (`bin/dispatch-runner.mjs:85`) — Node kills the
+`osascript` child via its own 5s timeout, twelve times faster than the
+~60s native AppleEvent timeout ever fires. So in production the child is
+SIGTERM'd before it can report its real reason, and `shortErr`
+(`bin/dispatch-runner.mjs:588-591`, first line / 200 chars) surfaces only
+the generic exec-kill message. My reproduction ran the same osascript
+command WITHOUT that 5s wrapper, letting the native call complete and
+reveal its true reason. Same root cause either way — this just explains
+why the on-screen error text doesn't literally say "AppleEvent timed out".
+
+**Confirmed the real runner is launchd-run, not an interactive terminal
+session** (KICKOFF's own suspicion): `~/Library/LaunchAgents/com.war-room.dispatch-runner.plist`
+runs `/Users/greg/.local/share/fnm/node-versions/v22.22.3/installation/bin/node
+/Users/greg/code/war-room/bin/dispatch-runner.mjs` with `RunAtLoad` +
+`KeepAlive`, no bound TTY/window session. A LaunchAgent has no interactive
+surface to click through a first-run Automation consent dialog — so this
+grant can never happen on its own, no matter how the code is structured.
+No code fix exists for this; per KICKOFF item 9's own instruction, this is
+a REVIEW-ON-RETURN GUI-consent gate, not an engineering task.
+
+**What Greg should do, exact steps:**
+
+1. Open **System Settings → Privacy & Security → Automation**.
+2. Find the entry for **`node`** (the fnm-managed binary at
+   `/Users/greg/.local/share/fnm/node-versions/v22.22.3/installation/bin/node`
+   — if it isn't listed yet, the toggle won't appear until the LaunchAgent
+   triggers the OS's first-ever consent prompt while Greg is logged in and
+   present at the physical console to click "OK"; running
+   `launchctl kickstart -k gui/$(id -u)/com.war-room.dispatch-runner`
+   from an interactive Terminal session right after opening that System
+   Settings pane is the most reliable way to force the prompt to surface).
+3. Enable the checkbox for **System Events** under that `node` entry.
+4. Re-run the FOCUS action from War Room — the fix requires zero code
+   changes once consent is granted.
+
+**Ready-to-run diagnostic** (confirms whether consent was granted, safe,
+takes ~1s if granted or ~60s if not — run from an interactive Terminal,
+not through this harness):
+
+```bash
+osascript -e 'tell application "System Events" to set frontmost of (first process whose unix id is '"$$"') to true'
+echo "exit: $?"
+```
+
+Exit 0 with no output = consent is granted, FOCUS will work as-is. A
+60s hang ending in "AppleEvent timed out" = still ungranted, repeat step 2.
+
+---
+
 ## [G2] economyConstants.ts rate table — REVIEW-ON-RETURN
 
 `server/src/economyConstants.ts` holds every Cash/Reputation number in the
