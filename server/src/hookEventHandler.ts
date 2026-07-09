@@ -3,7 +3,7 @@ import * as path from 'path';
 import { employeeId } from '../../core/src/employeeId.js';
 import type { AgentEvent, HookProvider } from '../../core/src/provider.js';
 import type { AgentStateStore } from './agentStateStore.js';
-import { buffsForDesk } from './buildingBuffs.js';
+import { buffsForDesk, globalBuffs } from './buildingBuffs.js';
 import { SESSION_END_GRACE_MS } from './constants.js';
 import { economyStore } from './economyStore.js';
 import { employeeStore, XP_TURN } from './employeeStore.js';
@@ -722,11 +722,19 @@ export class HookEventHandler {
       // `assignedRoomId` holds the desk's PlacedFurniture uid (assign()'s
       // param name predates G2's buildings; it is used here as the desk-uid
       // reference the buff resolver needs).
+      //
+      // Server Room (§5.4) is a GLOBAL (non-desk) buff — read once off the
+      // same point-in-time layout regardless of assignedRoomId, and pass
+      // through to economyStore's Cash award below (economyStore.ts cannot
+      // import officeLayoutStore.ts itself: officeLayoutStore already
+      // imports economyStore, so a reverse import would cycle).
       let xpOverride: number | undefined;
+      let cashBonusPct = 0;
       const existingEmp = employeeStore.getById(employeeId(agent.machine, agent.projectDir));
-      if (existingEmp?.assignedRoomId) {
-        const layout = getOfficeLayout();
-        if (layout) {
+      const layout = getOfficeLayout();
+      if (layout) {
+        cashBonusPct = globalBuffs(layout).cashBonusPct;
+        if (existingEmp?.assignedRoomId) {
           const buffs = buffsForDesk(layout, existingEmp.assignedRoomId);
           if (buffs.xpBonusPct > 0) {
             xpOverride = Math.round(XP_TURN * (1 + buffs.xpBonusPct / 100));
@@ -743,8 +751,9 @@ export class HookEventHandler {
         },
       );
       // Economy (v2 mechanic G2, GAME-DESIGN §3): same real-event source
-      // and exclusion as above — Cash + the once/day streak-touch bonus.
-      economyStore.recordTurnCompleted();
+      // and exclusion as above — Cash + the once/day streak-touch bonus,
+      // plus the Server Room global Cash bonus computed above.
+      economyStore.recordTurnCompleted(undefined, cashBonusPct);
     }
     this.markAgentWaiting(agent, agentId, awaitingInput);
   }

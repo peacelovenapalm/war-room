@@ -20,10 +20,13 @@
 
 import * as path from 'path';
 
+import { employeeId } from '../../core/src/employeeId.js';
 import { normalizeProjectPath } from '../../core/src/normalizeProjectPath.js';
 import type { AgentStateStore } from './agentStateStore.js';
+import { buffsForDesk, globalBuffs } from './buildingBuffs.js';
 import type { EconomyStore } from './economyStore.js';
 import type { EmployeeStore } from './employeeStore.js';
+import { getOfficeLayout } from './officeLayoutStore.js';
 import type { ProgressionStore } from './progressionStore.js';
 import type { ShiftStats } from './shiftStats.js';
 import type { AgentState, PollStateValue } from './types.js';
@@ -43,8 +46,12 @@ export type CrisisXpSink = Pick<ProgressionStore, 'recordCrisisResolved'>;
 /** Employees (v2 mechanic G1): the same real-event contract as
  *  CrisisXpSink above, cloned rather than shared since the two stores
  *  take different arguments (employeeStore needs machine/projectDir to
- *  resolve identity; progressionStore is account-wide). */
-export type EmployeeCrisisXpSink = Pick<EmployeeStore, 'recordCrisisResolved'>;
+ *  resolve identity; progressionStore is account-wide). `getById` is
+ *  additionally needed here (not just `recordCrisisResolved`) to look up
+ *  the resolving employee's assignedRoomId for the War Room crisisXpBonusPct
+ *  buff (G2, GAME-DESIGN §5.4) — same point-in-time lookup pattern as
+ *  hookEventHandler.ts's Dev Pit XP-bonus wiring. */
+export type EmployeeCrisisXpSink = Pick<EmployeeStore, 'recordCrisisResolved' | 'getById'>;
 
 /** Economy (v2 mechanic G2): the same OBSERVED-transition-only contract as
  *  CrisisXpSink — never fires for the "no longer reported" clear or the
@@ -180,8 +187,26 @@ export function applyPollStates(
       // non-blocked state) — never fires for the silent "no longer
       // reported" clear below or the TTL sweep (see CrisisXpSink doc).
       progressionSink?.recordCrisisResolved(now);
-      employeeSink?.recordCrisisResolved(agent.machine, agent.projectDir, now);
-      economySink?.recordCrisisResolved(now);
+      // Building buffs (G2, GAME-DESIGN §5.4/§5.5) — point-in-time layout
+      // read at the moment of the real, observed resolution (never cached,
+      // never client-computed), same pattern as hookEventHandler.ts's Dev
+      // Pit XP-bonus wiring:
+      //   - War Room crisisXpBonusPct is desk-scoped — resolve the
+      //     employee's assignedRoomId first (a not-yet-hired employee has
+      //     none, which degrades to the neutral 0% via buffsForDesk).
+      //   - Server Room cashBonusPct is a GLOBAL buff — no desk lookup.
+      let crisisXpBonusPct = 0;
+      let cashBonusPct = 0;
+      const layout = getOfficeLayout();
+      if (layout) {
+        cashBonusPct = globalBuffs(layout).cashBonusPct;
+        const existingEmp = employeeSink?.getById(employeeId(agent.machine, agent.projectDir));
+        if (existingEmp?.assignedRoomId) {
+          crisisXpBonusPct = buffsForDesk(layout, existingEmp.assignedRoomId).crisisXpBonusPct;
+        }
+      }
+      employeeSink?.recordCrisisResolved(agent.machine, agent.projectDir, now, crisisXpBonusPct);
+      economySink?.recordCrisisResolved(now, cashBonusPct);
     }
     // `since` survives refresh ticks while the STATE VALUE is unchanged — it is
     // the transition time that anchors crisis aging (smoke → fire → alarm).

@@ -1,10 +1,31 @@
-import { beforeEach, describe, expect, it, vi } from 'vitest';
+import * as fs from 'fs';
+import * as os from 'os';
+import * as path from 'path';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 import { AgentStateStore } from '../src/agentStateStore.js';
+import { SERVER_ROOM_CASH_BONUS_PCT } from '../src/economyConstants.js';
+import { economyStore } from '../src/economyStore.js';
 import { HookEventHandler } from '../src/hookEventHandler.js';
 import { claudeProvider } from '../src/providers/hook/claude/claude.js';
 import { SessionRouter } from '../src/sessionRouter.js';
 import type { AgentState } from '../src/types.js';
+
+// Building buffs (G2, GAME-DESIGN §5.4): handleStop now reads the real
+// office layout via getOfficeLayout() (officeLayoutStore.ts ->
+// layoutPersistence.ts), which resolves os.homedir() unconditionally.
+// Existing tests in this file already exercise the employeeStore/
+// economyStore SINGLETONS on every Stop event (unmocked, pre-dating this
+// change) against whatever the real machine's homedir resolves to — that
+// was always a no-op (no ~/.pixel-agents/{employees,economy,layout}.json
+// in a dev/CI environment). Mocking os.homedir here to an isolated temp
+// dir is strictly safer/more hermetic and changes nothing about those
+// tests' assertions (none inspect employeeStore/economyStore state).
+let mockHome: string;
+vi.mock('os', async () => {
+  const actual = await vi.importActual<typeof import('os')>('os');
+  return { ...actual, homedir: () => mockHome };
+});
 
 /** Minimal AgentState for testing. */
 function createTestAgent(overrides: Partial<AgentState> = {}): AgentState {
@@ -57,6 +78,7 @@ describe('HookEventHandler', () => {
     waitingTimers = new Map();
     permissionTimers = new Map();
     mockWebview = createMockWebview();
+    mockHome = fs.mkdtempSync(path.join(os.tmpdir(), 'hook-event-handler-'));
     // Wire broadcast subscriber so mockWebview captures store broadcasts
     agents.on('broadcast', (msg) => {
       mockWebview.postMessage(msg);
@@ -68,6 +90,10 @@ describe('HookEventHandler', () => {
       claudeProvider,
       new SessionRouter(),
     );
+  });
+
+  afterEach(() => {
+    fs.rmSync(mockHome, { recursive: true, force: true });
   });
 
   // ── PermissionRequest ───────────────────────────────────────
@@ -203,6 +229,56 @@ describe('HookEventHandler', () => {
       (m) => m.type === 'agentToolStart' && m.toolId === 'bg-tool',
     );
     expect(reSent).toBeTruthy();
+  });
+
+  it('Stop passes the Server Room global Cash bonus (G2, GAME-DESIGN §5.4) through to economyStore.recordTurnCompleted — F2', () => {
+    // Spy rather than compare Cash totals: CASH_PER_TURN (2) rounds
+    // Math.round(2 * 1.1) back down to 2, so the bonus is mathematically
+    // invisible in the resulting Cash total at these tuned constants —
+    // asserting the actual argument passed to economyStore is the only
+    // way this test can fail on broken wiring and pass on correct wiring.
+    const recordTurnCompletedSpy = vi.spyOn(economyStore, 'recordTurnCompleted');
+
+    // Baseline: no layout file on disk at all -> getOfficeLayout() returns
+    // null -> globalBuffs neutral (cashBonusPct 0).
+    const baselineAgent = createTestAgent({ id: 91, sessionId: 'sr-baseline' });
+    agents.set(91, baselineAgent);
+    handler.registerAgent('sr-baseline', 91);
+    handler.handleEvent('claude', { hook_event_name: 'Stop', session_id: 'sr-baseline' });
+    expect(recordTurnCompletedSpy).toHaveBeenLastCalledWith(undefined, 0);
+
+    // Now write a layout with a Server Room + a qualifying PC_* furniture
+    // piece placed inside it.
+    fs.mkdirSync(path.join(mockHome, '.pixel-agents'), { recursive: true });
+    fs.writeFileSync(
+      path.join(mockHome, '.pixel-agents', 'layout.json'),
+      JSON.stringify({
+        version: 1,
+        cols: 20,
+        rows: 11,
+        tiles: new Array(220).fill(1),
+        furniture: [{ uid: 'pc-1', type: 'PC_FRONT_ON_1', col: 1, row: 1 }],
+        rooms: [
+          {
+            uid: 'server-room',
+            type: 'server_room',
+            colStart: 0,
+            rowStart: 0,
+            colEnd: 4,
+            rowEnd: 4,
+            createdAt: 0,
+          },
+        ],
+      }),
+    );
+
+    const buffedAgent = createTestAgent({ id: 92, sessionId: 'sr-buffed' });
+    agents.set(92, buffedAgent);
+    handler.registerAgent('sr-buffed', 92);
+    handler.handleEvent('claude', { hook_event_name: 'Stop', session_id: 'sr-buffed' });
+    expect(recordTurnCompletedSpy).toHaveBeenLastCalledWith(undefined, SERVER_ROOM_CASH_BONUS_PCT);
+
+    recordTurnCompletedSpy.mockRestore();
   });
 
   // ── hookDelivered ───────────────────────────────────────────

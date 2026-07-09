@@ -28,6 +28,7 @@ import {
   REP_DECAY_DARK_DAY,
   REP_DECAY_GRACE_DAYS,
   REP_SHIFT_GRADE,
+  SERVER_ROOM_CASH_BONUS_PCT,
 } from '../src/economyConstants.js';
 import { EconomyStore, economyStore } from '../src/economyStore.js';
 
@@ -117,6 +118,51 @@ describe('EconomyStore real-event awards', () => {
     store.recordShiftDayClosed({ date: '2026-07-07', turnsCompleted: 0, efficiency: 'LEAN' }, DAY1);
     store.recordShiftDayClosed({ date: '2026-07-07', turnsCompleted: 5, efficiency: null }, DAY1);
     expect(store.getSnapshot().cash).toBe(0);
+  });
+});
+
+describe('EconomyStore Server Room cashBonusPct (G2, GAME-DESIGN §5.4) — F2', () => {
+  it('recordTurnCompleted applies cashBonusPct to CASH_PER_TURN only, never the once/day streak touch', () => {
+    const store = new EconomyStore(statePath);
+    // CASH_PER_TURN (2) is small enough that a 10% bump rounds back down to
+    // 2 — assert the exact rounded formula (the real regression check on
+    // the wiring) rather than a "greater than" that a small base defeats.
+    store.recordTurnCompleted(DAY1, SERVER_ROOM_CASH_BONUS_PCT);
+    const expectedTurnCash = Math.round(CASH_PER_TURN * (1 + SERVER_ROOM_CASH_BONUS_PCT / 100));
+    expect(store.getSnapshot().cash).toBe(expectedTurnCash + CASH_STREAK_DAY_TOUCH);
+    // A larger, more realistic bonus pct DOES measurably exceed the unbuffed award.
+    const secondStore = new EconomyStore(path.join(tmpDir, 'economy-2.json'));
+    secondStore.recordTurnCompleted(DAY1, 200);
+    expect(secondStore.getSnapshot().cash).toBeGreaterThan(CASH_PER_TURN + CASH_STREAK_DAY_TOUCH);
+  });
+
+  it('recordCrisisResolved applies cashBonusPct to CASH_PER_CRISIS_RESOLVED', () => {
+    const store = new EconomyStore(statePath);
+    store.recordCrisisResolved(DAY1, SERVER_ROOM_CASH_BONUS_PCT);
+    const expected = Math.round(CASH_PER_CRISIS_RESOLVED * (1 + SERVER_ROOM_CASH_BONUS_PCT / 100));
+    expect(store.getSnapshot().cash).toBe(expected);
+    expect(expected).toBeGreaterThan(CASH_PER_CRISIS_RESOLVED);
+  });
+
+  it('recordDispatchExit applies cashBonusPct to CASH_PER_DISPATCH_EXIT_0, still bounded by the daily cap', () => {
+    const store = new EconomyStore(statePath);
+    store.recordDispatchExit(0, DAY1, SERVER_ROOM_CASH_BONUS_PCT);
+    const expected = Math.round(CASH_PER_DISPATCH_EXIT_0 * (1 + SERVER_ROOM_CASH_BONUS_PCT / 100));
+    expect(store.getSnapshot().cash).toBe(expected);
+    expect(expected).toBeGreaterThan(CASH_PER_DISPATCH_EXIT_0);
+    // The daily cap still wins even with the bonus applied — award never
+    // exceeds DISPATCH_CASH_DAILY_CAP total for the day (anti-farming
+    // guarantee holds regardless of Server Room).
+    for (let i = 1; i < 12; i++) {
+      store.recordDispatchExit(0, DAY1 + i * 1000, SERVER_ROOM_CASH_BONUS_PCT);
+    }
+    expect(store.getSnapshot().cash).toBe(DISPATCH_CASH_DAILY_CAP);
+  });
+
+  it('a zero cashBonusPct (no Server Room) awards the plain unbuffed amount — default param', () => {
+    const store = new EconomyStore(statePath);
+    store.recordTurnCompleted(DAY1);
+    expect(store.getSnapshot().cash).toBe(CASH_PER_TURN + CASH_STREAK_DAY_TOUCH);
   });
 });
 

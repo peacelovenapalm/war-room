@@ -10,6 +10,7 @@ import type { AgentStateStore } from './agentStateStore.js';
 import { getBriefing } from './briefingProvider.js';
 import type { ClaudeRateLimitSnapshot } from './budgetStore.js';
 import { budgetStore } from './budgetStore.js';
+import { globalBuffs } from './buildingBuffs.js';
 import { chainOrchestrator } from './chainOrchestrator.js';
 import { CHAIN_MAX_STEPS, type ChainStepDef, chainStore } from './chainStore.js';
 import type { AssetCache, SetHooksEnabledSideEffect } from './clientMessageHandler.js';
@@ -25,7 +26,7 @@ import { economyStore } from './economyStore.js';
 import type { Employee, ScoreTrack } from './employeeStore.js';
 import { employeeStore } from './employeeStore.js';
 import { notifyBigMoment } from './notifyBark.js';
-import { addRoom, buyFurniture, expandOffice, sell } from './officeLayoutStore.js';
+import { addRoom, buyFurniture, expandOffice, getOfficeLayout, sell } from './officeLayoutStore.js';
 import type { RoomType } from './officeLayoutTypes.js';
 import { RoomType as RoomTypeValues } from './officeLayoutTypes.js';
 import { applyPollStates, parsePollBody, startPollStateSweep } from './pollStateHandler.js';
@@ -525,7 +526,14 @@ function registerDispatchRoutes(app: FastifyInstance, options: HttpServerOptions
       // codex exits additionally feed the budget guardrail's weekly counter.
       if (event === 'exited' && exitCode !== undefined) {
         const record = dispatchStore.getRecord(request.params.id);
-        economyStore.recordDispatchExit(exitCode);
+        // Server Room global Cash buff (G2, GAME-DESIGN §5.4) — same
+        // point-in-time layout read as the poll route below and
+        // hookEventHandler.ts's turn-completed award; economyStore.ts
+        // cannot import officeLayoutStore.ts itself (reverse-cycle risk),
+        // so the bonus is computed here and passed through.
+        const dispatchLayout = getOfficeLayout();
+        const dispatchCashBonusPct = dispatchLayout ? globalBuffs(dispatchLayout).cashBonusPct : 0;
+        economyStore.recordDispatchExit(exitCode, undefined, dispatchCashBonusPct);
         if (record?.employeeId) {
           employeeStore.recordDispatchExit(record.employeeId, exitCode);
         }

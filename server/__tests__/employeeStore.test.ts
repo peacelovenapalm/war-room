@@ -16,18 +16,60 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { employeeId } from '../../core/src/employeeId.js';
 import { computeLevel, xpForLevel } from '../../core/src/leveling.js';
 import {
+  BREAK_ROOM_MOOD_REGEN_MULT,
+  KITCHEN_MOOD_DECAY_MULT,
+  WAR_ROOM_CRISIS_XP_BONUS_PCT,
+} from '../src/economyConstants.js';
+import {
   computeBadges,
   computeScores,
   EMPLOYEE_LEVEL_CURVE,
   EmployeeStore,
   employeeStore,
   MIN_SAMPLES,
+  MOOD_BREAK_RESTORE,
+  MOOD_DECAY_PER_HOUR_IDLE,
   QUIT_GRACE_DAYS,
   QUIT_THRESHOLD_MOOD,
   SPEED_MS_REFERENCE,
   XP_CRISIS_RESOLVED,
   XP_TURN,
 } from '../src/employeeStore.js';
+import type { OfficeLayout, PlacedFurniture, PlacedRoom } from '../src/officeLayoutTypes.js';
+import { RoomType, TileType } from '../src/officeLayoutTypes.js';
+
+// Building buffs (G2, GAME-DESIGN §5.4/§5.5): break_/applyUpkeep now call
+// the real getOfficeLayout() (via officeLayoutStore.ts). Stub only that
+// module boundary (keep every other real export via vi.importActual, same
+// idiom as the `os` mock above) so buffsForDesk/globalBuffs — the real,
+// unmocked computation — run against a layout fixture we control.
+vi.mock('../src/officeLayoutStore.js', async () => {
+  const actual = await vi.importActual<typeof import('../src/officeLayoutStore.js')>(
+    '../src/officeLayoutStore.js',
+  );
+  return { ...actual, getOfficeLayout: vi.fn() };
+});
+const { getOfficeLayout } = await import('../src/officeLayoutStore.js');
+
+/** Mirrors buildingBuffs.test.ts's fixture-construction style. */
+function baseLayout(overrides: Partial<OfficeLayout> = {}): OfficeLayout {
+  const cols = 20;
+  const rows = 11;
+  const tiles = new Array(cols * rows).fill(TileType.FLOOR_1);
+  return { version: 1, cols, rows, tiles, furniture: [], rooms: [], ...overrides };
+}
+function desk(uid: string, col: number, row: number): PlacedFurniture {
+  return { uid, type: 'DESK_FRONT', col, row };
+}
+function room(
+  type: RoomType,
+  colStart: number,
+  rowStart: number,
+  colEnd: number,
+  rowEnd: number,
+): PlacedRoom {
+  return { uid: `room-${type}`, type, colStart, rowStart, colEnd, rowEnd, createdAt: 0 };
+}
 
 // Isolated temp HOME for the VITEST-guard describe block below (same
 // rationale/pattern as dispatchRoutes.test.ts — mocks os.homedir so the
@@ -47,6 +89,18 @@ beforeEach(() => {
   tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'employee-store-'));
   statePath = path.join(tmpDir, 'employees.json');
   ledgerDir = path.join(tmpDir, 'employee-history');
+  // Building buffs (G2, GAME-DESIGN §5.4/§5.5): applyUpkeep/break_/
+  // recordCrisisResolved now call the real getOfficeLayout() (via
+  // officeLayoutStore.ts -> layoutPersistence.ts), which resolves
+  // os.homedir() unconditionally — give it a valid default here so that
+  // read resolves to "no layout file" (tolerant -> null -> neutral buffs)
+  // instead of throwing on the mocked homedir's undefined default. The
+  // nested VITEST-guard describe below still overrides this per-test.
+  vitestGuardHome = tmpDir;
+  // Default: no layout (neutral buffs) — individual tests below override
+  // via vi.mocked(getOfficeLayout).mockReturnValue(...) to exercise a
+  // specific room fixture.
+  vi.mocked(getOfficeLayout).mockReturnValue(null);
 });
 
 afterEach(() => {
@@ -471,6 +525,145 @@ describe('EmployeeStore XP sources', () => {
     const emp = store.getAll(DAY1 + 2000).find((e) => e.projectDir === '/proj')!;
     expect(emp.xp).toBe(XP_TURN + XP_CRISIS_RESOLVED);
     expect(emp.moodBoost).toBeGreaterThan(0);
+  });
+
+  it('recordCrisisResolved applies an optional crisisXpBonusPct override (War Room buff, G2 §5.4), rounded like xpOverride — F2', () => {
+    const store = new EmployeeStore(statePath, ledgerDir);
+    store.recordTurn('MACBOOK', '/proj', 'proj', { outputTokensCumulative: 100 }, DAY1);
+    // Unbuffed baseline.
+    store.recordCrisisResolved('MACBOOK', '/proj', DAY1 + 1000);
+    const unbuffed = store.getAll(DAY1 + 1500).find((e) => e.projectDir === '/proj')!;
+    expect(unbuffed.xp).toBe(XP_TURN + XP_CRISIS_RESOLVED);
+
+    // Second resolution, this time with the War Room bonus applied.
+    store.recordCrisisResolved('MACBOOK', '/proj', DAY1 + 2000, WAR_ROOM_CRISIS_XP_BONUS_PCT);
+    const buffed = store.getAll(DAY1 + 2500).find((e) => e.projectDir === '/proj')!;
+    const expectedBonusedXp = Math.round(
+      XP_CRISIS_RESOLVED * (1 + WAR_ROOM_CRISIS_XP_BONUS_PCT / 100),
+    );
+    expect(buffed.xp).toBe(unbuffed.xp + expectedBonusedXp);
+    // The buffed award is measurably higher than the plain XP_CRISIS_RESOLVED.
+    expect(expectedBonusedXp).toBeGreaterThan(XP_CRISIS_RESOLVED);
+  });
+});
+
+describe('EmployeeStore.break_ — Break Room moodRegenMult (G2, GAME-DESIGN §5.4) — F2', () => {
+  it('restores MOOD_BREAK_RESTORE * BREAK_ROOM_MOOD_REGEN_MULT when the desk is inside a Break Room; MOOD_BREAK_RESTORE only otherwise', () => {
+    const layout = baseLayout({
+      furniture: [desk('break-desk', 1, 1), desk('plain-desk', 15, 8)],
+      rooms: [room(RoomType.BREAK_ROOM, 0, 0, 4, 4)],
+    });
+    vi.mocked(getOfficeLayout).mockReturnValue(layout);
+    const store = new EmployeeStore(statePath, ledgerDir);
+
+    function moodDeltaFromBreak(projectDir: string, deskUid: string): number {
+      // 3 turns to reach 'active' (break_ requires it), then assign a desk,
+      // then idle 100h so decay brings mood down from 70 with headroom
+      // under the 100 cap for the x1.5 multiplier to actually show up.
+      let emp = store.recordTurn(
+        'MACBOOK',
+        projectDir,
+        projectDir,
+        { outputTokensCumulative: 1 },
+        DAY1,
+      );
+      emp = store.recordTurn(
+        'MACBOOK',
+        projectDir,
+        projectDir,
+        { outputTokensCumulative: 2 },
+        DAY1 + 1000,
+      );
+      emp = store.recordTurn(
+        'MACBOOK',
+        projectDir,
+        projectDir,
+        { outputTokensCumulative: 3 },
+        DAY1 + 2000,
+      );
+      expect(emp.status).toBe('active');
+      store.assign(emp.id, deskUid, DAY1 + 3000);
+      const farTime = DAY1 + 3000 + 100 * 3_600_000; // 100h idle
+      const moodBefore = store.getById(emp.id, farTime)!.mood;
+      const result = store.break_(emp.id, farTime);
+      expect(result.ok).toBe(true);
+      const moodAfter = (result as { ok: true; employee: { mood: number } }).employee.mood;
+      return moodAfter - moodBefore;
+    }
+
+    const breakRoomDelta = moodDeltaFromBreak('/break-room-emp', 'break-desk');
+    const plainDeskDelta = moodDeltaFromBreak('/plain-desk-emp', 'plain-desk');
+
+    expect(breakRoomDelta).toBeCloseTo(MOOD_BREAK_RESTORE * BREAK_ROOM_MOOD_REGEN_MULT, 5);
+    expect(plainDeskDelta).toBeCloseTo(MOOD_BREAK_RESTORE, 5);
+    expect(breakRoomDelta).toBeGreaterThan(plainDeskDelta);
+  });
+
+  it('a missing layout degrades to the neutral MOOD_BREAK_RESTORE (never throws), even for an assigned desk', () => {
+    vi.mocked(getOfficeLayout).mockReturnValue(null);
+    const store = new EmployeeStore(statePath, ledgerDir);
+    let emp = store.recordTurn('MACBOOK', '/proj', 'proj', { outputTokensCumulative: 1 }, DAY1);
+    emp = store.recordTurn('MACBOOK', '/proj', 'proj', { outputTokensCumulative: 2 }, DAY1 + 1000);
+    emp = store.recordTurn('MACBOOK', '/proj', 'proj', { outputTokensCumulative: 3 }, DAY1 + 2000);
+    store.assign(emp.id, 'some-desk', DAY1 + 3000);
+    const moodBefore = store.getById(emp.id, DAY1 + 4000)!.mood;
+    let result: ReturnType<EmployeeStore['break_']> | undefined;
+    expect(() => {
+      result = store.break_(emp.id, DAY1 + 4000);
+    }).not.toThrow();
+    const moodAfter = (result as { ok: true; employee: { mood: number } }).employee.mood;
+    expect(moodAfter - moodBefore).toBeCloseTo(MOOD_BREAK_RESTORE, 5);
+  });
+});
+
+describe('EmployeeStore idle mood decay — Kitchen moodDecayMult (G2, GAME-DESIGN §5.4) — F2', () => {
+  it('decays mood slower by moodDecayMult when a Kitchen exists anywhere in the layout (global, no desk needed)', () => {
+    const store = new EmployeeStore(statePath, ledgerDir);
+    const elapsedHours = 10;
+    const laterNow = DAY1 + elapsedHours * 3_600_000;
+
+    vi.mocked(getOfficeLayout).mockReturnValue(baseLayout());
+    const noKitchen = store.recordTurn(
+      'MACBOOK',
+      '/no-kitchen',
+      'no-kitchen',
+      { outputTokensCumulative: 1 },
+      DAY1,
+    );
+    const noKitchenMood = store.getById(noKitchen.id, laterNow)!.mood;
+    expect(70 - noKitchenMood).toBeCloseTo(elapsedHours * MOOD_DECAY_PER_HOUR_IDLE, 5);
+
+    vi.mocked(getOfficeLayout).mockReturnValue(
+      baseLayout({ rooms: [room(RoomType.KITCHEN, 0, 0, 3, 3)] }),
+    );
+    const withKitchen = store.recordTurn(
+      'MACBOOK',
+      '/kitchen',
+      'kitchen',
+      { outputTokensCumulative: 1 },
+      DAY1,
+    );
+    const withKitchenMood = store.getById(withKitchen.id, laterNow)!.mood;
+    expect(70 - withKitchenMood).toBeCloseTo(
+      elapsedHours * MOOD_DECAY_PER_HOUR_IDLE * KITCHEN_MOOD_DECAY_MULT,
+      5,
+    );
+
+    // Measurably slower decay with a Kitchen present, over the identical window.
+    expect(withKitchenMood).toBeGreaterThan(noKitchenMood);
+  });
+
+  it('a missing layout degrades to the neutral moodDecayMult of 1 (never throws)', () => {
+    vi.mocked(getOfficeLayout).mockReturnValue(null);
+    const store = new EmployeeStore(statePath, ledgerDir);
+    const elapsedHours = 10;
+    const laterNow = DAY1 + elapsedHours * 3_600_000;
+    const emp = store.recordTurn('MACBOOK', '/proj', 'proj', { outputTokensCumulative: 1 }, DAY1);
+    let mood: number | undefined;
+    expect(() => {
+      mood = store.getById(emp.id, laterNow)!.mood;
+    }).not.toThrow();
+    expect(70 - mood!).toBeCloseTo(elapsedHours * MOOD_DECAY_PER_HOUR_IDLE, 5);
   });
 });
 

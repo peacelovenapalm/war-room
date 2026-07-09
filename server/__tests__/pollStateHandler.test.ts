@@ -10,12 +10,53 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 import { AgentStateStore } from '../src/agentStateStore.js';
 import {
+  SERVER_ROOM_CASH_BONUS_PCT,
+  WAR_ROOM_CRISIS_XP_BONUS_PCT,
+} from '../src/economyConstants.js';
+import type { Employee } from '../src/employeeStore.js';
+import type { OfficeLayout, PlacedFurniture, PlacedRoom } from '../src/officeLayoutTypes.js';
+import { RoomType, TileType } from '../src/officeLayoutTypes.js';
+import {
   applyPollStates,
   parsePollBody,
   POLL_STATE_TTL_MS,
   startPollStateSweep,
 } from '../src/pollStateHandler.js';
 import type { AgentState } from '../src/types.js';
+
+// Building buffs (G2, GAME-DESIGN §5.4/§5.5): applyPollStates reads the
+// office layout via officeLayoutStore.ts's getOfficeLayout() at the moment
+// a crisis resolves. Stub the module boundary only (keep every other real
+// export, same `vi.importActual` idiom economyStore.test.ts/
+// employeeStore.test.ts use for `os`) so buffsForDesk/globalBuffs — the
+// real, unmocked computation — run against a layout fixture we control.
+vi.mock('../src/officeLayoutStore.js', async () => {
+  const actual = await vi.importActual<typeof import('../src/officeLayoutStore.js')>(
+    '../src/officeLayoutStore.js',
+  );
+  return { ...actual, getOfficeLayout: vi.fn() };
+});
+const { getOfficeLayout } = await import('../src/officeLayoutStore.js');
+
+/** Mirrors buildingBuffs.test.ts's fixture-construction style. */
+function baseLayout(overrides: Partial<OfficeLayout> = {}): OfficeLayout {
+  const cols = 20;
+  const rows = 11;
+  const tiles = new Array(cols * rows).fill(TileType.FLOOR_1);
+  return { version: 1, cols, rows, tiles, furniture: [], rooms: [], ...overrides };
+}
+function desk(uid: string, col: number, row: number): PlacedFurniture {
+  return { uid, type: 'DESK_FRONT', col, row };
+}
+function room(
+  type: RoomType,
+  colStart: number,
+  rowStart: number,
+  colEnd: number,
+  rowEnd: number,
+): PlacedRoom {
+  return { uid: `room-${type}`, type, colStart, rowStart, colEnd, rowEnd, createdAt: 0 };
+}
 
 function createTestAgent(overrides: Partial<AgentState> = {}): AgentState {
   return {
@@ -266,6 +307,148 @@ describe('applyPollStates', () => {
     );
     applyPollStates(store, 'MACBOOK', 'MACBOOK', [], 4000, undefined, { recordCrisisResolved });
     expect(recordCrisisResolved).toHaveBeenCalledTimes(1); // still just the one observed resolution
+  });
+});
+
+describe('applyPollStates — building buffs on crisis resolution (G2, GAME-DESIGN §5.4/§5.5, F2)', () => {
+  let store: AgentStateStore;
+
+  beforeEach(() => {
+    store = new AgentStateStore();
+    vi.mocked(getOfficeLayout).mockReturnValue(null);
+  });
+
+  it('War Room: a resolver seated at a War Room desk gets WAR_ROOM_CRISIS_XP_BONUS_PCT; a non-War-Room desk gets 0 — same layout', () => {
+    const layout = baseLayout({
+      furniture: [desk('war-desk', 1, 1), desk('plain-desk', 15, 8)],
+      rooms: [room(RoomType.WAR_ROOM, 0, 0, 4, 4)],
+    });
+    vi.mocked(getOfficeLayout).mockReturnValue(layout);
+    const recordCrisisResolved = vi.fn();
+    const employeeSinkFor = (assignedRoomId: string | undefined) => ({
+      recordCrisisResolved,
+      getById: vi.fn(() => ({ assignedRoomId }) as unknown as Employee),
+    });
+
+    // War-Room-seated employee.
+    store.set(
+      1,
+      createTestAgent({ id: 1, sessionId: 'war-sess', machine: 'MACBOOK', projectDir: '/war' }),
+    );
+    applyPollStates(store, 'MACBOOK', 'MACBOOK', [{ id: 'war-sess', state: 'blocked' }], 1000);
+    applyPollStates(
+      store,
+      'MACBOOK',
+      'MACBOOK',
+      [{ id: 'war-sess', state: 'working' }],
+      2000,
+      undefined,
+      undefined,
+      employeeSinkFor('war-desk'),
+    );
+    expect(recordCrisisResolved).toHaveBeenCalledWith(
+      'MACBOOK',
+      '/war',
+      2000,
+      WAR_ROOM_CRISIS_XP_BONUS_PCT,
+    );
+
+    // Non-War-Room-seated employee, identical layout — neutral 0% bonus.
+    recordCrisisResolved.mockClear();
+    store.set(
+      2,
+      createTestAgent({ id: 2, sessionId: 'plain-sess', machine: 'MACBOOK', projectDir: '/plain' }),
+    );
+    applyPollStates(store, 'MACBOOK', 'MACBOOK', [{ id: 'plain-sess', state: 'blocked' }], 3000);
+    applyPollStates(
+      store,
+      'MACBOOK',
+      'MACBOOK',
+      [{ id: 'plain-sess', state: 'working' }],
+      4000,
+      undefined,
+      undefined,
+      employeeSinkFor('plain-desk'),
+    );
+    expect(recordCrisisResolved).toHaveBeenCalledWith('MACBOOK', '/plain', 4000, 0);
+  });
+
+  it('Server Room: economySink gets SERVER_ROOM_CASH_BONUS_PCT only when qualifying furniture sits inside the Server Room', () => {
+    const economyRecordCrisisResolved = vi.fn();
+
+    // No Server Room in the layout at all.
+    vi.mocked(getOfficeLayout).mockReturnValue(baseLayout());
+    store.set(1, createTestAgent({ id: 1, sessionId: 'no-server-sess', machine: 'MACBOOK' }));
+    applyPollStates(
+      store,
+      'MACBOOK',
+      'MACBOOK',
+      [{ id: 'no-server-sess', state: 'blocked' }],
+      1000,
+    );
+    applyPollStates(
+      store,
+      'MACBOOK',
+      'MACBOOK',
+      [{ id: 'no-server-sess', state: 'working' }],
+      2000,
+      undefined,
+      undefined,
+      undefined,
+      { recordCrisisResolved: economyRecordCrisisResolved },
+    );
+    expect(economyRecordCrisisResolved).toHaveBeenCalledWith(2000, 0);
+
+    // Server Room with a qualifying PC_* furniture piece placed inside.
+    economyRecordCrisisResolved.mockClear();
+    const layoutWithServerRoom = baseLayout({
+      furniture: [{ uid: 'pc-1', type: 'PC_FRONT_ON_1', col: 1, row: 1 }],
+      rooms: [room(RoomType.SERVER_ROOM, 0, 0, 4, 4)],
+    });
+    vi.mocked(getOfficeLayout).mockReturnValue(layoutWithServerRoom);
+    store.set(2, createTestAgent({ id: 2, sessionId: 'server-sess', machine: 'MACBOOK' }));
+    applyPollStates(store, 'MACBOOK', 'MACBOOK', [{ id: 'server-sess', state: 'blocked' }], 3000);
+    applyPollStates(
+      store,
+      'MACBOOK',
+      'MACBOOK',
+      [{ id: 'server-sess', state: 'working' }],
+      4000,
+      undefined,
+      undefined,
+      undefined,
+      { recordCrisisResolved: economyRecordCrisisResolved },
+    );
+    expect(economyRecordCrisisResolved).toHaveBeenCalledWith(4000, SERVER_ROOM_CASH_BONUS_PCT);
+  });
+
+  it('a missing layout degrades to neutral (0% / no bonus), never throws', () => {
+    vi.mocked(getOfficeLayout).mockReturnValue(null);
+    const employeeRecordCrisisResolved = vi.fn();
+    const economyRecordCrisisResolved = vi.fn();
+    store.set(1, createTestAgent({ id: 1, sessionId: 'no-layout-sess', machine: 'MACBOOK' }));
+    applyPollStates(
+      store,
+      'MACBOOK',
+      'MACBOOK',
+      [{ id: 'no-layout-sess', state: 'blocked' }],
+      1000,
+    );
+    expect(() =>
+      applyPollStates(
+        store,
+        'MACBOOK',
+        'MACBOOK',
+        [{ id: 'no-layout-sess', state: 'working' }],
+        2000,
+        undefined,
+        undefined,
+        { recordCrisisResolved: employeeRecordCrisisResolved, getById: vi.fn() },
+        { recordCrisisResolved: economyRecordCrisisResolved },
+      ),
+    ).not.toThrow();
+    expect(employeeRecordCrisisResolved).toHaveBeenCalledWith('MACBOOK', '/test', 2000, 0);
+    expect(economyRecordCrisisResolved).toHaveBeenCalledWith(2000, 0);
   });
 });
 

@@ -174,11 +174,16 @@ export class EconomyStore {
   /** A completed real turn (hook Stop, Claude sessions only — same
    *  exclusion shiftStats/progression apply). Awards CASH_PER_TURN, plus a
    *  once-per-local-day CASH_STREAK_DAY_TOUCH (own last-active-date
-   *  tracking — touchStreak is private on progressionStore). */
-  recordTurnCompleted(now: number = Date.now()): void {
+   *  tracking — touchStreak is private on progressionStore).
+   *  `cashBonusPct` is the Server Room global Cash buff (G2, GAME-DESIGN
+   *  §5.4) — computed by the caller (economyStore.ts cannot read the
+   *  office layout itself: officeLayoutStore.ts already imports this
+   *  module, so a reverse import would cycle) and applied only to the
+   *  base turn award, never the once/day streak touch. */
+  recordTurnCompleted(now: number = Date.now(), cashBonusPct = 0): void {
     const data = this.ensureLoaded();
     this.touchActivity(data, now);
-    this.addCash(CASH_PER_TURN, 'turn-completed', now);
+    this.addCash(this.withCashBonus(CASH_PER_TURN, cashBonusPct), 'turn-completed', now);
     const today = localDate(now);
     if (data.streakDayTouchedDate !== today) {
       data.streakDayTouchedDate = today;
@@ -187,11 +192,16 @@ export class EconomyStore {
   }
 
   /** An OBSERVED crisis resolution (real state transition, never a stale
-   *  sweep clear — mirrors progressionStore's CrisisXpSink contract). */
-  recordCrisisResolved(now: number = Date.now()): void {
+   *  sweep clear — mirrors progressionStore's CrisisXpSink contract).
+   *  `cashBonusPct` — see recordTurnCompleted's doc above. */
+  recordCrisisResolved(now: number = Date.now(), cashBonusPct = 0): void {
     const data = this.ensureLoaded();
     this.touchActivity(data, now);
-    this.addCash(CASH_PER_CRISIS_RESOLVED, 'crisis-resolved', now);
+    this.addCash(
+      this.withCashBonus(CASH_PER_CRISIS_RESOLVED, cashBonusPct),
+      'crisis-resolved',
+      now,
+    );
   }
 
   /** A shift-report day closed with a grade (wired via ShiftStats'
@@ -208,9 +218,12 @@ export class EconomyStore {
    *  for decay purposes; only exit 0 pays Cash, hard-capped
    *  DISPATCH_CASH_DAILY_CAP/local day — the anti-farming fix (Fable
    *  review delta #5): dispatching burns real tokens, so uncapped it would
-   *  pay for volume. Not yet wired to a live route (dispatch chains land
-   *  in G3) — implemented and unit-tested now per BUILD-PLAN §G2 task 4. */
-  recordDispatchExit(exitCode: number, now: number = Date.now()): void {
+   *  pay for volume. `cashBonusPct` (Server Room, see recordTurnCompleted's
+   *  doc) is applied BEFORE the daily cap — the cap stays the hard
+   *  anti-farming ceiling regardless of the buff. Not yet wired to a live
+   *  route (dispatch chains land in G3) — implemented and unit-tested now
+   *  per BUILD-PLAN §G2 task 4. */
+  recordDispatchExit(exitCode: number, now: number = Date.now(), cashBonusPct = 0): void {
     const data = this.ensureLoaded();
     this.touchActivity(data, now);
     if (exitCode !== 0) {
@@ -223,13 +236,20 @@ export class EconomyStore {
       data.dispatchCashToday = 0;
     }
     const remaining = Math.max(0, DISPATCH_CASH_DAILY_CAP - data.dispatchCashToday);
-    const award = Math.min(CASH_PER_DISPATCH_EXIT_0, remaining);
+    const award = Math.min(this.withCashBonus(CASH_PER_DISPATCH_EXIT_0, cashBonusPct), remaining);
     if (award > 0) {
       data.dispatchCashToday += award;
       this.addCash(award, 'dispatch-exit-0', now);
     } else {
       this.persist(now);
     }
+  }
+
+  /** Rounds the same way hookEventHandler.ts's xpOverride does
+   *  (Math.round(base * (1 + pct/100))) — kept as a single helper so all
+   *  three Cash-award call sites round identically. */
+  private withCashBonus(amount: number, cashBonusPct: number): number {
+    return Math.round(amount * (1 + cashBonusPct / 100));
   }
 
   private touchActivity(data: EconomyData, now: number): void {

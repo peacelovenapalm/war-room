@@ -39,9 +39,11 @@ import * as path from 'path';
 import { hashString, mulberry32 } from '../../core/src/deterministicRandom.js';
 import { employeeId } from '../../core/src/employeeId.js';
 import { computeLevel, xpForLevel } from '../../core/src/leveling.js';
+import { buffsForDesk, globalBuffs } from './buildingBuffs.js';
 import { LAYOUT_FILE_DIR } from './constants.js';
 import { economyStore } from './economyStore.js';
 import { EMPLOYEE_NAMES } from './employeeNames.js';
+import { getOfficeLayout } from './officeLayoutStore.js';
 import { EFFICIENCY_LEAN_MAX, EFFICIENCY_STEADY_MAX } from './shiftStats.js';
 
 const PERSIST_THROTTLE_MS = 5_000;
@@ -343,17 +345,24 @@ export class EmployeeStore {
   /** An OBSERVED crisis resolution (real state transition, never a stale
    *  sweep clear — callers must not call this for TTL/poller-silence
    *  clears; mirrors progressionStore's CrisisXpSink contract). XP +
-   *  moodBoost only, no rolling-turn entry. */
+   *  moodBoost only, no rolling-turn entry. `crisisXpBonusPct` is the War
+   *  Room buff (G2, GAME-DESIGN §5.4) — computed by the caller (mirrors
+   *  hookEventHandler.ts's xpOverride pattern: pollStateHandler.ts looks up
+   *  the resolving employee's assignedRoomId via getById BEFORE calling
+   *  this, since only it has the point-in-time office layout in scope) and
+   *  rounded the same way xpOverride is. Not subject to the desk 40% cap
+   *  pool (single source, nothing else stacks against it). */
   recordCrisisResolved(
     machine: string | undefined,
     projectDir: string,
     now: number = Date.now(),
+    crisisXpBonusPct = 0,
   ): void {
     // No projectLabel available at this call site (pollStateHandler only
     // has machine/projectDir) — reuse the existing record if present,
     // otherwise fall back to the raw dir as label (same as a fresh hire).
     const emp = this.touch(machine, projectDir, path.basename(projectDir), now);
-    emp.xp += XP_CRISIS_RESOLVED;
+    emp.xp += Math.round(XP_CRISIS_RESOLVED * (1 + crisisXpBonusPct / 100));
     emp.moodBoost = clamp(-MOOD_BOOST_CLAMP, MOOD_BOOST_CLAMP, emp.moodBoost + 5);
     emp.lastActiveAt = now;
     this.finish(emp, now, 'crisis-resolved', {});
@@ -447,7 +456,20 @@ export class EmployeeStore {
     if (!emp) return { ok: false, reason: 'not-found' };
     if (emp.status !== 'active') return { ok: false, reason: 'not-active' };
     emp.status = 'on_break';
-    emp.mood = clamp(0, 100, emp.mood + MOOD_BREAK_RESTORE);
+    // Break Room moodRegenMult (G2, GAME-DESIGN §5.4): x1.5 when this
+    // employee's desk is inside a Break Room, x1 otherwise — a
+    // point-in-time layout read, same access pattern as
+    // hookEventHandler.ts's Dev Pit XP-bonus lookup. A missing layout or
+    // an unassigned desk degrades to the neutral x1 (buffsForDesk's
+    // existing "unknown desk returns all-zero/neutral" contract).
+    let moodRegenMult = 1;
+    if (emp.assignedRoomId) {
+      const layout = getOfficeLayout();
+      if (layout) {
+        moodRegenMult = buffsForDesk(layout, emp.assignedRoomId).moodRegenMult;
+      }
+    }
+    emp.mood = clamp(0, 100, emp.mood + MOOD_BREAK_RESTORE * moodRegenMult);
     emp.breakUntil = now + BREAK_DURATION_MS;
     this.finish(emp, now, 'break', {});
     return { ok: true, employee: { ...emp } };
@@ -639,7 +661,18 @@ export class EmployeeStore {
     if (emp.status === 'active' || emp.status === 'candidate') {
       const elapsedHours = (now - emp.lastDecayAppliedAt) / 3_600_000;
       if (elapsedHours > 0) {
-        emp.mood = clamp(0, 100, emp.mood - elapsedHours * MOOD_DECAY_PER_HOUR_IDLE);
+        // Kitchen moodDecayMult (G2, GAME-DESIGN §5.4): a GLOBAL buff (x0.85
+        // company-wide) while a Kitchen exists anywhere in the layout — no
+        // assignedRoomId/desk lookup, just layout presence. Same
+        // point-in-time read pattern as the desk buffs above; a missing
+        // layout degrades to the neutral x1 (globalBuffs' own contract).
+        const layout = getOfficeLayout();
+        const moodDecayMult = layout ? globalBuffs(layout).moodDecayMult : 1;
+        emp.mood = clamp(
+          0,
+          100,
+          emp.mood - elapsedHours * MOOD_DECAY_PER_HOUR_IDLE * moodDecayMult,
+        );
       }
     }
     emp.lastDecayAppliedAt = now;
