@@ -25,7 +25,8 @@ export function ProgressionHUD({ progression }: ProgressionHUDProps) {
 
   return (
     <div
-      className="absolute top-8 left-8 z-10 pixel-panel py-4 px-8 flex items-center gap-8 text-sm pointer-events-none select-none"
+      className="pixel-panel py-4 px-8 flex items-center gap-8 text-sm pointer-events-none! select-none
+        max-sm:flex-col max-sm:items-start max-sm:gap-1 max-sm:px-4 max-sm:py-2 max-sm:text-xs"
       data-testid="progression-hud"
     >
       <span className="flex items-center gap-3 font-bold whitespace-nowrap" title="Level">
@@ -46,15 +47,12 @@ export function ProgressionHUD({ progression }: ProgressionHUDProps) {
       </span>
 
       <span
-        className="flex items-center gap-3 min-w-[7rem]"
+        className="flex items-center gap-3 min-w-[7rem] max-sm:min-w-[4.5rem]"
         title={`${xpIntoLevel} / ${xpForNextLevel} XP to next level`}
         data-testid="progression-xp-bar"
       >
         <span aria-hidden="true">✦</span>
-        <span
-          className="relative h-8 flex-1 border-2 border-border overflow-hidden"
-          style={{ minWidth: '5rem' }}
-        >
+        <span className="relative h-8 flex-1 border-2 border-border overflow-hidden min-w-[5rem] max-sm:min-w-[2.5rem]">
           <span
             className="absolute inset-y-0 left-0 bg-accent"
             style={{ width: `${pct}%` }}

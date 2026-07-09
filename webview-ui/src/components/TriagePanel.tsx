@@ -70,7 +70,7 @@ export function TriagePanel({ officeState, onOpenAgent }: TriagePanelProps) {
 
   if (showAllClear) {
     return (
-      <div className="absolute top-8 right-8 z-30 triage-panel" data-testid="triage-panel">
+      <div className="triage-panel" data-testid="triage-panel">
         <div className="triage-panel__allclear" data-testid="triage-all-clear">
           ✓ ALL CLEAR
         </div>
@@ -81,7 +81,7 @@ export function TriagePanel({ officeState, onOpenAgent }: TriagePanelProps) {
   if (collapsed) {
     return (
       <button
-        className="absolute top-8 right-8 z-30 triage-panel triage-panel__header"
+        className="triage-panel triage-panel__header"
         onClick={() => setCollapsed(false)}
         data-testid="triage-panel-collapsed"
         title="Expand the triage board"
@@ -92,10 +92,7 @@ export function TriagePanel({ officeState, onOpenAgent }: TriagePanelProps) {
   }
 
   return (
-    <div
-      className="absolute top-8 right-8 z-30 triage-panel flex flex-col"
-      data-testid="triage-panel"
-    >
+    <div className="triage-panel flex flex-col" data-testid="triage-panel">
       <button
         className="triage-panel__header text-left"
         onClick={() => setCollapsed(true)}

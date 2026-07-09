@@ -119,7 +119,7 @@ export function ContractsPanel({
 
   return (
     <div
-      className="absolute top-8 left-8 z-30 pixel-panel flex flex-col max-w-md max-h-[70vh] overflow-y-auto"
+      className="pixel-panel flex flex-col max-w-md max-h-[70vh] overflow-y-auto"
       data-testid="contracts-panel"
     >
       <div className="flex items-center justify-between py-4 px-8 border-b-2 border-border">

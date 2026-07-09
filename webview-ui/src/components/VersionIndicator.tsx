@@ -59,15 +59,31 @@ export function VersionIndicator({
 
   return (
     <>
+      {/* Version label — always visible. Rendered FIRST: the bottom-right
+          HudStack uses flex-col-reverse, so the first DOM child stays
+          pinned to the screen edge while the notice/tooltip below stack
+          above it (see hudLayout.ts). */}
+      <div
+        onMouseEnter={() => setLabelHovered(true)}
+        onMouseLeave={() => setLabelHovered(false)}
+        onClick={handleOpenChangelog}
+        className="text-lg cursor-pointer select-none pr-2 transition-opacity duration-200"
+        style={{ opacity: labelHovered ? 0.8 : 0.4 }}
+        data-testid="version-label"
+      >
+        v{currentMajorMinor}
+      </div>
+
       {/* Update notice — shown once per version until dismissed or auto-closed */}
       {showUpdateNotice && (
         <div
           onClick={handleOpenChangelog}
-          className="absolute bottom-42 right-28 z-20 pixel-panel px-10 pt-8 pb-9 cursor-pointer flex flex-col gap-8 max-w-2xs"
+          className="pixel-panel px-10 pt-8 pb-9 cursor-pointer flex flex-col gap-8 max-w-2xs"
           style={{
             opacity: fading ? 0 : 1,
             transition: `opacity ${WHATS_NEW_FADE_MS / 1000}s ease-out`,
           }}
+          data-testid="version-update-notice"
         >
           <div className="flex justify-between items-center gap-10">
             <span className="text-lg text-accent-bright leading-none">
@@ -84,21 +100,12 @@ export function VersionIndicator({
       {!showUpdateNotice && labelHovered && (
         <div
           onClick={handleOpenChangelog}
-          className="absolute bottom-42 right-28 z-20 pixel-panel py-6 px-12 cursor-pointer text-sm whitespace-nowrap"
+          className="pixel-panel py-6 px-12 cursor-pointer text-sm whitespace-nowrap"
+          data-testid="version-whats-new-tip"
         >
           See what's new!
         </div>
       )}
-      {/* Version label — always visible */}
-      <div
-        onMouseEnter={() => setLabelHovered(true)}
-        onMouseLeave={() => setLabelHovered(false)}
-        onClick={handleOpenChangelog}
-        className="absolute bottom-8 right-28 z-20 text-lg cursor-pointer select-none pr-2 transition-opacity duration-200"
-        style={{ opacity: labelHovered ? 0.8 : 0.4 }}
-      >
-        v{currentMajorMinor}
-      </div>
     </>
   );
 }

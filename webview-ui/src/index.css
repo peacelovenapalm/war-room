@@ -375,6 +375,40 @@
     min-height: 44px;
     display: flex;
     align-items: center;
+    font-size: 15px;
+  }
+  /* KICKOFF v1.1 item 4: the desktop row (stage 92px + identity 170px +
+     cause flex + age 44px) has a ~440px minimum width — wider than the
+     iPhone-14 viewport itself, so the panel (docked top-right) overflowed
+     past the LEFT edge and collided with ProgressionHUD (top-left). Drop
+     the least essential column (cause — supplementary detail, not required
+     by the colorblind shape+word rule, which stage's glyph+word already
+     satisfies) and shrink the rest.
+     The real constraint isn't just "fits in 390px" — top-center (STOP ALL,
+     the zoom-% chip, EditActionBar) is horizontally CENTERED, so any width
+     this panel has that puts its left edge left of the viewport's own
+     center (195px at 390 wide) collides with top-center's content no
+     matter how narrow that content is. Right-anchored at `right-8`
+     (left edge = 382 - own width), this panel's width must stay under
+     ~180px to keep its left edge past center with a safety margin. */
+  .triage-panel {
+    max-width: 174px;
+  }
+  .triage-row {
+    gap: 4px;
+    padding: 5px 6px 6px;
+  }
+  .triage-row__cause {
+    display: none;
+  }
+  .triage-row__stage {
+    min-width: 48px;
+  }
+  .triage-row__identity {
+    max-width: 56px;
+  }
+  .triage-row__age {
+    min-width: 26px;
   }
 }
 

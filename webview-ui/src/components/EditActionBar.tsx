@@ -16,7 +16,10 @@ export function EditActionBar({ editor, editorState: es }: EditActionBarProps) {
   const redoDisabled = es.redoStack.length === 0;
 
   return (
-    <div className="absolute top-8 left-1/2 -translate-x-1/2 z-10 flex gap-4 items-center pixel-panel p-4">
+    <div
+      className="flex gap-4 items-center pixel-panel p-4 max-sm:flex-wrap max-sm:justify-center max-sm:w-[140px]"
+      data-testid="edit-action-bar"
+    >
       <Button
         variant={undoDisabled ? 'disabled' : 'default'}
         size="md"

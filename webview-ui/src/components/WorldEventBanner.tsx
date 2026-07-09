@@ -30,10 +30,7 @@ export function WorldEventBanner({ events }: WorldEventBannerProps) {
   if (!current) return null;
 
   return (
-    <div
-      className="absolute top-24 left-8 z-30 world-event-banner"
-      data-testid="world-event-banner"
-    >
+    <div className="world-event-banner" data-testid="world-event-banner">
       <div className="inline-flex items-center gap-2">
         <SignalChip glyph={current.glyph} word={current.summary} real={false} />
         <button

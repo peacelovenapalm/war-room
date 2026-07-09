@@ -3,28 +3,17 @@ import type { ReactNode } from 'react';
 interface TooltipProps {
   title: string;
   onDismiss: () => void;
-  position?: 'top-right' | 'top-left' | 'bottom-right' | 'bottom-left';
   children: ReactNode;
 }
 
-// Position via Tailwind classes (not inline styles) so `max-sm:` can move
-// 'top-right' below the crowded mobile top row — real bug found in the G6
-// mobile screenshot pass: ProgressionHUD (top-8 left-8), EconomyHUD (top-8
-// right-8) and StopAllControl (top-8, centered) all share that strip, and
-// at a 390px viewport there's no room left for a top-right corner tooltip
-// too. Desktop (`sm:` and up) keeps the original top:8/right:52 corner spot.
-const positionClasses: Record<string, string> = {
-  'top-right': 'max-sm:top-64 max-sm:left-8 max-sm:right-8 sm:top-8 sm:right-52',
-  'top-left': 'top-8 left-8',
-  'bottom-right': 'max-sm:bottom-64 max-sm:left-8 max-sm:right-8 sm:bottom-8 sm:right-52',
-  'bottom-left': 'bottom-8 left-8',
-};
-
-export function Tooltip({ title, onDismiss, position = 'top-right', children }: TooltipProps) {
+// Position is owned by whichever HudStack corner mounts this (see
+// hudLayout.ts) — no absolute/corner classes here. This also retires the old
+// G6-only mobile special-case (a full-width strip below the top row): the
+// HudStack the caller places this in already reserves a slot below its
+// siblings at every viewport, so the ad hoc case is no longer needed.
+export function Tooltip({ title, onDismiss, children }: TooltipProps) {
   return (
-    <div
-      className={`absolute z-20 pixel-panel whitespace-nowrap p-0 max-sm:whitespace-normal ${positionClasses[position]}`}
-    >
+    <div className="pixel-panel whitespace-nowrap p-0 max-sm:whitespace-normal max-w-2xs max-sm:max-w-64">
       <div className="flex items-center justify-between py-4 px-8 border-b border-border">
         <span className="text-base text-accent font-bold">{title}</span>
         <button

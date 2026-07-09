@@ -20,7 +20,7 @@ export function EconomyHUD({ economy }: EconomyHUDProps) {
 
   return (
     <div
-      className="absolute top-8 right-8 z-10 pixel-panel py-4 px-8 flex items-center gap-8 text-sm pointer-events-none select-none"
+      className="pixel-panel py-4 px-8 flex items-center gap-8 text-sm pointer-events-none! select-none"
       data-testid="economy-hud"
     >
       <span className="flex items-center gap-3 font-bold whitespace-nowrap" title="Cash">

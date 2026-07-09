@@ -25,11 +25,12 @@ import { StandingOrdersPanel } from './components/StandingOrdersPanel.js';
 import { StopAllControl } from './components/StopAllControl.js';
 import { Tooltip } from './components/Tooltip.js';
 import { TriagePanel } from './components/TriagePanel.js';
+import { HudStack } from './components/ui/HudStack.js';
 import { Modal } from './components/ui/Modal.js';
 import { UnlocksPanel } from './components/UnlocksPanel.js';
 import { VersionIndicator } from './components/VersionIndicator.js';
 import { WorldEventBanner } from './components/WorldEventBanner.js';
-import { ZoomControls } from './components/ZoomControls.js';
+import { ZoomControls, ZoomLevelBadge } from './components/ZoomControls.js';
 import {
   detectSendFailures,
   type DispatchActionValue,
@@ -40,6 +41,7 @@ import {
 import { useEditorActions } from './hooks/useEditorActions.js';
 import { useEditorKeyboard } from './hooks/useEditorKeyboard.js';
 import { useExtensionMessages } from './hooks/useExtensionMessages.js';
+import { HUD_LAYER } from './hudLayout.js';
 import { OfficeCanvas } from './office/components/OfficeCanvas.js';
 import { ToolOverlay } from './office/components/ToolOverlay.js';
 import { EditorState } from './office/editor/editorState.js';
@@ -371,26 +373,11 @@ function App() {
 
       {!isDebugMode ? (
         <>
-          <ZoomControls zoom={editor.zoom} onZoomChange={editor.handleZoomChange} />
-
           {/* Vignette overlay */}
           <div
             className="absolute inset-0 pointer-events-none"
             style={{ background: 'var(--vignette)' }}
           />
-
-          {editor.isEditMode && editor.isDirty && (
-            <EditActionBar editor={editor} editorState={editorState} />
-          )}
-
-          {showRotateHint && (
-            <div
-              className="absolute left-1/2 -translate-x-1/2 z-11 bg-accent-bright text-white text-sm py-3 px-8 rounded-none border-2 border-accent shadow-pixel pointer-events-none whitespace-nowrap"
-              style={{ top: editor.isDirty ? 64 : 8 }}
-            >
-              Rotate (R)
-            </div>
-          )}
 
           {editor.isEditMode &&
             (() => {
@@ -439,40 +426,12 @@ function App() {
             alwaysShowOverlay={alwaysShowOverlay}
           />
 
-          {/* TRIAGE incident board (v1): auto-appears when a crisis exists */}
-          <TriagePanel officeState={officeState} onOpenAgent={handleClick} />
-
-          {/* World event banner (v2 mechanic G5, GAME-DESIGN §6.3): ambient
-              flavor only, dismissable, auto-hides — never competes with the
-              TRIAGE board's real-crisis attention. */}
-          <WorldEventBanner events={worldEvents} />
-
-          {/* PROGRESSION HUD (v1 mechanic #3): level + streak + XP bar, always visible */}
-          <ProgressionHUD progression={progression} />
-
-          {/* ECONOMY HUD (v2 mechanic G2): Cash + Reputation, always visible */}
-          <EconomyHUD economy={economy} />
-
-          {/* STOP ALL kill switch (v2 mechanic G3, §7.5): always visible,
-              never buried in a menu. */}
-          <StopAllControl />
-
           {editor.buildActionMessage && (
             <div
               className="absolute top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2 z-20 pixel-panel py-4 px-8 text-sm pointer-events-none whitespace-nowrap"
               data-testid="build-action-message"
             >
               ⚠ {editor.buildActionMessage}
-            </div>
-          )}
-
-          {/* Night shift (v1 #4): empty office → dimmed canvas + TEXT label */}
-          {agents.length === 0 && subagentCharacters.length === 0 && (
-            <div
-              className="absolute top-40 left-1/2 -translate-x-1/2 z-10 pixel-panel py-4 px-14 text-sm text-text-muted pointer-events-none whitespace-nowrap"
-              data-testid="night-shift-label"
-            >
-              ◐ NIGHT SHIFT — no active sessions
             </div>
           )}
         </>
@@ -488,31 +447,88 @@ function App() {
         />
       )}
 
-      {/* Hooks first-run tooltip */}
-      {!hooksInfoShown && !hooksTooltipDismissed && (
-        <Tooltip
-          title="Instant Detection Active"
-          position="top-right"
-          onDismiss={() => {
-            setHooksTooltipDismissed(true);
-            transport.send({ type: 'setHooksInfoShown' });
-          }}
-        >
-          <span className="text-sm text-text leading-none">
-            Your agents now respond in real-time.{' '}
-            <span
-              className="text-accent cursor-pointer underline"
-              onClick={() => {
-                setIsHooksInfoOpen(true);
-                setHooksTooltipDismissed(true);
-                transport.send({ type: 'setHooksInfoShown' });
-              }}
-            >
-              View more
+      {/* HUD/overlay layout (KICKOFF v1.1 item 4): one HudStack per screen
+          corner — every top/bottom-anchored overlay is a flow child instead
+          of an independent `absolute top-N`, so a new sibling can never
+          reclaim a rectangle another one is already using. Each item below
+          keeps its EXACT original visibility condition (including the
+          `!isDebugMode` guard the whole group used to share by being nested
+          inside that ternary); only the position mechanism changed. See
+          hudLayout.ts for the z-index scale and corner semantics. */}
+      <HudStack corner="top-left" layer={HUD_LAYER.CRITICAL}>
+        {/* PROGRESSION HUD (v1 mechanic #3): level + streak + XP bar, always visible */}
+        {!isDebugMode && <ProgressionHUD progression={progression} />}
+        {!isDebugMode && <ZoomControls zoom={editor.zoom} onZoomChange={editor.handleZoomChange} />}
+        {/* World event banner (v2 mechanic G5, GAME-DESIGN §6.3): ambient
+            flavor only, dismissable, auto-hides — never competes with the
+            TRIAGE board's real-crisis attention. */}
+        {!isDebugMode && <WorldEventBanner events={worldEvents} />}
+        <ContractsPanel
+          isOpen={isContractsOpen}
+          onClose={() => setIsContractsOpen(false)}
+          employees={employees}
+          onDispatchContract={handleDispatchContract}
+        />
+      </HudStack>
+
+      <HudStack corner="top-center" layer={HUD_LAYER.CRITICAL}>
+        {/* STOP ALL kill switch (v2 mechanic G3, §7.5): always visible,
+            never buried in a menu. */}
+        {!isDebugMode && <StopAllControl />}
+        {!isDebugMode && <ZoomLevelBadge zoom={editor.zoom} />}
+        {!isDebugMode && editor.isEditMode && editor.isDirty && (
+          <EditActionBar editor={editor} editorState={editorState} />
+        )}
+        {!isDebugMode && showRotateHint && (
+          <div
+            className="bg-accent-bright text-white text-sm py-3 px-8 rounded-none border-2 border-accent shadow-pixel pointer-events-none! whitespace-nowrap"
+            data-testid="rotate-hint"
+          >
+            Rotate (R)
+          </div>
+        )}
+        {/* Night shift (v1 #4): empty office → dimmed canvas + TEXT label */}
+        {!isDebugMode && agents.length === 0 && subagentCharacters.length === 0 && (
+          <div
+            className="pixel-panel py-4 px-14 text-sm text-text-muted pointer-events-none! whitespace-nowrap
+              max-sm:whitespace-normal max-sm:max-w-[130px] max-sm:text-center max-sm:text-xs max-sm:px-6"
+            data-testid="night-shift-label"
+          >
+            ◐ NIGHT SHIFT — no active sessions
+          </div>
+        )}
+      </HudStack>
+
+      <HudStack corner="top-right" layer={HUD_LAYER.CRITICAL}>
+        {/* ECONOMY HUD (v2 mechanic G2): Cash + Reputation, always visible */}
+        {!isDebugMode && <EconomyHUD economy={economy} />}
+        {/* TRIAGE incident board (v1): auto-appears when a crisis exists */}
+        {!isDebugMode && <TriagePanel officeState={officeState} onOpenAgent={handleClick} />}
+        {/* Hooks first-run tooltip */}
+        {!hooksInfoShown && !hooksTooltipDismissed && (
+          <Tooltip
+            title="Instant Detection Active"
+            onDismiss={() => {
+              setHooksTooltipDismissed(true);
+              transport.send({ type: 'setHooksInfoShown' });
+            }}
+          >
+            <span className="text-sm text-text leading-none">
+              Your agents now respond in real-time.{' '}
+              <span
+                className="text-accent cursor-pointer underline"
+                onClick={() => {
+                  setIsHooksInfoOpen(true);
+                  setHooksTooltipDismissed(true);
+                  transport.send({ type: 'setHooksInfoShown' });
+                }}
+              >
+                View more
+              </span>
             </span>
-          </span>
-        </Tooltip>
-      )}
+          </Tooltip>
+        )}
+      </HudStack>
 
       {/* Hooks info modal */}
       <Modal
@@ -547,42 +563,51 @@ function App() {
         </div>
       </Modal>
 
-      <BottomToolbar
-        isEditMode={editor.isEditMode}
-        onOpenClaude={editor.handleOpenClaude}
-        onToggleEditMode={editor.handleToggleEditMode}
-        isSettingsOpen={isSettingsOpen}
-        onToggleSettings={() => setIsSettingsOpen((v) => !v)}
-        workspaceFolders={workspaceFolders}
-        isBriefingOpen={isBriefingOpen}
-        onToggleBriefing={() => setIsBriefingOpen((v) => !v)}
-        isShiftOpen={isShiftOpen}
-        onToggleShift={() => setIsShiftOpen((v) => !v)}
-        isUnlocksOpen={isUnlocksOpen}
-        onToggleUnlocks={() => setIsUnlocksOpen((v) => !v)}
-        isEmployeesOpen={isEmployeesOpen}
-        onToggleEmployees={() => setIsEmployeesOpen((v) => !v)}
-        isHelpOpen={isHelpOpen}
-        onToggleHelp={() => setIsHelpOpen((v) => !v)}
-        isCallOpen={isCallOpen}
-        onToggleCall={() => {
-          setCallPrefill(null);
-          setIsCallOpen((v) => !v);
-        }}
-        isChainsOpen={isChainsOpen}
-        onToggleChains={() => setIsChainsOpen((v) => !v)}
-        isStandingOrdersOpen={isStandingOrdersOpen}
-        onToggleStandingOrders={() => setIsStandingOrdersOpen((v) => !v)}
-        isContractsOpen={isContractsOpen}
-        onToggleContracts={() => setIsContractsOpen((v) => !v)}
-      />
-
-      <ContractsPanel
-        isOpen={isContractsOpen}
-        onClose={() => setIsContractsOpen(false)}
-        employees={employees}
-        onDispatchContract={handleDispatchContract}
-      />
+      {/* Bottom-left HUD stack: BottomToolbar anchors nearest the screen
+          edge, DispatchTray and ChainTray stack away from it as entries
+          appear (flex-col-reverse — see hudLayout.ts). */}
+      <HudStack corner="bottom-left" layer={HUD_LAYER.TRAY}>
+        <BottomToolbar
+          isEditMode={editor.isEditMode}
+          onOpenClaude={editor.handleOpenClaude}
+          onToggleEditMode={editor.handleToggleEditMode}
+          isSettingsOpen={isSettingsOpen}
+          onToggleSettings={() => setIsSettingsOpen((v) => !v)}
+          workspaceFolders={workspaceFolders}
+          isBriefingOpen={isBriefingOpen}
+          onToggleBriefing={() => setIsBriefingOpen((v) => !v)}
+          isShiftOpen={isShiftOpen}
+          onToggleShift={() => setIsShiftOpen((v) => !v)}
+          isUnlocksOpen={isUnlocksOpen}
+          onToggleUnlocks={() => setIsUnlocksOpen((v) => !v)}
+          isEmployeesOpen={isEmployeesOpen}
+          onToggleEmployees={() => setIsEmployeesOpen((v) => !v)}
+          isHelpOpen={isHelpOpen}
+          onToggleHelp={() => setIsHelpOpen((v) => !v)}
+          isCallOpen={isCallOpen}
+          onToggleCall={() => {
+            setCallPrefill(null);
+            setIsCallOpen((v) => !v);
+          }}
+          isChainsOpen={isChainsOpen}
+          onToggleChains={() => setIsChainsOpen((v) => !v)}
+          isStandingOrdersOpen={isStandingOrdersOpen}
+          onToggleStandingOrders={() => setIsStandingOrdersOpen((v) => !v)}
+          isContractsOpen={isContractsOpen}
+          onToggleContracts={() => setIsContractsOpen((v) => !v)}
+        />
+        <DispatchTray
+          entries={dispatchEntries}
+          onDismiss={dismissDispatch}
+          onView={setViewedDispatchId}
+          sendFailures={sendFailures}
+        />
+        <ChainTray
+          runs={chainRuns}
+          receivedAtById={chainRunReceivedAtById}
+          onDismiss={dismissChainRun}
+        />
+      </HudStack>
 
       <ChainBuilderPanel isOpen={isChainsOpen} onClose={() => setIsChainsOpen(false)} />
 
@@ -613,12 +638,14 @@ function App() {
 
       <HelpModal isOpen={isHelpOpen} onClose={() => setIsHelpOpen(false)} />
 
-      <VersionIndicator
-        currentVersion={extensionVersion}
-        lastSeenVersion={lastSeenVersion}
-        onDismiss={handleWhatsNewDismiss}
-        onOpenChangelog={handleOpenChangelog}
-      />
+      <HudStack corner="bottom-right" layer={HUD_LAYER.TRAY}>
+        <VersionIndicator
+          currentVersion={extensionVersion}
+          lastSeenVersion={lastSeenVersion}
+          onDismiss={handleWhatsNewDismiss}
+          onOpenChangelog={handleOpenChangelog}
+        />
+      </HudStack>
 
       <ChangelogModal
         isOpen={isChangelogOpen}
@@ -661,19 +688,6 @@ function App() {
         prefill={callPrefill}
         onSend={registerSend}
         budget={budget}
-      />
-
-      <DispatchTray
-        entries={dispatchEntries}
-        onDismiss={dismissDispatch}
-        onView={setViewedDispatchId}
-        sendFailures={sendFailures}
-      />
-
-      <ChainTray
-        runs={chainRuns}
-        receivedAtById={chainRunReceivedAtById}
-        onDismiss={dismissChainRun}
       />
 
       <DispatchResultModal

@@ -41,7 +41,7 @@ export function StopAllControl() {
   };
 
   return (
-    <div className="absolute top-8 left-1/2 -translate-x-1/2 z-30 flex flex-col items-center gap-3">
+    <div className="flex flex-col items-center gap-3" data-testid="stop-all-stack">
       {stopped ? (
         <Button
           variant={confirmResume ? 'accent' : 'default'}
@@ -62,7 +62,20 @@ export function StopAllControl() {
           ■ STOP ALL
         </Button>
       )}
-      {message && <span className="text-xs text-text-muted pixel-panel py-2 px-6">{message}</span>}
+      {/* Detail text only — the button's own label change (STOP ALL <->
+          RESUME) already carries the state change. Hidden at mobile: this
+          stack sits between the top-left and top-right corners with very
+          little horizontal margin at the iPhone-14 width once TriagePanel
+          is expanded (KICKOFF v1.1 item 4) — growing taller here is what
+          pushed it into TriagePanel's row, not this text's width. */}
+      {message && (
+        <span
+          className="text-xs text-text-muted pixel-panel py-2 px-6 max-sm:hidden"
+          data-testid="stop-all-message"
+        >
+          {message}
+        </span>
+      )}
     </div>
   );
 }

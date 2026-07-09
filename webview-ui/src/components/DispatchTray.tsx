@@ -47,7 +47,7 @@ export function DispatchTray({ entries, onDismiss, onView, sendFailures }: Dispa
   if (visible.length === 0 && visibleFailures.length === 0) return null;
 
   return (
-    <div className="absolute bottom-64 left-10 z-20 flex flex-col gap-4 items-start">
+    <div className="flex flex-col gap-4 items-start" data-testid="dispatch-tray">
       {visible.map((entry) => {
         const viewable = hasViewableResult(entry);
         return (

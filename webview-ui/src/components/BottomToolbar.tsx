@@ -121,12 +121,14 @@ export function BottomToolbar({
   return (
     // Mobile (<640px, G6 BUILD-PLAN §G6 task 4): too many buttons to fit a
     // 390px viewport even at the 44px touch floor — becomes a horizontally
-    // scrollable strip pinned near the screen edges instead of reflowing
-    // into a new component family. Desktop (`sm:` and up) is unchanged.
+    // scrollable strip instead of reflowing into a new component family.
+    // Position (which edge, which corner) is owned by the bottom-left
+    // HudStack this mounts into (see hudLayout.ts); only the internal
+    // width-cap + scroll behavior lives here.
     <div
-      className="absolute bottom-10 left-10 z-20 flex items-center gap-4 pixel-panel p-4
-        max-sm:left-4 max-sm:right-4 max-sm:bottom-4 max-sm:max-w-[calc(100vw-32px)] max-sm:overflow-x-auto
-        max-sm:[&>*]:shrink-0"
+      className="flex items-center gap-4 pixel-panel p-4
+        max-sm:max-w-[calc(100vw-32px)] max-sm:overflow-x-auto max-sm:[&>*]:shrink-0"
+      data-testid="bottom-toolbar"
     >
       {/* Hide + Agent in standalone browser mode (no terminal to interact with) */}
       {!isBrowserRuntime && (

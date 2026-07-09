@@ -26,7 +26,7 @@ export function ChainTray({ runs, receivedAtById, onDismiss }: ChainTrayProps) {
   if (visible.length === 0) return null;
 
   return (
-    <div className="absolute bottom-112 left-10 z-20 flex flex-col gap-4 items-start">
+    <div className="flex flex-col gap-4 items-start" data-testid="chain-tray">
       {visible.map((run) => (
         <div
           key={run.id}
