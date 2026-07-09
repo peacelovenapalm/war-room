@@ -23,6 +23,8 @@ import {
   CASH_SHIFT_GRADE,
   CASH_STREAK_DAY_TOUCH,
   DISPATCH_CASH_DAILY_CAP,
+  PERK_COST,
+  PERK_IDS,
   REP_DECAY_DARK_DAY,
   REP_DECAY_GRACE_DAYS,
   REP_SHIFT_GRADE,
@@ -279,6 +281,44 @@ describe('EconomyStore ledger + vacation flag', () => {
     expect(store.isVacationActive()).toBe(false);
     store.setVacationMode(true, DAY1);
     expect(store.isVacationActive()).toBe(true);
+  });
+});
+
+describe('EconomyStore automation perks (v2 mechanic G3, §7.4)', () => {
+  it('buyPerk debits the exact cost and flips the flag on', () => {
+    const store = new EconomyStore(statePath);
+    store.addCash(500, 'seed', DAY1);
+    expect(store.getPerkFlags()).toEqual({
+      secondShift: false,
+      chainGang: false,
+      nightShiftForeman: false,
+    });
+    const result = store.buyPerk('secondShift', DAY1);
+    expect(result.ok).toBe(true);
+    expect(store.getSnapshot().cash).toBe(0);
+    expect(store.getPerkFlags().secondShift).toBe(true);
+  });
+
+  it('refuses insufficient Cash without mutating state', () => {
+    const store = new EconomyStore(statePath);
+    const result = store.buyPerk('nightShiftForeman', DAY1);
+    expect(result).toEqual({ ok: false, reason: 'insufficient-cash' });
+    expect(store.getSnapshot().cash).toBe(0);
+  });
+
+  it('refuses a double-purchase of an already-owned perk (idempotent, never double-charges)', () => {
+    const store = new EconomyStore(statePath);
+    store.addCash(1000, 'seed', DAY1);
+    store.buyPerk('secondShift', DAY1);
+    const cashAfterFirst = store.getSnapshot().cash;
+    const result = store.buyPerk('secondShift', DAY1);
+    expect(result).toEqual({ ok: false, reason: 'already-owned' });
+    expect(store.getSnapshot().cash).toBe(cashAfterFirst); // unchanged
+  });
+
+  it('the perk ladder is exactly 3 perks totaling 2800 — the Autopilot perk is CUT', () => {
+    expect(PERK_IDS).toEqual(['secondShift', 'chainGang', 'nightShiftForeman']);
+    expect(PERK_IDS.reduce((sum, id) => sum + PERK_COST[id], 0)).toBe(2800);
   });
 });
 

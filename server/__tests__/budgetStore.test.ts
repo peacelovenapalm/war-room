@@ -14,7 +14,6 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 import {
   BUDGET_PAUSE_5H_PCT_BASE,
-  BUDGET_PAUSE_5H_PCT_FOREMAN,
   BUDGET_PAUSE_7D_PCT_BASE,
   BUDGET_PAUSE_HARD_CEILING_5H,
   BUDGET_STALE_MS,

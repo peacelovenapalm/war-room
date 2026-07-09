@@ -95,6 +95,27 @@ export const KITCHEN_MOOD_DECAY_MULT = 0.85;
 /** Sell refund (§5.7). */
 export const SELL_REFUND_PCT = 50;
 
+/** Automation perks (v2 mechanic G3, §7.4) — Cash-purchased, read-only
+ *  `perkFlags` consumed by standingOrderStore/budgetStore/chainOrchestrator.
+ *  The Autopilot perk is CUT (interrogation delta #6): first-fire confirm
+ *  is unconditional forever regardless of any perk owned here. Total 2800
+ *  across the 3-perk ladder. */
+export const PERK_IDS = ['secondShift', 'chainGang', 'nightShiftForeman'] as const;
+export type PerkId = (typeof PERK_IDS)[number];
+
+export const PERK_COST: Record<PerkId, number> = {
+  secondShift: 500,
+  chainGang: 800,
+  nightShiftForeman: 1500,
+};
+
+export const PERK_DESCRIPTION: Record<PerkId, string> = {
+  secondShift: 'Standing-order cap 1 → 2.',
+  chainGang: 'Chain max steps 8 → 12, concurrent runs 3 → 5.',
+  nightShiftForeman:
+    'Standing-order cap 2 → 4; budget pause thresholds 70/80% → 80/88% (hard ceilings 95/95 never move).',
+};
+
 export function bayCost(n: number): number {
   return Math.round(BAY_BASE_COST * Math.pow(BAY_COST_GROWTH, n));
 }

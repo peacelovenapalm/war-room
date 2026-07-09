@@ -34,6 +34,8 @@ import {
   CASH_STREAK_DAY_TOUCH,
   DISPATCH_CASH_DAILY_CAP,
   OFFLINE_CATCHUP_CAP_DAYS,
+  PERK_COST,
+  type PerkId,
   REP_DECAY_DARK_DAY,
   REP_DECAY_GRACE_DAYS,
   REP_SHIFT_GRADE,
@@ -83,6 +85,17 @@ export interface EconomySnapshot {
   vacationMode: boolean;
   bayCount: number;
   ledger: EconomyLedgerEntry[];
+  purchasedPerks: PerkId[];
+}
+
+/** Read-only automation-perk flags (v2 mechanic G3, §7.4) — consumed by
+ *  standingOrderStore/budgetStore/chainOrchestrator, all of which receive
+ *  this as a plain value per-call rather than importing economyStore
+ *  directly (one-way layering). */
+export interface PerkFlags {
+  secondShift: boolean;
+  chainGang: boolean;
+  nightShiftForeman: boolean;
 }
 
 interface EconomyData {
@@ -105,6 +118,10 @@ interface EconomyData {
   zeroActivityStreakDays: number;
   /** Last calendar date decay bookkeeping has been walked through (inclusive). */
   lastDecayCheckDate: string | null;
+  /** Automation perks purchased (v2 mechanic G3, §7.4) — the Autopilot
+   *  perk is CUT; these 3 never remove the standing-order first-fire
+   *  confirm gate. */
+  purchasedPerks: PerkId[];
 }
 
 function emptyData(): EconomyData {
@@ -121,6 +138,7 @@ function emptyData(): EconomyData {
     dispatchCashToday: 0,
     zeroActivityStreakDays: 0,
     lastDecayCheckDate: null,
+    purchasedPerks: [],
   };
 }
 
@@ -306,6 +324,34 @@ export class EconomyStore {
     return true;
   }
 
+  // ── Automation perks (v2 mechanic G3, §7.4) ─────────────────────────
+
+  /** Debit Cash and mark a perk purchased iff sufficient funds and not
+   *  already owned (idempotent — buying twice is a no-op refusal, never a
+   *  double-charge). The Autopilot perk was CUT; nothing purchasable here
+   *  ever weakens the standing-order first-fire confirm gate. */
+  buyPerk(id: PerkId, now: number = Date.now()): { ok: true } | { ok: false; reason: string } {
+    const data = this.ensureLoaded();
+    if (data.purchasedPerks.includes(id)) return { ok: false, reason: 'already-owned' };
+    const cost = PERK_COST[id];
+    if (data.cash < cost) return { ok: false, reason: 'insufficient-cash' };
+    this.addCash(-cost, `perk-${id}`, now);
+    data.purchasedPerks.push(id);
+    this.persist(now, true);
+    const snapshot = this.getSnapshot();
+    for (const listener of this.listeners) listener(snapshot);
+    return { ok: true };
+  }
+
+  getPerkFlags(): PerkFlags {
+    const owned = new Set(this.ensureLoaded().purchasedPerks);
+    return {
+      secondShift: owned.has('secondShift'),
+      chainGang: owned.has('chainGang'),
+      nightShiftForeman: owned.has('nightShiftForeman'),
+    };
+  }
+
   // ── Vacation toggle (§4.5) ─────────────────────────────────────────
 
   setVacationMode(active: boolean, now: number = Date.now()): EconomySnapshot {
@@ -328,6 +374,7 @@ export class EconomyStore {
       vacationMode: data.vacationMode,
       bayCount: data.bayCount,
       ledger: [...data.ledger],
+      purchasedPerks: [...data.purchasedPerks],
     };
   }
 

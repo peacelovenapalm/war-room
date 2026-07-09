@@ -8,10 +8,17 @@ import Fastify from 'fastify';
 import type { AgentRuntime } from './agentRuntime.js';
 import type { AgentStateStore } from './agentStateStore.js';
 import { getBriefing } from './briefingProvider.js';
+import type { ClaudeRateLimitSnapshot } from './budgetStore.js';
+import { budgetStore } from './budgetStore.js';
+import { chainOrchestrator } from './chainOrchestrator.js';
+import { CHAIN_MAX_STEPS, type ChainStepDef, chainStore } from './chainStore.js';
 import type { AssetCache, SetHooksEnabledSideEffect } from './clientMessageHandler.js';
 import { handleClientMessage } from './clientMessageHandler.js';
 import { HOOK_API_PREFIX, MAX_HOOK_BODY_SIZE } from './constants.js';
 import { dispatchStore } from './dispatchStore.js';
+import { dispatchTemplateStore } from './dispatchTemplateStore.js';
+import type { PerkId } from './economyConstants.js';
+import { PERK_IDS } from './economyConstants.js';
 import { economyStore } from './economyStore.js';
 import type { Employee, ScoreTrack } from './employeeStore.js';
 import { employeeStore } from './employeeStore.js';
@@ -21,6 +28,8 @@ import { RoomType as RoomTypeValues } from './officeLayoutTypes.js';
 import { applyPollStates, parsePollBody, startPollStateSweep } from './pollStateHandler.js';
 import { progression } from './progressionStore.js';
 import { shiftStats } from './shiftStats.js';
+import type { StandingOrderSchedule } from './standingOrderStore.js';
+import { standingOrderStore } from './standingOrderStore.js';
 import type { AgentState } from './types.js';
 
 /** Options for creating the HTTP + WebSocket server. */
@@ -95,7 +104,45 @@ export async function createHttpServer(options: HttpServerOptions): Promise<Http
   registerEmployeeRoutes(app);
   registerEconomyRoutes(app);
   registerBuildingRoutes(app, options);
+  registerChainRoutes(app);
+  registerStandingOrderRoutes(app);
+  registerDispatchTemplateRoutes(app);
+  registerBudgetRoutes(app, options);
+  registerAutomationStopAllRoutes(app, options);
   registerWebSocketRoute(app, options);
+
+  // chainOrchestrator singleton subscription (v2 mechanic G3, bug-fix #1):
+  // called EXACTLY ONCE here, at process startup — createHttpServer() runs
+  // once per process in production. Never call chainOrchestrator.start()
+  // inside registerWebSocketRoute's per-connection handler; see
+  // chainOrchestrator.ts's file header for why (start() is idempotent as
+  // defense-in-depth, but call-site discipline is the real fix).
+  chainOrchestrator.configure({
+    resolveEmployeeDefaults: (id) => employeeStore.resolveEmployeeDefaults(id),
+    isAutomationPaused: (_machine, provider) =>
+      budgetStore.isAutomationPaused(provider, economyStore.getPerkFlags()).paused,
+  });
+  chainOrchestrator.start();
+  const chainSweepTimer = setInterval(() => chainOrchestrator.sweep(), CHAIN_SWEEP_INTERVAL_MS);
+  chainSweepTimer.unref?.();
+  app.addHook('onClose', () => clearInterval(chainSweepTimer));
+
+  // standingOrderTick (v2 mechanic G3, §7.2) — timerManager.ts has no
+  // generic tick primitive (verified by grep, BUILD-PLAN §G3 task 6), so
+  // this uses the repo's real interval idiom: a setInterval registered
+  // where the dispatch TTL sweep already lives (httpServer.ts:238-241's
+  // pattern), cleared via onClose.
+  const standingOrderTimer = setInterval(() => {
+    standingOrderStore.tick(
+      Date.now(),
+      (_machine, provider) =>
+        budgetStore.isAutomationPaused(provider, economyStore.getPerkFlags()).paused,
+      (id) => employeeStore.resolveEmployeeDefaults(id),
+      (input) => dispatchStore.enqueue(input),
+    );
+  }, STANDING_ORDER_TICK_INTERVAL_MS);
+  standingOrderTimer.unref?.();
+  app.addHook('onClose', () => clearInterval(standingOrderTimer));
 
   // ── Listen ──────────────────────────────────────────────────
 
@@ -238,6 +285,16 @@ function registerPollRoute(app: FastifyInstance, options: HttpServerOptions): vo
 /** How often stale (unanswered past TTL) ringing requests are swept to `expired`. */
 const DISPATCH_SWEEP_INTERVAL_MS = 30_000;
 
+/** chainOrchestrator.sweep() cadence (v2 mechanic G3) — same interval as
+ *  the dispatch TTL sweep; retries budget-paused pending continuations and
+ *  applies the CHAIN_STEP_TIMEOUT_MS backstop. */
+const CHAIN_SWEEP_INTERVAL_MS = 30_000;
+
+/** standingOrderTick cadence (v2 mechanic G3, §7.2) — 60s, matching the
+ *  BUILD-PLAN §G3 task 6 spec exactly (the daily dedupe guard must fire at
+ *  most once per local date across repeated ticks at this cadence). */
+const STANDING_ORDER_TICK_INTERVAL_MS = 60_000;
+
 /**
  * Dispatch queue routes. The server never shells out — these routes only
  * read/write dispatchStore.ts's in-memory (persisted) queue; the actual CLI
@@ -322,9 +379,28 @@ function registerDispatchRoutes(app: FastifyInstance, options: HttpServerOptions
       const pid = typeof body.pid === 'number' ? body.pid : undefined;
       const exitCode = typeof body.exitCode === 'number' ? body.exitCode : undefined;
       const resultTail = typeof body.resultTail === 'string' ? body.resultTail : undefined;
-      reply.send(
-        dispatchStore.reportStatus(request.params.id, { event, pid, exitCode, resultTail }),
-      );
+      const result = dispatchStore.reportStatus(request.params.id, {
+        event,
+        pid,
+        exitCode,
+        resultTail,
+      });
+      // Dispatch-driven Cash/XP (v1 mechanic #6b Cash, v2 mechanic G3
+      // employee XP — GAME-DESIGN §7.3's "employeeWorkCompleted" integration
+      // point): every real exit counts as economy activity; exit 0 tagged
+      // with an employeeId also awards that employee XP exactly once.
+      // codex exits additionally feed the budget guardrail's weekly counter.
+      if (event === 'exited' && exitCode !== undefined) {
+        const record = dispatchStore.getRecord(request.params.id);
+        economyStore.recordDispatchExit(exitCode);
+        if (record?.employeeId) {
+          employeeStore.recordDispatchExit(record.employeeId, exitCode);
+        }
+        if (record?.provider === 'codex') {
+          budgetStore.recordCodexDispatchExit();
+        }
+      }
+      reply.send(result);
     },
   );
 }
@@ -533,6 +609,210 @@ function registerBuildingRoutes(app: FastifyInstance, options: HttpServerOptions
   });
 }
 
+// ── Dispatch chains (v2 mechanic G3 — GAME-DESIGN.md §7.1) ─────
+
+/**
+ * Chain routes. Same trust level as /api/employees/economy/building
+ * (unauthenticated local-webview player-action plane — the server is
+ * tailnet-only). Decisions are `{ok:false, reason}` at 200, never 4xx.
+ * The actual advance algorithm lives entirely in chainOrchestrator.ts —
+ * these routes only call into it (createDef is the one exception, a pure
+ * chainStore data operation with no dispatch side effect).
+ */
+function registerChainRoutes(app: FastifyInstance): void {
+  app.get('/api/chains/defs', async () => chainStore.getDefs());
+  app.get('/api/chains/runs', async () => chainStore.getRuns());
+
+  app.post<{ Body: Record<string, unknown> }>('/api/chains/defs', async (request, reply) => {
+    const body = request.body ?? {};
+    const name = typeof body.name === 'string' ? body.name : '';
+    const steps = Array.isArray(body.steps) ? (body.steps as ChainStepDef[]) : [];
+    if (steps.length > CHAIN_MAX_STEPS) {
+      reply.send({ ok: false, reason: 'too-many-steps' });
+      return;
+    }
+    const result = chainStore.createDef({ name, steps });
+    reply.send(result);
+  });
+
+  app.post<{ Params: { id: string } }>('/api/chains/defs/:id/run', async (request, reply) => {
+    const result = chainOrchestrator.startRun(request.params.id);
+    reply.send(result);
+  });
+}
+
+// ── Standing orders (v2 mechanic G3 — GAME-DESIGN.md §7.2) ─────
+
+/**
+ * Standing order routes. Same trust level as the chain routes above.
+ * confirmFirstFire is the ONLY route that ever clears
+ * needsFirstFireConfirm — see standingOrderStore.ts's file header; no
+ * other route, perk purchase, or STOP ALL/RESUME action can reach it.
+ */
+function registerStandingOrderRoutes(app: FastifyInstance): void {
+  app.get('/api/standing-orders', async () => standingOrderStore.getAll());
+
+  app.post<{ Body: Record<string, unknown> }>('/api/standing-orders', async (request, reply) => {
+    const body = request.body ?? {};
+    const schedule = body.schedule as StandingOrderSchedule | undefined;
+    if (
+      !schedule ||
+      (schedule.kind !== 'daily' && schedule.kind !== 'interval') ||
+      typeof body.name !== 'string' ||
+      typeof body.prompt !== 'string'
+    ) {
+      reply.send({ ok: false, reason: 'invalid-request' });
+      return;
+    }
+    const result = standingOrderStore.create(
+      {
+        name: body.name,
+        schedule,
+        machine: typeof body.machine === 'string' ? body.machine : undefined,
+        provider: typeof body.provider === 'string' ? body.provider : undefined,
+        cwd: typeof body.cwd === 'string' ? body.cwd : undefined,
+        prompt: body.prompt,
+        model: typeof body.model === 'string' ? body.model : undefined,
+        effort: typeof body.effort === 'string' ? body.effort : undefined,
+        employeeId: typeof body.employeeId === 'string' ? body.employeeId : undefined,
+      },
+      economyStore.getPerkFlags(),
+    );
+    reply.send(result);
+  });
+
+  app.post<{ Params: { id: string } }>(
+    '/api/standing-orders/:id/confirm-first-fire',
+    async (request, reply) => {
+      const result = standingOrderStore.confirmFirstFire(
+        request.params.id,
+        (id) => employeeStore.resolveEmployeeDefaults(id),
+        (input) => dispatchStore.enqueue(input),
+      );
+      reply.send(result);
+    },
+  );
+
+  app.post<{ Params: { id: string }; Body: Record<string, unknown> }>(
+    '/api/standing-orders/:id/enabled',
+    async (request, reply) => {
+      const enabled = request.body?.enabled === true;
+      reply.send(standingOrderStore.setEnabled(request.params.id, enabled));
+    },
+  );
+
+  app.post<{ Params: { id: string } }>(
+    '/api/standing-orders/:id/delete',
+    async (request, reply) => {
+      reply.send(standingOrderStore.delete(request.params.id));
+    },
+  );
+}
+
+// ── Dispatch templates (v2 mechanic G3 — GAME-DESIGN.md §7.3) ──
+
+function registerDispatchTemplateRoutes(app: FastifyInstance): void {
+  app.get('/api/dispatch-templates', async () => dispatchTemplateStore.getAll());
+
+  app.post<{ Body: Record<string, unknown> }>('/api/dispatch-templates', async (request, reply) => {
+    const body = request.body ?? {};
+    if (typeof body.name !== 'string' || typeof body.prompt !== 'string') {
+      reply.send({ ok: false, reason: 'invalid-request' });
+      return;
+    }
+    reply.send(
+      dispatchTemplateStore.create({
+        name: body.name,
+        prompt: body.prompt,
+        machine: typeof body.machine === 'string' ? body.machine : undefined,
+        provider: typeof body.provider === 'string' ? body.provider : undefined,
+        cwd: typeof body.cwd === 'string' ? body.cwd : undefined,
+        model: typeof body.model === 'string' ? body.model : undefined,
+        effort: typeof body.effort === 'string' ? body.effort : undefined,
+        employeeId: typeof body.employeeId === 'string' ? body.employeeId : undefined,
+      }),
+    );
+  });
+
+  app.post<{ Params: { id: string } }>(
+    '/api/dispatch-templates/:id/delete',
+    async (request, reply) => {
+      reply.send(dispatchTemplateStore.delete(request.params.id));
+    },
+  );
+}
+
+// ── Budget guardrail (v2 mechanic G3 — GAME-DESIGN.md §7.4) ────
+
+/**
+ * Budget routes. GET is unauthenticated (same trust level as the other
+ * player-facing snapshot routes). POST /api/budget/report is the ingest
+ * point for bin/needs-input-poller.mjs's forwarded snapshot — same Bearer
+ * auth as /api/agents/poll, since it's machine telemetry, not a player action.
+ */
+function registerBudgetRoutes(app: FastifyInstance, options: HttpServerOptions): void {
+  app.get('/api/budget', async () => budgetStore.getSnapshot());
+
+  app.post<{ Body: Record<string, unknown> }>(
+    '/api/budget/report',
+    { preHandler: bearerAuth(options.token) },
+    async (request, reply) => {
+      const body = request.body ?? {};
+      const snapshot = (body.rate_limits ?? body) as ClaudeRateLimitSnapshot;
+      budgetStore.reportClaudeSnapshot(snapshot);
+      reply.send({ ok: true });
+    },
+  );
+
+  app.post<{ Body: Record<string, unknown> }>('/api/budget/codex-cap', async (request, reply) => {
+    const cap = Number(request.body?.cap);
+    if (!Number.isFinite(cap) || cap < 0) {
+      reply.send({ ok: false, reason: 'invalid-cap' });
+      return;
+    }
+    budgetStore.setCodexWeeklyCap(cap);
+    reply.send({ ok: true });
+  });
+
+  app.post<{ Body: Record<string, unknown> }>('/api/economy/perks/buy', async (request, reply) => {
+    const id = request.body?.id;
+    if (typeof id !== 'string' || !(PERK_IDS as readonly string[]).includes(id)) {
+      reply.send({ ok: false, reason: 'invalid-perk' });
+      return;
+    }
+    reply.send(economyStore.buyPerk(id as PerkId));
+  });
+}
+
+// ── STOP ALL — the global kill switch (v2 mechanic G3 — GAME-DESIGN.md §7.5) ──
+
+/**
+ * `POST /api/automation/stop-all` — one transaction (§7.5): disables every
+ * enabled standing order (stoppedByKillSwitch flag), halts every running
+ * chain run (in-flight dispatch finishes on its own but never enqueues the
+ * next step), and broadcasts `automationStopped`. `POST
+ * /api/automation/resume` is a separate explicit action, never automatic.
+ * Manual CallModal dispatch is unaffected either way — the kill switch
+ * targets autonomy, not the human.
+ */
+function registerAutomationStopAllRoutes(app: FastifyInstance, options: HttpServerOptions): void {
+  app.post('/api/automation/stop-all', async (_request, reply) => {
+    const haltedOrders = standingOrderStore.haltAll();
+    const haltedRuns = chainOrchestrator.haltAll();
+    options.store.broadcast({
+      type: 'automationStopped',
+      haltedOrderIds: haltedOrders.map((o) => o.id),
+      haltedRunIds: haltedRuns.map((r) => r.id),
+    });
+    reply.send({ ok: true, haltedOrders: haltedOrders.length, haltedRuns: haltedRuns.length });
+  });
+
+  app.post('/api/automation/resume', async (_request, reply) => {
+    const resumedOrders = standingOrderStore.resumeAll();
+    reply.send({ ok: true, resumedOrders: resumedOrders.length });
+  });
+}
+
 /** Normalize an X-Machine header value to an uppercase label, or undefined if invalid. */
 export function sanitizeMachineLabel(raw: unknown): string | undefined {
   const value = Array.isArray(raw) ? raw[0] : raw;
@@ -648,6 +928,34 @@ function registerWebSocketRoute(app: FastifyInstance, options: HttpServerOptions
     });
     safeSend(socket, { type: 'economyUpdate', ...economyStore.getSnapshot() });
 
+    // Chain runs (v2 mechanic G3): PURE broadcast fan-out to this connected
+    // client -- distinct from chainOrchestrator's own singleton subscription
+    // to dispatchStore.onUpdate() (wired once at process startup, above in
+    // createHttpServer()), which is the one that ACTS on updates. This
+    // per-connection subscription only forwards state, never enqueues
+    // anything, so N open tabs are safe here the same way they're safe for
+    // dispatchStore's own broadcast fan-out below.
+    const unsubscribeChainRuns = chainStore.onRunUpdate((run) => {
+      safeSend(socket, { type: 'chainRunUpdate', run });
+    });
+    for (const run of chainStore.getActiveRuns()) {
+      safeSend(socket, { type: 'chainRunUpdate', run });
+    }
+
+    // Standing orders (v2 mechanic G3): same pure-forwarding rationale.
+    const unsubscribeStandingOrders = standingOrderStore.onChange((order) => {
+      safeSend(socket, { type: 'standingOrderUpdate', order });
+    });
+    for (const order of standingOrderStore.getAll()) {
+      safeSend(socket, { type: 'standingOrderUpdate', order });
+    }
+
+    // Budget guardrail (v2 mechanic G3): same pure-forwarding rationale.
+    const unsubscribeBudget = budgetStore.onChange((snapshot) => {
+      safeSend(socket, { type: 'budgetUpdate', ...snapshot });
+    });
+    safeSend(socket, { type: 'budgetUpdate', ...budgetStore.getSnapshot() });
+
     // Handle incoming client messages
     socket.on('message', (data: Buffer | string) => {
       try {
@@ -675,6 +983,9 @@ function registerWebSocketRoute(app: FastifyInstance, options: HttpServerOptions
       unsubscribeDispatch();
       unsubscribeEmployees();
       unsubscribeEconomy();
+      unsubscribeChainRuns();
+      unsubscribeStandingOrders();
+      unsubscribeBudget();
     });
   });
 }

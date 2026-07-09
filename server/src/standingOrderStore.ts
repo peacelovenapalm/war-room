@@ -142,6 +142,7 @@ export type EnqueueDispatch = (input: {
   prompt: string;
   model?: string;
   effort?: string;
+  employeeId?: string;
 }) => { ok: boolean; reason?: string };
 
 export class StandingOrderStore {
@@ -231,7 +232,12 @@ export class StandingOrderStore {
     if (!order.needsFirstFireConfirm) return { ok: false, reason: 'already-confirmed' };
     const target = resolveTarget(order, resolveEmployeeDefaults);
     if (!target) return { ok: false, reason: 'missing-dispatch-target' };
-    const result = enqueueDispatch({ action: 'dispatch', prompt: order.prompt, ...target });
+    const result = enqueueDispatch({
+      action: 'dispatch',
+      prompt: order.prompt,
+      employeeId: order.employeeId,
+      ...target,
+    });
     if (!result.ok) return { ok: false, reason: result.reason ?? 'enqueue-failed' };
     order.needsFirstFireConfirm = false;
     order.lastFiredAt = now;
@@ -279,7 +285,12 @@ export class StandingOrderStore {
         this.finish(order, now, false);
         continue;
       }
-      const result = enqueueDispatch({ action: 'dispatch', prompt: order.prompt, ...target });
+      const result = enqueueDispatch({
+        action: 'dispatch',
+        prompt: order.prompt,
+        employeeId: order.employeeId,
+        ...target,
+      });
       if (!result.ok) {
         order.lastSkipReason = `enqueue-failed: ${result.reason ?? 'unknown'}`;
         order.updatedAt = now;

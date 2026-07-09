@@ -94,6 +94,12 @@ interface DispatchRecord {
    *  CallModal dispatch never carries these. */
   chainRunId?: string;
   chainStep?: number;
+  /** Employee correlation (v2 mechanic G3, §7.3) — set when a chain step or
+   *  standing order dispatches on behalf of a specific employee. Consumed
+   *  by httpServer.ts's status route to fire employeeStore.recordDispatchExit
+   *  on a real exit ("employeeWorkCompleted", GAME-DESIGN §7.3's one
+   *  dispatch-driven XP integration point). */
+  employeeId?: string;
   createdAt: number;
   updatedAt: number;
 }
@@ -112,6 +118,9 @@ export interface DispatchEnqueueInput {
   /** Chain correlation (G3, §7.1) — set only by chainOrchestrator.ts. */
   chainRunId?: string;
   chainStep?: number;
+  /** Employee correlation (G3, §7.3) — set by chainOrchestrator.ts/
+   *  standingOrderStore.ts when dispatching on behalf of an employee. */
+  employeeId?: string;
 }
 
 export type DispatchEnqueueResult =
@@ -262,6 +271,7 @@ export class DispatchStore {
       status: 'ringing',
       chainRunId: input.chainRunId,
       chainStep: input.chainStep,
+      employeeId: input.employeeId,
       createdAt: now,
       updatedAt: now,
     };
@@ -394,6 +404,23 @@ export class DispatchStore {
     }
     if (count > 0) this.persist();
     return count;
+  }
+
+  /** Server-side-only lookup (never sent over the wire) — the record's
+   *  provider/employeeId correlation, consumed by httpServer.ts's status
+   *  route to fire economy/employee/budget dispatch-exit side effects
+   *  after reportStatus() commits the terminal transition. */
+  getRecord(
+    id: string,
+  ): Pick<DispatchRecord, 'provider' | 'employeeId' | 'chainRunId' | 'chainStep'> | undefined {
+    const record = this.ensureLoaded().get(id);
+    if (!record) return undefined;
+    return {
+      provider: record.provider,
+      employeeId: record.employeeId,
+      chainRunId: record.chainRunId,
+      chainStep: record.chainStep,
+    };
   }
 
   /** Non-terminal entries (ringing/answered) — replayed to a freshly

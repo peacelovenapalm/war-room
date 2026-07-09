@@ -166,6 +166,7 @@ export class ChainOrchestrator {
         effort: stepDef.effort,
         chainRunId: runId,
         chainStep: stepIndex,
+        employeeId: stepDef.employeeId,
       },
       now,
     );
