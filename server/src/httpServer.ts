@@ -15,6 +15,8 @@ import { CHAIN_MAX_STEPS, type ChainStepDef, chainStore } from './chainStore.js'
 import type { AssetCache, SetHooksEnabledSideEffect } from './clientMessageHandler.js';
 import { handleClientMessage } from './clientMessageHandler.js';
 import { HOOK_API_PREFIX, MAX_HOOK_BODY_SIZE } from './constants.js';
+import { contractStore } from './contractStore.js';
+import { renderDigest } from './digest.js';
 import { dispatchStore } from './dispatchStore.js';
 import { dispatchTemplateStore } from './dispatchTemplateStore.js';
 import type { PerkId } from './economyConstants.js';
@@ -22,6 +24,7 @@ import { PERK_IDS } from './economyConstants.js';
 import { economyStore } from './economyStore.js';
 import type { Employee, ScoreTrack } from './employeeStore.js';
 import { employeeStore } from './employeeStore.js';
+import { notifyBigMoment } from './notifyBark.js';
 import { addRoom, buyFurniture, expandOffice, sell } from './officeLayoutStore.js';
 import type { RoomType } from './officeLayoutTypes.js';
 import { RoomType as RoomTypeValues } from './officeLayoutTypes.js';
@@ -31,6 +34,7 @@ import { shiftStats } from './shiftStats.js';
 import type { StandingOrderSchedule } from './standingOrderStore.js';
 import { standingOrderStore } from './standingOrderStore.js';
 import type { AgentState } from './types.js';
+import { worldEventStore } from './worldEventStore.js';
 
 /** Options for creating the HTTP + WebSocket server. */
 export interface HttpServerOptions {
@@ -109,7 +113,14 @@ export async function createHttpServer(options: HttpServerOptions): Promise<Http
   registerDispatchTemplateRoutes(app);
   registerBudgetRoutes(app, options);
   registerAutomationStopAllRoutes(app, options);
-  registerWebSocketRoute(app, options);
+  registerContractRoutes(app);
+  // Live-tick socket tracker (v2 mechanic G4, GAME-DESIGN §2's unified
+  // cadence model: "Live tick ... ≥1 socket connected, every 5 min ...
+  // stops the instant the last socket disconnects"). A plain mutable
+  // counter, not a module-level singleton -- each createHttpServer() call
+  // (each test's own app instance) gets its own.
+  const liveSocketTracker = { count: 0 };
+  registerWebSocketRoute(app, options, liveSocketTracker);
 
   // chainOrchestrator singleton subscription (v2 mechanic G3, bug-fix #1):
   // called EXACTLY ONCE here, at process startup — createHttpServer() runs
@@ -144,6 +155,53 @@ export async function createHttpServer(options: HttpServerOptions): Promise<Http
   standingOrderTimer.unref?.();
   app.addHook('onClose', () => clearInterval(standingOrderTimer));
 
+  // World events (v2 mechanic G4, §6.3) — the coarse "live tick" GAME-DESIGN
+  // §2 introduces: only rolls while ≥1 socket is connected (checked inside
+  // the callback, not by gating the interval itself, so it naturally stops
+  // doing anything the instant the last socket disconnects without needing
+  // a separate start/stop lifecycle). One-way layering held: worldEventStore
+  // never imports economyStore/employeeStore itself — every effect routes
+  // through the deps object built here.
+  const liveTickTimer = setInterval(() => {
+    if (liveSocketTracker.count <= 0) return;
+    worldEventStore.tick(Date.now(), {
+      online: true,
+      isVacationActive: () => economyStore.isVacationActive(),
+      getGrime: () => economyStore.getSnapshot().grime,
+      awardCash: (amount, reason) => economyStore.addCash(amount, reason),
+      awardReputation: (amount, reason) => economyStore.addReputation(amount, reason),
+      pickLowMoodEmployeeId: () => pickLowMoodEmployeeId(),
+      pickRandomEmployeeId: () => pickRandomEmployeeId(),
+      nudgeEmployeeMoodBoost: (id, delta) => employeeStore.nudgeMoodBoost(id, delta),
+    });
+  }, LIVE_TICK_INTERVAL_MS);
+  liveTickTimer.unref?.();
+  app.addHook('onClose', () => clearInterval(liveTickTimer));
+
+  // Bark big-moment pushes (v2 mechanic G4, §6.5) — contract-completed and
+  // chain-failed are wired here (subscribed once, at process startup, same
+  // discipline as chainOrchestrator.start() above); STOP ALL is wired
+  // directly at its route below. employee-quit and budget-paused are NOT
+  // yet wired (see TUNING.md REVIEW-ON-RETURN) — employeeStore's quit path
+  // doesn't currently emit a change event at all (a pre-existing gap, not
+  // introduced here), and budget-paused needs edge-triggered state tracking
+  // neither BUILD-PLAN's task list nor this milestone's acceptance criteria
+  // required.
+  const unsubscribeContractBark = contractStore.onCompleted((contract) => {
+    notifyBigMoment(
+      'contract-completed',
+      `Contract complete: ${contract.title} (+$${contract.payoutCash}${contract.payoutRep > 0 ? `, +${contract.payoutRep}★` : ''})`,
+    );
+  });
+  app.addHook('onClose', () => unsubscribeContractBark());
+
+  const unsubscribeChainBark = chainStore.onRunUpdate((run) => {
+    if (run.status === 'failed') {
+      notifyBigMoment('chain-failed', `Chain run failed: ${run.failReason ?? 'unknown reason'}`);
+    }
+  });
+  app.addHook('onClose', () => unsubscribeChainBark());
+
   // ── Listen ──────────────────────────────────────────────────
 
   await app.listen({ host: options.host ?? '127.0.0.1', port: options.port ?? 0 });
@@ -167,7 +225,14 @@ function registerHealthRoute(app: FastifyInstance): void {
 
 /** GET /api/briefing -- unauthenticated, like /api/health; the server is tailnet-only. */
 function registerBriefingRoute(app: FastifyInstance): void {
-  app.get('/api/briefing', async () => getBriefing());
+  app.get('/api/briefing', async () => {
+    const briefing = getBriefing();
+    // Contracts (v2 mechanic G4, §6.2): piggybacks briefingProvider's own
+    // 60s cache -- reconciling here (and again in registerContractRoutes)
+    // is the "no new poll loop" mint/complete tick.
+    contractStore.reconcile(briefing);
+    return briefing;
+  });
   // Shift report (v1 mechanic #2): today's scorecard — same trust level.
   // Also carries yesterday's closed ledger (deferred nit: previous-day card)
   // so a checked-out day isn't lost the moment midnight rolls over.
@@ -295,6 +360,33 @@ const CHAIN_SWEEP_INTERVAL_MS = 30_000;
  *  most once per local date across repeated ticks at this cadence). */
 const STANDING_ORDER_TICK_INTERVAL_MS = 60_000;
 
+/** World-event live-tick cadence (v2 mechanic G4, GAME-DESIGN §2's unified
+ *  cadence model) — 5 minutes, gated on ≥1 connected socket. */
+const LIVE_TICK_INTERVAL_MS = 300_000;
+
+/** effective mood = clamp(0,100, mood + moodBoost) — GAME-DESIGN §4.2. */
+function effectiveMood(emp: { mood: number; moodBoost: number }): number {
+  return Math.min(100, Math.max(0, emp.mood + emp.moodBoost));
+}
+
+/** rival_poach's targeting rule (§6.3): one random ACTIVE employee with
+ *  effective mood < 40. Returns undefined when nobody qualifies (the event
+ *  fizzles silently, per design). */
+function pickLowMoodEmployeeId(): string | undefined {
+  const candidates = employeeStore
+    .getAll()
+    .filter((e) => e.status === 'active' && effectiveMood(e) < 40);
+  if (candidates.length === 0) return undefined;
+  return candidates[Math.floor(Math.random() * candidates.length)].id;
+}
+
+/** birthday's targeting rule (§6.3): any random ACTIVE employee. */
+function pickRandomEmployeeId(): string | undefined {
+  const candidates = employeeStore.getAll().filter((e) => e.status === 'active');
+  if (candidates.length === 0) return undefined;
+  return candidates[Math.floor(Math.random() * candidates.length)].id;
+}
+
 /**
  * Dispatch queue routes. The server never shells out — these routes only
  * read/write dispatchStore.ts's in-memory (persisted) queue; the actual CLI
@@ -398,6 +490,14 @@ function registerDispatchRoutes(app: FastifyInstance, options: HttpServerOptions
         }
         if (record?.provider === 'codex') {
           budgetStore.recordCodexDispatchExit();
+        }
+        // Contracts (v2 mechanic G4, §6.2): the dispatch-result completion
+        // path -- an explicit contractId set at enqueue time by the
+        // webview's BRIEFING->DISPATCH prefill, never string-matched.
+        // Exit 0 only; a nonzero exit leaves the contract open (the linked
+        // work didn't actually finish).
+        if (record?.contractId && exitCode === 0) {
+          contractStore.completeByDispatch(record.contractId);
         }
       }
       reply.send(result);
@@ -511,12 +611,27 @@ function registerEmployeeRoutes(app: FastifyInstance): void {
 function registerEconomyRoutes(app: FastifyInstance): void {
   app.get('/api/economy', async () => economyStore.getSnapshot());
 
-  // GET /api/economy/summary — check-in digest (GAME-DESIGN §2). G4's
-  // worldEventStore adds the "top-5 flavor events" narrative line; until
-  // then this is the raw snapshot + recent ledger tail.
+  // GET /api/economy/summary — check-in digest (GAME-DESIGN §2/§6.5). The
+  // narrative sums the recent ledger tail's Cash/Rep deltas and pulls the
+  // last 5 world events for the "while you were out" story.
   app.get('/api/economy/summary', async () => {
     const snapshot = economyStore.getSnapshot();
-    return { ...snapshot, recentLedger: snapshot.ledger.slice(-20) };
+    const recentLedger = snapshot.ledger.slice(-20);
+    const cashDelta = recentLedger
+      .filter((e) => e.currency === 'cash')
+      .reduce((sum, e) => sum + e.delta, 0);
+    const reputationDelta = recentLedger
+      .filter((e) => e.currency === 'reputation')
+      .reduce((sum, e) => sum + e.delta, 0);
+    const topEvents = worldEventStore
+      .getEventLog(5)
+      .map((e) => ({ glyph: e.glyph, summary: e.summary }));
+    const warnings: string[] = [];
+    if (snapshot.grime > 70) {
+      warnings.push('Office grime is above 70 — consider a clean-up or a Kitchen.');
+    }
+    const narrative = renderDigest({ cashDelta, reputationDelta, topEvents, warnings });
+    return { ...snapshot, recentLedger, narrative };
   });
 
   app.post<{ Body: Record<string, unknown> }>('/api/economy/vacation', async (request, reply) => {
@@ -804,12 +919,37 @@ function registerAutomationStopAllRoutes(app: FastifyInstance, options: HttpServ
       haltedOrderIds: haltedOrders.map((o) => o.id),
       haltedRunIds: haltedRuns.map((r) => r.id),
     });
+    notifyBigMoment(
+      'stop-all',
+      `STOP ALL engaged: ${haltedOrders.length} standing order(s), ${haltedRuns.length} chain run(s) halted.`,
+    );
     reply.send({ ok: true, haltedOrders: haltedOrders.length, haltedRuns: haltedRuns.length });
   });
 
   app.post('/api/automation/resume', async (_request, reply) => {
     const resumedOrders = standingOrderStore.resumeAll();
     reply.send({ ok: true, resumedOrders: resumedOrders.length });
+  });
+}
+
+// ── Contracts (v2 mechanic G4 — GAME-DESIGN.md §6.2) ────────────
+
+/**
+ * Contract routes. Same trust level as employees/economy/building
+ * (unauthenticated local-webview player-action plane; the server is
+ * tailnet-only). GET reconciles first (piggybacking briefingProvider's own
+ * 60s cache, same as GET /api/briefing) so a client that only ever polls
+ * /api/contracts still sees fresh mints/completions. The manual-claim route
+ * rejects (never silently no-ops) a cap-exceeded or already-terminal claim.
+ */
+function registerContractRoutes(app: FastifyInstance): void {
+  app.get('/api/contracts', async () => {
+    contractStore.reconcile(getBriefing());
+    return contractStore.getAll();
+  });
+
+  app.post<{ Params: { id: string } }>('/api/contracts/:id/claim', async (request, reply) => {
+    reply.send(contractStore.claim(request.params.id));
   });
 }
 
@@ -831,7 +971,11 @@ export function sanitizeHookPid(raw: unknown): number | undefined {
 
 // ── WebSocket ──────────────────────────────────────────────────
 
-function registerWebSocketRoute(app: FastifyInstance, options: HttpServerOptions): void {
+function registerWebSocketRoute(
+  app: FastifyInstance,
+  options: HttpServerOptions,
+  liveSocketTracker: { count: number },
+): void {
   app.get('/ws', { websocket: true }, (socket, request) => {
     // In standalone mode (not embedded), skip auth for WebSocket connections.
     // The server binds to 127.0.0.1, so only local clients can connect.
@@ -846,6 +990,11 @@ function registerWebSocketRoute(app: FastifyInstance, options: HttpServerOptions
         return;
       }
     }
+
+    // World-event live-tick gate (v2 mechanic G4, GAME-DESIGN §2): a plain
+    // connect/close counter, decremented unconditionally on close so the
+    // live tick stops doing anything the instant the last socket disconnects.
+    liveSocketTracker.count += 1;
 
     const { store } = options;
 
@@ -976,6 +1125,7 @@ function registerWebSocketRoute(app: FastifyInstance, options: HttpServerOptions
     });
 
     socket.on('close', () => {
+      liveSocketTracker.count -= 1;
       store.off('agentAdded', onAgentAdded);
       store.off('agentRemoved', onAgentRemoved);
       store.off('broadcast', onBroadcast);
