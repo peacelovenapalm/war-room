@@ -1205,3 +1205,125 @@ clean, health check + briefing endpoint both responded.
 
 G2 (Economy + Building) is fully done: code, tests, screenshots, and the
 batch-1 deploy all verified. Proceeding to G3 (Command + Automation).
+
+### 2026-07-08 (later) — G3 (Command + Automation) code/test complete, no deploy
+
+Chains (`chainStore.ts`/`chainOrchestrator.ts`), standing orders
+(`standingOrderStore.ts`), templates (`dispatchTemplateStore.ts`), and the
+budget guardrail (`budgetStore.ts`) per GAME-DESIGN.md §7, superseding the
+old 08-draft "bolt fields onto dispatchStore" design (§9.11) — the
+`chainStore.ts`/`chainOrchestrator.ts` split with a real perk economy per
+§9.11's ruling.
+
+**Both of §7.1's self-identified correctness bugs, pre-fixed:**
+
+- **Bug #1 (subscription wiring):** `chainOrchestrator.start()` subscribes
+  to `dispatchStore.onUpdate()` exactly ONCE, called from
+  `httpServer.ts`'s `createHttpServer()` bootstrap — never inside
+  `registerWebSocketRoute`'s per-connection handler (grepped every
+  `dispatchStore.onUpdate` call site; the WS route's own subscription is a
+  separate, harmless pure-broadcast-forwarding one, not an advance-logic
+  subscription). `start()` is also idempotent as defense-in-depth, and the
+  advance algorithm independently re-checks `run.currentStep === stepIndex`
+  before acting on any event — two independent layers against the bug
+  shape, not just call-site discipline.
+- **Bug #2 (`expired` status):** treated IDENTICALLY to `denied` in
+  `chainOrchestrator.onDispatchUpdate` — terminal, fails the run
+  immediately, never retried. `CHAIN_STEP_TIMEOUT_MS=500_000`, verified
+  strictly less than `dispatchStore.ts`'s live `DISPATCH_TTL_MS=600_000`
+  constant (not retyped from memory).
+
+**Three unattended-run safety guards, all confirmed intact:**
+
+1. Standing-order first-fire confirm (`needsFirstFireConfirm`) is
+   UNCONDITIONAL — `confirmFirstFire()` is the only code path that ever
+   clears it, reachable only via an explicit human UI click; no perk
+   purchase, `tick()`, or STOP ALL/RESUME path can reach it (verified by a
+   dedicated test: an order with every perk owned still shows
+   `needsFirstFireConfirm:true` and `tick()` never fires it).
+2. Budget fail-safe pause: `budgetStore.isAutomationPaused()` returns
+   `paused:true, reason:'stale-snapshot'` whenever no fresh Claude report
+   exists — verified live end-to-end (fresh isolated server, zero
+   snapshot, a chain's step-2 auto-continuation genuinely stalled in
+   `pending` until a snapshot was seeded, exactly as designed — this was
+   an early test failure that turned out to be the fail-safe working
+   correctly, not a bug). Manual CallModal dispatch is never gated by this
+   store — grepped every call site.
+3. STOP ALL (`POST /api/automation/stop-all`) halts every running chain
+   run and disables every enabled standing order in one transaction,
+   broadcasts `automationStopped`; RESUME is a separate explicit action
+   restoring exactly the STOP ALL-disabled set (never a
+   previously-disabled order). Verified live: stop-all mid-chain, then the
+   in-flight step's own terminal exit arrives — the run stays `halted`,
+   step 2 never enqueues.
+
+**Regression tests for both named bugs, explicit and passing:**
+`chainOrchestrator.test.ts`'s "bug #1" test calls `start()` twice
+(simulating 2 WS connections naively re-wiring it) and asserts
+`dispatch.enqueue` is called exactly twice total across the whole 2-step
+run (once per step, never doubled) via a spy; the "bug #2" test drives a
+step to `expired` via `dispatchStore.sweepExpired()` and asserts the run
+fails immediately with `failReason:'step-expired'`, no stall.
+
+**Live E2E (real Fastify server + real poll/decide/status runner
+simulation, no mocked-Application shortcuts — `chainOrchestratorRoutes.test.ts`):**
+a 2-step chain on an allowlisted root completes with `{{step1.result}}`/
+`{{step1.exitCode}}` correctly substituted into step 2's actual prompt;
+a non-allowlisted root is denied by the (simulated) runner and the chain
+reaches `failed` with the runner's own deny reason surfaced, step 2 never
+enqueued.
+
+**Budget pause E2E (`standingOrderStoreRoutes.test.ts`) — spawns the REAL
+`bin/needs-input-poller.mjs` as a child process** (not a simulated forward
+call) against a hand-edited `~/.pixel-agents/rate-limit-snapshot.json`
+(`five_hour.used_percentage:95`, real field names verified against
+statusline.js), confirms the poller's `POST /api/budget/report` actually
+reaches the live server, then confirms a due standing order skips with
+`lastSkipReason:'budget-paused'`, `lastFiredAt` unchanged.
+
+**Claude/Codex usage-signal check, explicitly labeled per BUILD-PLAN §G3's
+required line:** the Claude rate-limit parser (`bin/lib/rate-limit-snapshot.mjs`)
+is **verified** against `~/.claude/statusline.js`'s own confirmed parse
+sites (lines 353/357-366/174) and exercised end-to-end against a
+realistic synthetic stdin payload matching that exact shape. The exact
+live CLI-generated stdin payload was NOT captured this session (doing so
+requires registering the hook in Greg's gated `~/.claude/settings.json`
+first, which this session correctly did not do) — the live CLI payload
+shape is **inferred** from statusline.js's source, not directly observed.
+The Codex weekly-cap heuristic is a manual config value by design (Greg
+enters it once), not a live signal — nothing to verify/infer there beyond
+the counter-increment logic, which is unit-tested.
+
+**Full verification (before → after):** server 393 → 463 (+70), webview
+206 → 231 (+25), bin/poller 63 → 74 (+11). Root `check-types`, full
+`npm run lint`, full `npm test`, and `npm run build` all clean. Live
+smoke-verified against a real running server instance with an isolated
+HOME (no interactive browser was available in this sandbox — no Chrome
+extension connection — so route responses, WS broadcast-on-connect
+replay, and the built bundle's inclusion of the new message types were
+confirmed via curl/websocket instead); Greg's own long-running local
+instance (PID 49078, port 3149) was detected via the CLI's server.json
+discovery and deliberately left untouched throughout (an isolated fake
+HOME was used instead of interacting with or restarting it).
+
+**Deviations from BUILD-PLAN:** CallModal's "employee prefill" call site
+(task 8's third of three `resolveEmployeeDefaults()` consumers) was not
+wired into a new UI affordance — `employeeStore.resolveEmployeeDefaults()`
+exists and is fully wired at the other two call sites (chain steps,
+standing orders); adding a "call this employee" button to
+`EmployeeRoster.tsx` would be new UI surface not required by any G3
+acceptance criterion, so it was deferred rather than speculatively built.
+WS broadcast planes (`chainRunUpdate`/`standingOrderUpdate`/`budgetUpdate`)
+were added beyond the doc's literal minimum (`automationStopped`) so
+ChainTray/StandingOrdersPanel/the CallModal budget chip update live —
+judged in-scope since every other v1/v2 tray/HUD in this codebase follows
+the same push pattern.
+
+**REVIEW-ON-RETURN logged to TUNING.md:** the 3-perk cost table, the
+budget pause thresholds (70/80 base, 80/88 Night Shift Foreman, 95/95
+hard ceilings), and the still-open statusline-snapshot-source decision
+(Option B implemented as the default per Greg's own "unsure" answer,
+Option A never touched).
+
+No deploy at G3 (batches with G4 per rev-2 sequencing). Proceeding to G4
+(Missions).
