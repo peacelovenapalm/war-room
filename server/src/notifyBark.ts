@@ -27,6 +27,25 @@ export const BIG_MOMENT_CLASSES = [
 ] as const;
 export type BigMomentClass = (typeof BIG_MOMENT_CLASSES)[number];
 
+/** KICKOFF v1.1 item 7: the NEXUS Bark wrapper (a FastAPI app) requires JSON
+ *  `{task, status, message}` — every push here used to POST raw text/plain,
+ *  which the wrapper 422s on (tested live 2026-07-09, TUNING.md). `status`
+ *  is mapped per push class; the wrapper turns it into an emoji/level/sound
+ *  on the phone side. */
+export type BarkStatus = 'info' | 'warning' | 'failure';
+
+const BIG_MOMENT_STATUS: Record<BigMomentClass, BarkStatus> = {
+  'contract-completed': 'info',
+  'employee-quit': 'warning',
+  'budget-paused': 'warning',
+  'stop-all': 'warning',
+  'chain-failed': 'failure',
+};
+
+/** Short, stable source label every push carries as `task` — distinguishes
+ *  War Room's pushes from other apps sharing the same Bark wrapper. */
+const TASK_LABEL = 'War Room';
+
 function localDate(now: number): string {
   const d = new Date(now);
   return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
@@ -47,14 +66,20 @@ export function getBarkUrl(env: NodeJS.ProcessEnv = process.env): string | undef
   return raw && raw.trim() !== '' ? raw.trim() : undefined;
 }
 
-async function postOnce(url: string, body: string, timeoutMs: number): Promise<void> {
+interface BarkPayload {
+  task: string;
+  status: BarkStatus;
+  message: string;
+}
+
+async function postOnce(url: string, payload: BarkPayload, timeoutMs: number): Promise<void> {
   const controller = new AbortController();
   const timer = setTimeout(() => controller.abort(), timeoutMs);
   try {
     const res = await fetch(url, {
       method: 'POST',
-      headers: { 'Content-Type': 'text/plain; charset=utf-8' },
-      body,
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(payload),
       signal: controller.signal,
     });
     if (!res.ok) throw new Error(`HTTP ${res.status}`);
@@ -63,11 +88,11 @@ async function postOnce(url: string, body: string, timeoutMs: number): Promise<v
   }
 }
 
-async function pushWithRetry(url: string, body: string, timeoutMs: number): Promise<void> {
+async function pushWithRetry(url: string, payload: BarkPayload, timeoutMs: number): Promise<void> {
   let lastError: unknown = new Error('unknown error');
   for (let attempt = 1; attempt <= MAX_ATTEMPTS; attempt++) {
     try {
-      await postOnce(url, body, timeoutMs);
+      await postOnce(url, payload, timeoutMs);
       return;
     } catch (err) {
       lastError = err;
@@ -84,11 +109,12 @@ export interface NotifyBarkOptions {
   now?: number;
 }
 
-function push(text: string, options: NotifyBarkOptions): void {
+function push(text: string, status: BarkStatus, options: NotifyBarkOptions): void {
   const url = options.url ?? getBarkUrl();
   if (!url) return; // feature off — zero noise
   const log = options.log ?? ((line: string) => console.log(line));
-  void pushWithRetry(url, text, options.timeoutMs ?? PUSH_TIMEOUT_MS)
+  const payload: BarkPayload = { task: TASK_LABEL, status, message: text };
+  void pushWithRetry(url, payload, options.timeoutMs ?? PUSH_TIMEOUT_MS)
     .then(() => log(`[Pixel Agents] Bark push delivered to ${maskUrlForLog(url)}`))
     .catch((err: unknown) => {
       log(`⚠ [Pixel Agents] Bark push failed for ${maskUrlForLog(url)}: ${String(err)}`);
@@ -107,7 +133,7 @@ export function notifyMorningDigest(text: string, options: NotifyBarkOptions = {
   const today = localDate(now);
   if (lastMorningDigestDate === today) return;
   lastMorningDigestDate = today;
-  push(text, options);
+  push(text, 'info', options);
 }
 
 /** Big-moment event push. Rejects (silent no-op, never throws) anything
@@ -120,7 +146,7 @@ export function notifyBigMoment(
   options: NotifyBarkOptions = {},
 ): void {
   if (!(BIG_MOMENT_CLASSES as readonly string[]).includes(kind)) return;
-  push(text, options);
+  push(text, BIG_MOMENT_STATUS[kind], options);
 }
 
 /** Test-only: reset the morning-digest dedupe state between test cases. */

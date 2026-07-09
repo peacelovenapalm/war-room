@@ -98,3 +98,38 @@ describe('notifyBigMoment class filter', () => {
     expect(fetch).not.toHaveBeenCalled();
   });
 });
+
+// KICKOFF v1.1 item 7: the wrapper 422s on raw text/plain — every push must
+// send JSON {task, status, message}. Assert the ACTUAL request shape, not
+// just that fetch fired.
+describe('Bark payload shape (KICKOFF v1.1 item 7)', () => {
+  function lastRequestBody(): { task: string; status: string; message: string } {
+    const mockFetch = fetch as unknown as { mock: { calls: unknown[][] } };
+    const [, init] = mockFetch.mock.calls.at(-1) as [string, RequestInit];
+    expect(init.headers).toMatchObject({ 'Content-Type': 'application/json' });
+    return JSON.parse(init.body as string);
+  }
+
+  it('notifyMorningDigest sends task="War Room", status="info"', () => {
+    notifyMorningDigest('good morning', { url: 'https://example.test/push', now: DAY1 });
+    const body = lastRequestBody();
+    expect(body).toEqual({ task: 'War Room', status: 'info', message: 'good morning' });
+  });
+
+  it('maps each BIG_MOMENT_CLASSES entry to a distinct, correct status', () => {
+    const expected: Record<BigMomentClass, string> = {
+      'contract-completed': 'info',
+      'employee-quit': 'warning',
+      'budget-paused': 'warning',
+      'stop-all': 'warning',
+      'chain-failed': 'failure',
+    };
+    for (const kind of BIG_MOMENT_CLASSES) {
+      notifyBigMoment(kind, `${kind} happened`, { url: 'https://example.test/push' });
+      const body = lastRequestBody();
+      expect(body.status).toBe(expected[kind]);
+      expect(body.task).toBe('War Room');
+      expect(body.message).toBe(`${kind} happened`);
+    }
+  });
+});
