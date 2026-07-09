@@ -1,4 +1,5 @@
 import { OfficeState } from './office/engine/officeState.js';
+import { getPixiInitCount } from './office/engine/pixiApp.js';
 
 declare global {
   interface Window {
@@ -31,6 +32,7 @@ declare global {
       }>;
       selectAgent?: (id: number) => void;
       setCrisis?: (id: number, since: number) => void;
+      getPixiInitCount?: () => number;
     };
   }
 }
@@ -84,6 +86,13 @@ export function installTestHooks(officeStateRef: { current: OfficeState | null }
     const ch = os?.characters.get(id);
     if (ch) ch.crisis = { since };
   };
+
+  // KICKOFF v1.1 item 2 — monotonic count of real Pixi Application.init()
+  // calls (see pixiApp.ts's getPixiInitCount doc). e2e drives view-switch/
+  // zoom/edit/resize interactions and asserts this stays 1 throughout,
+  // proving OfficeCanvas.tsx's mount effect no longer dispose+recreates the
+  // Application on every interaction (the disappearing-view bug).
+  hooks.getPixiInitCount = () => getPixiInitCount();
 
   // Point-in-time snapshot of every live pet. Pets render only on the canvas
   // (no DOM) and the heart bubble is never persisted, so e2e reads pet state

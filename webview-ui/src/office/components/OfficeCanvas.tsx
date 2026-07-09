@@ -55,7 +55,6 @@ interface OfficeCanvasProps {
   onDeleteSelected: () => void;
   onRotateSelected: () => void;
   onDragMove: (uid: string, newCol: number, newRow: number) => void;
-  editorTick: number;
   zoom: number;
   onZoomChange: (zoom: number) => void;
   panRef: React.MutableRefObject<{ x: number; y: number }>;
@@ -88,7 +87,6 @@ export function OfficeCanvas({
   onDeleteSelected,
   onRotateSelected,
   onDragMove,
-  editorTick: _editorTick,
   zoom,
   onZoomChange,
   panRef,
@@ -149,24 +147,6 @@ export function OfficeCanvas({
     },
     [officeState, zoom],
   );
-
-  // Resize canvas backing store to device pixels (no DPR transform on ctx)
-  const resizeCanvas = useCallback(() => {
-    const canvas = canvasRef.current;
-    const container = containerRef.current;
-    if (!canvas || !container) return;
-    const rect = container.getBoundingClientRect();
-    const dpr = window.devicePixelRatio || 1;
-    canvas.width = Math.round(rect.width * dpr);
-    canvas.height = Math.round(rect.height * dpr);
-    canvas.style.width = `${rect.width}px`;
-    canvas.style.height = `${rect.height}px`;
-    // No ctx.scale(dpr) — we render directly in device pixels
-    const scene = pixiSceneRef.current;
-    if (scene) {
-      scene.app.stage.hitArea = new Rectangle(0, 0, canvas.width, canvas.height);
-    }
-  }, []);
 
   // Shared per-frame sim step: office FSM tick + sound-layer bookkeeping.
   // Identical for both engines — only how the VISUAL frame gets drawn
@@ -355,26 +335,57 @@ export function OfficeCanvas({
     [officeState],
   );
 
+  // KICKOFF v1.1 item 2a — latest-value refs for the run-once Pixi ticker
+  // effect below. isEditMode/editorState/_editorTick/zoom and the four
+  // useCallback-wrapped functions above all change identity on ordinary
+  // interaction (paint-drags, color-slider drags, zoom, edit-mode toggle).
+  // The mount effect must run exactly once (mount/unmount), so the ticker
+  // can't close over these directly — it would freeze on whatever was live
+  // at mount. Instead it reads these refs every frame; this separate effect
+  // is the only thing that keeps them current, and it's cheap to re-run as
+  // often as its real deps change since it never touches Pixi or the canvas.
+  const stepSimulationRef = useRef(stepSimulation);
+  const buildEditorRenderStateRef = useRef(buildEditorRenderState);
+  const buildSelectionRenderStateRef = useRef(buildSelectionRenderState);
+  const applyCameraFollowAndAmbienceRef = useRef(applyCameraFollowAndAmbience);
+  const zoomRef = useRef(zoom);
+
+  useEffect(() => {
+    stepSimulationRef.current = stepSimulation;
+    buildEditorRenderStateRef.current = buildEditorRenderState;
+    buildSelectionRenderStateRef.current = buildSelectionRenderState;
+    applyCameraFollowAndAmbienceRef.current = applyCameraFollowAndAmbience;
+    zoomRef.current = zoom;
+  }, [
+    stepSimulation,
+    buildEditorRenderState,
+    buildSelectionRenderState,
+    applyCameraFollowAndAmbience,
+    zoom,
+  ]);
+
+  // KICKOFF v1.1 item 2 — run once per mount/unmount (empty deps), NOT on
+  // every isEditMode/_editorTick/zoom/bayCount change. The old version of
+  // this effect re-ran on every one of those, disposing and recreating the
+  // Pixi Application each time (force-losing the WebGL context on the
+  // reused canvas, blank frames during the async re-init) — that was the
+  // disappearing-view bug's primary mechanism (2a). officeState, editorState
+  // and panRef are stable singleton/ref identities (never reassigned), so
+  // reading them directly here (not via a ref) is safe; everything else the
+  // ticker needs comes from the *Ref indirection above.
   useEffect(() => {
     const canvas = canvasRef.current;
     if (!canvas) return;
-
-    resizeCanvas();
-
-    const observer = new ResizeObserver(() => resizeCanvas());
-    if (containerRef.current) {
-      observer.observe(containerRef.current);
-    }
 
     const handle = startPixiApp(canvas, {
       update: (dt) => {
         const scene = pixiSceneRef.current;
         if (!scene) return; // ready.then() below hasn't landed yet — skip this tick
-        stepSimulation(dt);
+        stepSimulationRef.current(dt);
 
-        const editorRender = buildEditorRenderState();
-        applyCameraFollowAndAmbience();
-        const selectionRender = buildSelectionRenderState();
+        const editorRender = buildEditorRenderStateRef.current();
+        applyCameraFollowAndAmbienceRef.current();
+        const selectionRender = buildSelectionRenderStateRef.current();
         const isNightMode = officeState.characters.size === 0;
 
         const { offsetX, offsetY } = renderPixiFrame(
@@ -385,7 +396,7 @@ export function OfficeCanvas({
           officeState.tileMap,
           officeState.furniture,
           officeState.getCharacters(),
-          zoom,
+          zoomRef.current,
           panRef.current.x,
           panRef.current.y,
           getSpriteTexture,
@@ -408,6 +419,8 @@ export function OfficeCanvas({
       },
     });
 
+    let observer: ResizeObserver | null = null;
+
     handle.ready
       .then((app) => {
         const layers = createPixiLayers(app.stage);
@@ -415,6 +428,30 @@ export function OfficeCanvas({
         pixiSceneRef.current = { app, layers, pools };
         app.stage.eventMode = 'static';
         app.stage.hitArea = new Rectangle(0, 0, canvas.width, canvas.height);
+
+        // KICKOFF v1.1 item 2b — Pixi's own ResizePlugin (resizeTo +
+        // autoDensity + resolution, see pixiApp.ts) is now the single owner
+        // of canvas.width/height (device px) and canvas.style.width/height
+        // (CSS px) on every `renderer.resize()` call. But ResizePlugin only
+        // listens for the window's native "resize" event (verified against
+        // pixi.js@8.19.0's ResizePlugin source) — it does not observe this
+        // container specifically, so a container-only resize (e.g. a side
+        // panel opening/closing with the window itself unchanged) needs an
+        // explicit nudge. This ResizeObserver drives that SAME
+        // renderer.resize() the ResizePlugin itself calls, so there remains
+        // exactly one owner of the width/height math either way; the
+        // renderer's own "resize" event (fired by both trigger paths) is
+        // what keeps stage.hitArea in sync afterward.
+        app.renderer.on('resize', () => {
+          app.stage.hitArea = new Rectangle(0, 0, canvas.width, canvas.height);
+        });
+
+        observer = new ResizeObserver(() => {
+          const container = containerRef.current;
+          if (!container) return;
+          app.renderer.resize(container.clientWidth, container.clientHeight);
+        });
+        if (containerRef.current) observer.observe(containerRef.current);
       })
       .catch(() => {
         // Disposed before init resolved (fast unmount) — nothing to build.
@@ -423,21 +460,10 @@ export function OfficeCanvas({
     return () => {
       handle.dispose();
       pixiSceneRef.current = null;
-      observer.disconnect();
+      observer?.disconnect();
     };
-  }, [
-    officeState,
-    resizeCanvas,
-    isEditMode,
-    editorState,
-    _editorTick,
-    zoom,
-    panRef,
-    stepSimulation,
-    buildEditorRenderState,
-    buildSelectionRenderState,
-    applyCameraFollowAndAmbience,
-  ]);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
 
   // Convert CSS mouse coords to world (sprite pixel) coords
   const screenToWorld = useCallback(
@@ -1148,6 +1174,7 @@ export function OfficeCanvas({
     >
       <canvas
         ref={canvasRef}
+        data-testid="office-canvas"
         onMouseMove={handleMouseMove}
         onMouseDown={handleMouseDown}
         onMouseUp={handleMouseUp}
