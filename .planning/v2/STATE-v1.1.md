@@ -30,3 +30,5 @@ status: IN PROGRESS <!-- IN PROGRESS | RUN COMPLETE -->
 <!-- one line per event: ISO time — what happened / what's next -->
 
 - 2026-07-09T08:51:22Z — LOOP-LOCK claimed (pid 97056), first iteration, STATE-v1.1.md created from KICKOFF-v1.1.md template. Next: baseline re-derivation + preflight.
+- 2026-07-09T08:56:00Z — baseline re-derivation MATCHES expected exactly: check-types clean, lint clean, server 512/512, webview 264/264, bin/poller 74/74, build clean (PWA output present, 11 precache entries). No mismatch, no stop needed.
+- 2026-07-09T08:58:00Z — preflight PASS: `ssh nexus-ts true` reachable; `npx playwright --version` → 1.59.1 present; `git push --dry-run` has no upstream on war-room/v1 (pre-existing — v0/v1 were never pushed to origin; deploy runbook rsyncs the local checkout over SSH directly, no git push in the deploy path, so this is not a blocker). Proceeding to item 1.
