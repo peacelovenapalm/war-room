@@ -119,7 +119,15 @@ export function BottomToolbar({
   };
 
   return (
-    <div className="absolute bottom-10 left-10 z-20 flex items-center gap-4 pixel-panel p-4">
+    // Mobile (<640px, G6 BUILD-PLAN §G6 task 4): too many buttons to fit a
+    // 390px viewport even at the 44px touch floor — becomes a horizontally
+    // scrollable strip pinned near the screen edges instead of reflowing
+    // into a new component family. Desktop (`sm:` and up) is unchanged.
+    <div
+      className="absolute bottom-10 left-10 z-20 flex items-center gap-4 pixel-panel p-4
+        max-sm:left-4 max-sm:right-4 max-sm:bottom-4 max-sm:max-w-[calc(100vw-32px)] max-sm:overflow-x-auto
+        max-sm:[&>*]:shrink-0"
+    >
       {/* Hide + Agent in standalone browser mode (no terminal to interact with) */}
       {!isBrowserRuntime && (
         <div

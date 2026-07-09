@@ -25,8 +25,12 @@ export function Modal({
   return (
     <>
       <div className="fixed inset-0 bg-black/50" style={{ zIndex }} onClick={onClose} />
+      {/* Mobile (<640px, G6 BUILD-PLAN §G6 task 2): bottom-sheet — fixed to
+          the viewport bottom, full width, internally scrollable, padded for
+          the iOS home-indicator safe area. `sm:` reverts to the original
+          centered floating panel, unchanged. */}
       <div
-        className={`fixed top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2 bg-bg border-2 border-border rounded-none shadow-pixel p-4 min-w-xs ${className}`}
+        className={`fixed inset-x-0 bottom-0 w-full max-h-[85vh] overflow-y-auto pb-[calc(4px+env(safe-area-inset-bottom))] sm:inset-x-auto sm:bottom-auto sm:top-1/2 sm:left-1/2 sm:-translate-x-1/2 sm:-translate-y-1/2 sm:w-auto sm:max-h-none sm:overflow-visible sm:pb-4 bg-bg border-2 border-border rounded-none shadow-pixel p-4 min-w-xs ${className}`}
         style={{ zIndex: zIndex + 1 }}
       >
         <div className="flex items-center justify-between py-4 px-10 border-b border-border mb-4">
