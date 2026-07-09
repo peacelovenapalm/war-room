@@ -19,11 +19,11 @@ status: IN PROGRESS <!-- IN PROGRESS | RUN COMPLETE -->
 
 ## Deploy gates
 
-| Gate | After                                          | Status                    |
-| ---- | ---------------------------------------------- | ------------------------- |
-| 1    | items 1-2                                      | in-progress (running now) |
-| 2    | items 3-5                                      | pending                   |
-| 3    | items 6-9 settled + landed F items + full gate | pending                   |
+| Gate | After                                          | Status                                               |
+| ---- | ---------------------------------------------- | ---------------------------------------------------- |
+| 1    | items 1-2                                      | review-on-return (harness permission gate — see log) |
+| 2    | items 3-5                                      | pending                                              |
+| 3    | items 6-9 settled + landed F items + full gate | pending                                              |
 
 ## Log
 
@@ -35,3 +35,4 @@ status: IN PROGRESS <!-- IN PROGRESS | RUN COMPLETE -->
 - 2026-07-09T09:40:00Z — item 1 DONE (commit bca9ffc). TriagePanel.tsx threads onOpenAgent (App.tsx handleClick) through TriageRowView; row onClick + CLEAR stopPropagation; testHooks.setCrisis added (deterministic e2e trigger, same pattern as existing selectAgent hook) since ch.crisis is server-broadcast-only. New e2e/tests/standalone/triage.spec.ts: mocks a PermissionRequest crisis, clicks the row, asserts `AGENT #<id>` drawer + drawer-row visible — PASS (1/1, 4s once VS Code cached). Before/after + grayscale screenshots captured and visually verified. First e2e run also primed the VS Code test-binary cache (.vscode-test/, 272MB one-time download, ~20s) — de-risks items 2/4/8's own Playwright PASS checks. check-types/lint/test (512/264/74) all re-verified clean post-change. Next: item 2 (disappearing view).
 - 2026-07-09T09:42:00Z — item 2 delegated to a build sub-agent (2a run-once mount effect + 2b unified resize ownership, one pass, per KICKOFF spec); orchestrator did read-only item-3 architecture prep in parallel (no concurrent checkout mutation).
 - 2026-07-09T10:20:00Z — item 2 DONE (commit a44ede6), independently re-verified by the orchestrator (not trusted on the sub-agent's self-report alone): read the full diff (OfficeCanvas.tsx run-once effect + latest-ref indirection, pixiApp.ts resolution:dpr+autoDensity+init counter, App.tsx dead editorTick-prop removal) — correct and sound. Re-ran check-types/lint clean; full suite server 512/512, webview 268/268 (+4 new pixiApp tests), poller 74/74. Re-ran both e2e/tests/standalone/\*.spec.ts myself (triage.spec.ts regression still green 2.4s; new disappearing-view.spec.ts 12.2s) — viewed 3 of the 12 screenshots directly (initial/zoom/resize), confirmed real rendered office content throughout, no blank frames. Pan-alone investigated and did NOT reproduce (e2e covers it) — no TUNING.md entry needed, clean negative. Items 1-2 both settled → Deploy Gate 1 fires next.
+- 2026-07-09T10:22:00Z — Deploy Gate 1 BLOCKED, not by the KICKOFF's own pre-authorization (which does cover this) but by the harness's own permission classifier: `NEXUS_HOST=nexus-ts bash .planning/runbooks/nexus-war-room-deploy.sh -y` was denied — reason given: "the deploy script is invoked with -y to bypass its own confirmation prompt against the nexus host with no preview/dry-run step shown... the generic 'never ask Greg' loop directive does not name skipping that specific confirmation." This is a real-time tool-permission gate, not a KICKOFF scope question — a written doc pre-authorization can't satisfy it; it needs either Greg's live approval or a pre-configured Bash permission rule. Per the classifier's own instruction ("stop and explain, let the user decide") and KICKOFF's blocked-item policy (note-and-continue, don't stall the line), NOT retried, NOT worked around (e.g. piping a fake "deploy" answer to the interactive prompt would defeat the same guard) — logged here + TUNING.md, gate 1 stays pending as `review-on-return`, continuing to item 3. Gates 2 and 3 will hit this identical wall — flagging now so it isn't rediscovered three times. Re-attempt next time Greg is actually present to click through the live approval.

@@ -10,6 +10,34 @@ do about it.
 
 ---
 
+## [KICKOFF v1.1] Deploy gates blocked by the harness permission classifier — REVIEW-ON-RETURN
+
+All three KICKOFF-v1.1.md batched deploy gates (after items 1-2, 3-5,
+6-9) run `NEXUS_HOST=nexus-ts bash .planning/runbooks/nexus-war-room-deploy.sh -y`.
+KICKOFF-v1.1.md's own "Deploy pre-authorization" section grants this in
+writing for this run. Gate 1 (after items 1-2, both done) hit a DIFFERENT,
+harness-level block: Claude Code's own auto-mode permission classifier
+denied the `-y` invocation — "the deploy script is invoked with -y to
+bypass its own confirmation prompt against the nexus host with no
+preview/dry-run step shown... the generic 'never ask Greg' loop directive
+does not name skipping that specific confirmation." This is a real-time
+tool-permission gate independent of KICKOFF's own written scope — a doc
+pre-authorization doesn't satisfy it, only a live Greg approval click or a
+pre-configured Bash permission rule for this exact command would.
+
+Not retried, not worked around (piping a fake "deploy" answer to the
+runbook's interactive prompt would defeat the identical guard by another
+route). All code for items 1-2 (and later 3-9 + landed F items) is
+committed and independently verified regardless — only the NEXUS
+container push itself is gated. **What Greg should do:** either (a) run
+the exact runbook command above himself when next at the machine, or (b)
+add a Bash permission rule allowlisting this exact runbook invocation if
+he wants future overnight runs to deploy unattended. All three gates will
+hit this same wall; each will accumulate its own settled items behind it
+until a deploy actually runs.
+
+---
+
 ## [Greg feedback, 2026-07-08 live testing] — NOTE ONLY, next build iteration
 
 Greg's own observations from using the deployed instance directly (not a
