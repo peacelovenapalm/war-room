@@ -122,6 +122,13 @@ ssh "${NEXUS_HOST}" "tailscale funnel status 2>/dev/null | grep -q ':${SERVE_POR
   && fail "SAFETY: :${SERVE_PORT} appears in FUNNEL status — run 'tailscale funnel --https=${SERVE_PORT} off' NOW" \
   || ok "funnel check clean — :${SERVE_PORT} is tailnet-only"
 
+# ── PWA manifest reachable over the real tailnet path (G6, BUILD-PLAN §G6 task 5) ──
+if curl -sf -m 8 "https://${TAILNET_FQDN}:${SERVE_PORT}/manifest.webmanifest" >/dev/null; then
+  ok "manifest.webmanifest reachable over tailnet HTTPS"
+else
+  warn "manifest.webmanifest not reachable from this machine over tailnet HTTPS — check this Mac's tailscale connection, then verify by hand"
+fi
+
 echo
 echo "=============================================================="
 ok "DEPLOY COMPLETE"
