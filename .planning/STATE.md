@@ -1493,3 +1493,160 @@ not a fixture — G4's missions system is live and correctly wired.
 G3+G4 (Command+Automation, Missions) are both fully done: code, tests,
 screenshots, and the batch-2 deploy all verified. Proceeding to G5 (Art +
 Living World Polish).
+
+### 2026-07-08 (later) — G5 Track 1 (world sim polish) ✓ DONE, Track 2 (art gen) DEFERRED
+
+Scope for this run, set by the top-level orchestrator: Track 1 (code —
+ambientEvents.ts, WorldEventBanner.tsx, calendarStore.ts) in full;
+Track 2 (actual Codex `$imagegen` art generation) explicitly OUT OF SCOPE
+— it needs a fresh in-person Greg authorization for the gated
+`rembg`/`sharp` installs and burns real Codex plan budget unattended,
+neither appropriate for an unattended run. BUILD-PLAN §G5 itself sanctions
+this exact fallback ("ship v1.0 on hue-shift recolors ... document the
+generation batch as a post-run `/loop` job"). One agent, one checkout,
+sequential — no worktree canary needed since Track 2 never ran.
+
+**Track 1 — ambient wander bias
+(`webview-ui/src/office/world/ambientEvents.ts`, NEW):** idle (non-
+BURNED_OUT) employees occasionally drift toward a same-real-project
+coworker (employeeId's project slug, machine-agnostic) or the placed
+Break Room instead of a fully random tile — same "cheap rule" shape as
+the v1 emergence crowd-pull in `characters.ts` (`CROWD_PULL_CHANCE`).
+Deliberately does NOT touch `characters.ts`'s tested FSM: `officeState.ts`'s
+existing `update()` loop (already driven by pixiApp.ts's ticker, no new
+timer) now computes a per-character `wanderTarget` — the existing global
+crisis `crowdTarget` when one exists (crisis attention always wins), else
+`ambientWanderTarget()` for any character currently `CharacterState.IDLE`
+— and passes whichever applies to the unmodified `updateCharacter()` call,
+same as before. `COWORKER_CLUSTER_PULL_CHANCE=0.3`/
+`BREAK_ROOM_PULL_CHANCE=0.25` are documented judgment calls (GAME-DESIGN
+doesn't specify numbers), deliberately lower than the v1 fire-crowd's 0.65
+so ambient flavor reads as occasional texture, not a dominant behavior.
+
+**Track 1 — live WorldEventBanner:** `worldEventStore.tick()` (G4) already
+produced an event log for the digest/Bark planes but never broadcast live
+— confirmed this session via grep (no `worldEventFired`-equivalent message
+existed, `useExtensionMessages.ts` had no handler). Added: `WorldEventFired`
+to `core/asyncapi.yaml` (regenerated `messages.ts`, never hand-edited);
+`httpServer.ts`'s live-tick handler now calls `options.store.broadcast(...)`
+whenever `tick()` returns a fired entry (in addition to its existing
+economy/employee-store effects, unchanged); `useExtensionMessages.ts`
+gains a capped rolling `worldEvents` list. `webview-ui/src/worldEventBanner.ts`
+(NEW, plain `.ts`) holds the testable core (`WorldEventEntryClient` type,
+`latestVisibleWorldEvent()`, 15s `WORLD_EVENT_BANNER_AUTO_HIDE_MS`) —
+`WorldEventBanner.tsx` is a thin wrapper, mirroring this repo's own
+`standingOrders.ts`/`StandingOrdersPanel.tsx` split (no jsdom/
+testing-library in this repo; pure logic lives outside the component).
+Every event renders through `SignalChip` with `real=false` (§6.1) —
+purely fictional flavor, dismissable, auto-hides so it never lingers like
+a real alert or competes with the TRIAGE board.
+
+**Real bug found + fixed via the real-browser evidence capture (not
+caught by any unit test):** first evidence pass showed `WorldEventBanner`
+rendering directly on top of `ProgressionHUD` — both were positioned
+`absolute top-8 left-8`, an overlap invisible in `latestVisibleWorldEvent`'s
+unit tests (which never render layout) and only found once a live
+`heatwave` event actually fired mid-capture and visually collided with the
+LVL/STREAK text. Moved to `top-24 left-8` (same left edge, stacked below),
+rebuilt, and re-ran the full 5-minute capture rather than ship evidence
+with a visible bug baked in.
+
+**Track 1 — `server/src/calendarStore.ts` (NEW):** `getSeason()`
+(meteorological quarters) + `isHolidayWeek()` (Dec 20-31), pure functions
+of a timestamp, zero external calendar reads. Intentionally mirrors
+`webview-ui/src/office/dayNight.ts`'s identical logic rather than sharing
+it — server can't import webview-ui files (same constraint
+`buildingBuffs.ts` already documents for `furnitureBuffs.ts`). Not wired
+to any consumer this session (BUILD-PLAN's task list names no call site);
+a forward-compatible scoping decision, same posture as G1's
+`employeeHired`/`employeeQuit` message types being defined-but-unemitted.
+
+**Idle-wander/clustering observation (real, not simulated):** isolated-
+HOME standalone server (`dist/cli.js`, same pattern G0-G2 used) + real
+headless Chromium via Playwright. Seeded a Break Room over the bundled
+default layout's furnished lounge (`POST /api/building/room`, Cash
+fixture-seeded to skip the grind) and 4 employees as 2 same-project
+coworker pairs via the authed hook-ingest path (`SessionStart`+`Stop`,
+the same M2/G1 acceptance pattern). `LIVE_TICK_INTERVAL_MS=300_000`
+exactly matches the "5-minute unattended observation window" acceptance
+line — deliberately, since a fresh `worldEventStore` always fires
+something on its first eligible tick, so the same window also proves the
+live broadcast. T0 screenshot (`g5-living-world-before.png`) taken ~8s
+after seeding (characters just gone idle at their desks); T1
+(`g5-living-world.png` + `-grayscale.png`) taken 305s later. Confirmed
+across two capture runs: character tile positions visibly changed
+(desk-chair reassignments; one run had an employee reach the tagged
+Break Room directly), and a live world event (`heatwave` in the first
+run, `coffee_run` in the final one) rendered via the banner both times —
+the store's per-id min-gap/weighted-roll logic means the SPECIFIC event
+is nondeterministic run-to-run, which is correct behavior, not flakiness.
+Two real environment gotchas hit and fixed in the driver script (not
+product code): the standalone server never auto-persists the bundled
+default layout to `~/.pixel-agents/layout.json` (serves it from an
+in-memory cache until a client `SaveLayout`s — `loadLayout()`'s
+file-persisting variant is `adapters/vscode`-only, not part of the
+standalone build) — seeded `layout.json` directly instead; the bundled
+21×22 default layout has an internal wall splitting a desk room from a
+furnished lounge (not the `DEFAULT_COLS=20`/`DEFAULT_ROWS=11` fallback
+`createDefaultLayout()` shape) — the Break Room rectangle needed retagging
+onto the actual open floor after the first attempt hit `tile-not-owned-floor`.
+
+**Verification (before → after):** server 509 → 512 (+3 —
+`calendarStore.test.ts`), webview 237 → 255 (+18 — `ambientEvents.test.ts`
+12, `WorldEventBanner.test.ts` 6), bin/poller 74 → 74 (unchanged, no
+`bin/` files touched). Root `check-types`, webview's own `tsc -b` (a
+first draft's `WorldEventBanner.test.ts` imported a type straight from
+`useExtensionMessages.ts`, which pulled that file — and transitively
+`notificationSound.ts` — into `tsconfig.node.json`'s program for the
+first time, surfacing a latent gap where `testHooks.ts`'s
+`Window.__pixelAgentsTestHooks` global augmentation isn't reachable from
+that tsconfig; fixed by the `worldEventBanner.ts` split above, which also
+matches the repo's own existing convention rather than being a one-off
+workaround), full `npm run lint`, root `npm test`, and `npm run build`
+all clean. `dist/webview` bundle: 2.6M (STATE.md's own G0 correction
+still holds — the real outDir is repo-root `dist/webview`, not
+`webview-ui/dist` — recorded here for G6's batch-3 deploy check per
+BUILD-PLAN's instruction).
+
+**Grep sweep (BUILD-PLAN §G5 acceptance criterion):** the full G5 diff
+(`ambientEvents.ts`, `officeState.ts`'s wander-target change,
+`worldEventBanner.ts`, `WorldEventBanner.tsx`, `useExtensionMessages.ts`'s
+new handler, `httpServer.ts`'s new broadcast lines, `calendarStore.ts`) —
+zero `economyStore`/`employeeStore` hits. `httpServer.ts` as a whole file
+still touches both stores extensively (pre-existing G2-G4 wiring,
+unchanged), but the diff added by this session does not.
+
+**Track 2 preflight (task 4a, read-only — nothing installed, nothing
+invoked):** `pip`/`pip3 show rembg`, `npm ls sharp` (repo-local + global),
+`which rembg` all confirm **still not installed**. `~/Diablito/.env`
+still absent, `FAL_KEY` still unset — **Fal fallback still
+unprovisioned**. Re-read `Diablito/SESSION-HANDOFF-2026-07-06.md` §7.3 in
+full — the documented Codex `$imagegen` transport is unchanged from
+GAME-DESIGN §8.3/BUILD-PLAN §G5 task 4a, no drift. New finding this
+session: the `BIG_MAP_TABLE` 2×2-footprint code gate (task 7) is already
+satisfied — `footprintW`/`footprintH` occupancy loops in
+`layoutSerializer.ts`/`editorActions.ts`/`officeState.ts` are generic
+nested loops, nothing hardcodes a 1-wide/2-tall assumption. Full
+ready-to-run job (install commands as instructions, the `codex exec`
+invocation pattern, the ~40-41-job asset list, the QA-gate +
+hue-shift-fallback workflow) logged to `.planning/v2/TUNING.md` as
+`[G5] Track 2 art generation — DEFERRED, ready-to-run /loop job`.
+
+**Explicit confirmations:** did NOT install `rembg`/`sharp` (read-only
+checks only). Did NOT invoke Codex/`$imagegen` or attempt any image
+generation. Did NOT attempt any deploy, NEXUS, SSH, docker, or tailscale
+action (G5 has no deploy gate — batches with G6). Did NOT touch anything
+outside `/Users/greg/code/war-room`. Did NOT touch Greg's own running
+local instances (his server on 3149/3199 was not detected this session
+since the earlier discovery windows weren't re-probed, but the evidence
+harness used an isolated `HOME`/dynamic free port throughout, same as
+every prior milestone's pattern, so no collision risk either way).
+
+Screenshots: `.planning/evidence/g5-living-world-before.png` (T0),
+`g5-living-world.png` + `-grayscale.png` (T1, 5 min later) — grayscale
+fully legible, every signal (state chips, the world-event chip, HUD
+numbers) reads by shape+text alone.
+
+No deploy at G5 (batches with G6's batch-3). Proceed to G6 (Phone/PWA)
+once ready; the deferred Track 2 job in TUNING.md is available for a
+future session with Greg present.

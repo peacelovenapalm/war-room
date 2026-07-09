@@ -246,3 +246,110 @@ against statusline.js's source; exact live CLI payload shape **inferred**
 from that source, not directly observed this session.
 
 ---
+
+## [G5] Track 2 art generation — DEFERRED, ready-to-run `/loop` job
+
+Track 1 (world sim polish — `ambientEvents.ts`, `WorldEventBanner.tsx`,
+`calendarStore.ts`) shipped this session, code-only, against hue-shift
+recolors of the existing 6 character palettes. Track 2 (actual AI art
+generation via Codex `$imagegen`) was explicitly out of scope for this
+run — it needs a fresh, in-person Greg authorization for the gated
+`rembg`/`sharp` installs, and it burns real Codex/ChatGPT plan budget
+3-5x per image turn, which shouldn't be spent unattended. Per BUILD-PLAN
+§G5's own sanctioned fallback: v1.0 ships on hue-shift recolors; this
+entry is the "documented post-run `/loop` job" it calls for.
+
+**Preflight re-confirmed this session (read-only checks only, nothing
+installed or invoked):**
+
+- `pip show rembg` / `pip3 show rembg` → not found. `npm ls sharp`
+  (repo-local and global) → empty. `which rembg` → not found. **Still not
+  installed**, matching GAME-DESIGN §8.3's prior finding.
+- `~/Diablito/.env` → does not exist, `FAL_KEY` not in this shell's env.
+  **Fal fallback still unprovisioned.**
+- Re-read `/Users/greg/code/Diablito/SESSION-HANDOFF-2026-07-06.md` §7.3
+  in full — the documented transport is still accurate: Codex CLI
+  `$imagegen` on the ChatGPT subscription, prompt via stdin (a positional
+  arg after `-i` gets swallowed as an image path), waves of 6-9 parallel
+  `codex exec` jobs, stop-and-report on any rate-limit message. No drift
+  from what GAME-DESIGN §8.3/BUILD-PLAN §G5 task 4a already say.
+- **New this session:** the `BIG_MAP_TABLE` 2×2-footprint code gate
+  (BUILD-PLAN §G5 task 7) is **CONFIRMED already supported** —
+  `footprintW`/`footprintH` occupancy loops in
+  `webview-ui/src/office/layout/layoutSerializer.ts`,
+  `webview-ui/src/office/editor/editorActions.ts`, and
+  `webview-ui/src/office/engine/officeState.ts` are all generic nested
+  `for (dr < footprintH) for (dc < footprintW)` loops — nothing hardcodes
+  a 1-wide or 2-tall assumption. A 2×2 furniture manifest entry
+  (`footprintW:2, footprintH:2`) needs no code changes; a future session
+  can generate/wire `BIG_MAP_TABLE` without first spiking `tileMap.ts`.
+
+**When Greg is present to authorize installs and watch Codex budget, the
+job is:**
+
+1. Install the two gated post-processing tools (ask first, then):
+   ```bash
+   pip install rembg
+   npm install --save-dev sharp   # or install globally if preferred
+   ```
+2. Per-asset generation, reference-anchored against the existing shipped
+   PNG, one `codex exec` call per image/frame-set:
+   ```bash
+   codex exec --skip-git-repo-check -s workspace-write \
+     -i <anchor.png> < prompt.txt > log.txt 2>&1
+   ```
+   Batch in waves of 6-9 parallel jobs (`&` + `wait`), check logs for
+   rate-limit messages between waves, stop and report rather than
+   hammering. This matches Greg's own stated preference: "batch the
+   sprites around my reset and use /loop on a 6-hour timer until all of
+   the images are done" — each `/loop` iteration is one wave, sized to
+   the 5h Codex reset window.
+3. Asset list (from `archive/sections/07-art-pipeline.md` §2/§3/§5.5 —
+   asset tables/prompt templates only; GAME-DESIGN §8.3 wins on any repo
+   fact conflict, already reconciled below):
+   - `char_N_work.png` — desk-work cycle, NEW file (not a slot reuse —
+     GAME-DESIGN §8.3 correction), 112×96/3-row×7-frame grid, all 6
+     palettes (N=0..5): 6 jobs.
+   - `char_N_celebrate.png` — down-row only, 4-frame, NEW file, all 6
+     palettes: 6 jobs.
+   - `char_N_break.png` — single-row 112×32, NEW file + NEW decoder export
+     `decodeSingleRowCharacterPng` (add, don't modify the 3-row decoder),
+     all 6 palettes: 6 jobs.
+   - Room/furniture sprites (Section 07 §3's table): `SERVER_RACK`,
+     `CABLE_TRAY`, `ESPRESSO_MACHINE`/`VENDING_MACHINE`, `STANDING_DESK`,
+     `BIG_MAP_TABLE` (2×2 — code gate now confirmed clear, see above),
+     floor tile variants for Server/Break/War rooms: ~9-10 jobs.
+   - Weather particle textures (rain streak, snowflake): 2 jobs.
+   - Mood/trait badge glyph set (4 mood states + ~7 trait icons from G1's
+     badge table, `personaBadges.ts`): ~10-11 jobs.
+   - Total ≈ 40-41 generation jobs, budget 2-3x in regens per GAME-DESIGN's
+     own risk note.
+4. QA gate per asset (extend `webview-ui/test/dev-assets.test.ts`, don't
+   create a parallel test path), per BUILD-PLAN §G5 task 10 — before
+   accepting into the manifest:
+   - Dimension check (exact width/height match).
+   - Alpha check (real alpha channel, not a baked checkerboard — confirms
+     `rembg` actually ran).
+   - Grayscale-distinctness check against any asset it appears alongside
+     on screen (colorblind hard rule — reject on >90% silhouette overlap).
+   - Decoder smoke test (`decodeCharacterPng`/`decodeSingleRowCharacterPng`/
+     `pngToSpriteData`/`decodeFloorPng` — must not throw, must produce a
+     non-empty grid of the expected shape).
+   - **2 failed regens on the same asset → fall back to hue-shift-
+     recoloring an existing sprite** (`adjustSprite`/`hueShiftSprites` in
+     `colorize.ts`), logged explicitly as `[x] (FALLBACK: recolored
+     <source>)` in `assets-source/_progress.md` — never silently
+     substituted, never blocks anything downstream (Track 1's code
+     already renders correctly against pure hue-shift recolors, so a
+     partial or zero-generation outcome ships fine).
+5. Wire each accepted sheet/sprite through the existing asset-loader/
+   manifest path (no new pipeline) and re-run the full gate list
+   (`check-types`, `lint`, `test`, `build`) before considering the batch
+   done.
+
+**Framing:** this is a proposed `/loop`-able job for a future session
+with Greg present, not a blocker on G5/G6/v1.0 shipping. v1.0 ships on
+hue-shift recolors; this entry exists so picking Track 2 back up doesn't
+require re-deriving the transport, asset list, or QA gate from scratch.
+
+---
