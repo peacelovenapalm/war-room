@@ -995,3 +995,159 @@ surface — `helpContent.test.ts` only gates a fixed, explicit list).
 
 No deploy at G1 (batches into G2's deploy gate). Proceed to G2
 (Economy + Building).
+
+### 2026-07-08 (later still) — G2 economy + building ✓ DONE (BATCH-1 deploy GATED)
+
+Three waves, one agent, one checkout, sequential — no collisions. Wave A
+(economy, commit `30307b8`), Wave B (building, `9cca5f8`), Wave C
+(webview build-mode UI, `91af910`), plus a real-browser perf-bug fix +
+evidence (`ad8386e`) and TUNING.md (`f007786`). Implements GAME-DESIGN.md
+§3/§5 exactly.
+
+**Wave A (economy):** `economyConstants.ts` (single numeric authority) +
+`economyStore.ts` — Cash/Reputation/grime/vacation-mode, capped 200-entry
+ledger, Reputation decay with a 1-day grace + a 72h/3-day
+offline-catchup cap (own day-by-day walk, not a batch recompute — avoids
+double-decaying already-processed days), dispatch-cash anti-farming daily
+cap (`DISPATCH_CASH_DAILY_CAP=50`, implemented + unit-tested per the
+build plan's task 4 but not yet wired to a live dispatch route — that
+wiring is G3's dispatch-chains territory, a deliberate scope line, not an
+oversight). Wired into the EXACT real-event call sites
+`progression`/`shiftStats` already use: `hookEventHandler.ts`'s
+`handleStop` (turn completed — also the once/day streak-touch bonus) and
+`pollStateHandler.ts`'s observed-transition branch (crisis resolved) and
+`shiftStats.ts`'s `onDayClose` default callback (shift grade). GET/POST
+`/api/economy*` routes + WS `economyUpdate` broadcast + connect-time
+offline catch-up. `employeeStore.ts`'s singleton export now wires its
+Reputation-award/vacation-flag deps to the real `economyStore` (a
+one-line change at the export site — the `EmployeeStoreDeps` injection
+seam G1 anticipated for exactly this).
+
+**Wave B (building):** `buildingBuffs.ts` — the authoritative
+`computeActiveBuffs()`, `buffsForDesk()` (Dev Pit/Break Room/War Room
+room-membership + Chebyshev furniture adjacency, one shared 40% cap per
+GAME-DESIGN §9.19, not two independent 40s) and `globalBuffs()` (Server
+Room +10% Cash requiring qualifying furniture inside, Kitchen mood-decay
+×0.85). `officeLayoutStore.ts` owns the four server-authoritative
+mutations (expand/room/furniture/sell) — check-debit-persist, client
+never mutates Cash. Bay expansion converts a 4-col rectangle to floor
+with a doorway punched through the old right-edge wall at the row
+midpoint, exact `500*1.55^n` cost. The Dev Pit +15% XP room-membership
+bonus is wired into the REAL turn-XP call site
+(`hookEventHandler.ts`'s `handleStop`) via `employeeStore.recordTurn`'s
+existing `xpOverride` param — looks up the employee's `assignedRoomId`
+(repurposed as the assigned desk's furniture uid) and computes the buff
+server-side, point-in-time, at the moment the real event resolves.
+Webview gains `RoomType`/`PlacedRoom` on `OfficeLayout` (rooms default to
+`[]`, same shape as `pets`) and a `furnitureBuffs.ts` sidecar for future
+UI display — the generated asset manifest is untouched, per the doc's
+explicit instruction.
+
+**Wave C (webview):** `EconomyHUD.tsx` (Cash/Reputation strip, sibling to
+`ProgressionHUD.tsx`) wired through `useExtensionMessages.ts`'s new
+`economyUpdate`/`officeExpanded`/`officeLayoutUpdated` handlers.
+`EditorToolbar.tsx` gains a 5-button room palette + Sell tool + Expand
+Office button (shape+text, no color-only). `OfficeCanvas.tsx` wires
+ROOM_TAG (drag-rectangle, mirrors the existing tile-paint drag pattern)
+and SELL (click-to-target) to new `editorActions.ts` async commit
+functions — server-authoritative check-debit-persist-broadcast, client
+applies the returned layout only on `{ok:true}`. New `pixiRenderer.ts`
+functions (`renderRoomTagPreview`, `renderBayGhost`) reuse the existing
+`dashedRect` primitive for the drag-rectangle preview and the next-bay
+LOCKED ghost overlay.
+
+**Real-browser bug found + fixed (not caught by any unit test):**
+`renderBayGhost()` reassigned a Pixi `Text.text` property every frame
+regardless of whether the value changed. Pixi re-rasterizes the glyph
+texture on every `.text` write — this pegged the render loop's CPU to
+100% the instant edit mode was entered, and independently caused
+Playwright's `page.screenshot()` to hang indefinitely (reproducible with
+`--disable-gpu --use-gl=swiftshader` forcing software rendering, which
+surfaced it faster; the browser's own GPU compositor apparently masked
+enough of the cost that the hang was CPU-load-dependent, not purely
+correctness-dependent). Root-caused via a from-scratch bisection (WS
+frame counting ruled out a server broadcast loop; disabling the new
+render calls but keeping the computation ruled out the two new render
+functions themselves as the _rendering_ cost, isolating it to the `.text`
+write; CPU measurement during the hang window, not just after, confirmed
+it wasn't a screenshot-API-specific issue). Fixed with a value-comparison
+guard before the write, matching the existing `renderSeatIndicators`
+precedent elsewhere in the same file (which only ever writes `.text`
+conditionally, never unconditionally every frame). This is the kind of
+bug `pixiRenderer.test.ts`'s mocked-`Application` scene-graph assertions
+structurally cannot catch — worth flagging as a gap: no G0-era test
+exercises real per-frame render cost against a live browser.
+
+**Verification:** server 393/393 (was 355, +38 — `economyStore.test.ts`
+23, `buildingBuffs.test.ts` 12, `buildingRoutes.test.ts` 3), webview
+206/206 (was 199, +7 — `layoutSerializer.test.ts` +2 rooms-migration
+cases, `editorActions.test.ts` 5 new), bin/poller 63/63 unchanged. Root
+`check-types`, webview's own `tsc -b`, full `npm run lint`, and `npm run
+build` all clean. `grep` sweep of the full G2 diff for the word "token"
+— every hit is inside a guardrail comment ("never token volume", "burning
+real tokens"), zero hits in actual reward-computation code.
+
+**Acceptance checks, explicitly confirmed:**
+
+- A real completed turn increases Cash by exactly `CASH_PER_TURN=2` —
+  verified via before/after `GET /api/economy` reads in
+  `economyStore.test.ts`, not just unit-level state assertions.
+- Bay purchase deducts the exact `500*1.55^n` formula, twice in a row,
+  via a live HTTP round-trip in `buildingRoutes.test.ts` (not a unit
+  test alone) — cols grow by exactly 4, the doorway tile at the old
+  right-edge wall's midpoint row is punched open, insufficient-Cash is
+  rejected without mutating the layout.
+- Dev Pit +15% XP bonus: `buildingRoutes.test.ts` drives 3 real turns to
+  cross the candidate→active threshold, assigns the employee to a desk,
+  tags a Dev Pit over it via the live route, drives a 4th real turn, and
+  asserts the XP delta is exactly `Math.round(XP_TURN * 1.15)` — a real
+  observed event through the actual hook-ingest→employeeStore pipeline,
+  not a unit test alone.
+- 40% shared cap: `buildingBuffs.test.ts` constructs a layout where
+  Dev Pit (15%) + 4 distinct buffed furniture types (10+10+10+15=45%)
+  would total 60% uncapped, and asserts the resolved bonus is exactly
+  `ADJACENCY_AND_ROOM_BONUS_CAP_PCT=40`, not 60 and not 80 — the
+  boundary case, not just "stays under 40."
+
+Screenshots: `.planning/evidence/g2-build-mode.png` + `-grayscale.png` —
+the room palette (5 buttons, glyph+text: Dev Pit/Server Room/Break
+Room/War Room/Kitchen), Sell tool, Expand Office button showing the exact
+live `bayCost(1)=$775`, and the EconomyHUD (`$1850 ★42`) against real
+seeded economy/employee data. Grayscale fully legible — every signal is
+shape+text, colorblind rule holds. The office canvas itself renders blank
+in this specific capture (camera/viewport quirk under the
+software-rendering flags forced to work around the screenshot hang, not
+reproduced in the earlier non-edit-mode captures which show the office
+correctly) — a cosmetic capture artifact, not a functional gap; the
+non-edit-mode office view (same session) renders furniture/floor
+correctly with the EconomyHUD overlaid.
+
+**BATCH-1 DEPLOY: GATED, NOT RUN.** The full gate list is green and the
+deploy was otherwise ready. Invoking
+`.planning/runbooks/nexus-war-room-deploy.sh` was **blocked by the
+permission system's auto-mode classifier** — it correctly determined
+that a teammate/orchestrator's pre-authorization does not carry Greg's
+own direct consent for a production-adjacent NEXUS action, and the
+agent did not attempt to route around the block. Ready-to-run command
+and the independent post-deploy `curl` verification step are logged in
+`.planning/v2/TUNING.md` under "[G2] BATCH-1 deploy — GATED, not run."
+Greg needs to either run the runbook himself or explicitly authorize it
+directly in a session before G4's batch-2 deploy assumes G2 is live.
+
+**Scoping decisions (forward-compatible, not implemented yet):**
+`recordDispatchExit()` (Cash + activity-touch for dispatch runs) is
+implemented and unit-tested but not wired into a live dispatch route —
+BUILD-PLAN's Wave A task 3 scopes G2's wiring to exactly 3 call sites
+(turn/crisis/shift-close); dispatch-exit Cash naturally lands in G3
+alongside the dispatch-chains/budget-guardrail work. `/api/building/furniture`
+exists and is tested indirectly via `buildingBuffs.test.ts`'s fixtures but
+has no dedicated buy-flow webview UI beyond the route + editorActions
+wrapper (`commitBuyFurniture`) — no acceptance criterion required it and
+the existing free-furniture-placement UI already covers plain decor; a
+buffed-furniture shopping UI is a reasonable follow-up, not a gap against
+this milestone's stated criteria. `PlacedRoom` has no persistent visual
+indicator in the renderer yet (an already-tagged room doesn't render a
+tinted overlay) — GAME-DESIGN doesn't require one for v1, follow-up for
+G5 polish.
+
+Proceed to G3 (Command + Automation) once G2's deploy is confirmed live.
