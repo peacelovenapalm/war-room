@@ -397,6 +397,17 @@ export class EmployeeStore {
     };
   }
 
+  /** World events (v2 mechanic G4, §6.3) — rival_poach/birthday nudge an
+   *  employee's transient moodBoost. No-op on an unknown id (an event may
+   *  target an employee who was fired/deleted between the pick and the
+   *  nudge — an honest no-op, same posture as recordDispatchExit). */
+  nudgeMoodBoost(id: string, delta: number, now: number = Date.now()): void {
+    const emp = this.getExisting(id, now);
+    if (!emp) return;
+    emp.moodBoost = clamp(-MOOD_BOOST_CLAMP, MOOD_BOOST_CLAMP, emp.moodBoost + delta);
+    this.finish(emp, now, 'mood-nudge', { delta });
+  }
+
   // ── Verbs (GAME-DESIGN §4.6) ────────────────────────────────────────
 
   train(id: string, track: ScoreTrack, now: number = Date.now()): EmployeeVerbResult {
