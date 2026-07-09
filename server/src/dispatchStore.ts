@@ -88,6 +88,12 @@ interface DispatchRecord {
    *  only place a run's actual output reaches the dashboard. Capped at
    *  DISPATCH_RESULT_TAIL_MAX_CHARS regardless of what the runner sends. */
   resultTail?: string;
+  /** Chain correlation (v2 mechanic G3, GAME-DESIGN.md §7.1) — additive,
+   *  optional, set only when this dispatch is one step of a chain run.
+   *  chainOrchestrator.ts is the only writer (via enqueue()); a manual
+   *  CallModal dispatch never carries these. */
+  chainRunId?: string;
+  chainStep?: number;
   createdAt: number;
   updatedAt: number;
 }
@@ -103,6 +109,9 @@ export interface DispatchEnqueueInput {
   pid?: number;
   model?: string;
   effort?: string;
+  /** Chain correlation (G3, §7.1) — set only by chainOrchestrator.ts. */
+  chainRunId?: string;
+  chainStep?: number;
 }
 
 export type DispatchEnqueueResult =
@@ -124,6 +133,11 @@ export interface DispatchBroadcast {
   /** Terminal-run output tail (dispatch action, `exited` status only) — the
    *  same trust level as promptPreview: capped, never the full log. */
   resultTail?: string;
+  /** Chain correlation (G3, §7.1) — present only for chain-step dispatches.
+   *  chainOrchestrator.ts is the sole subscriber that acts on these; the
+   *  webview client is free to ignore them. */
+  chainRunId?: string;
+  chainStep?: number;
 }
 
 /** What a runner receives on `POST /api/dispatch/poll` — the ONLY place the
@@ -246,6 +260,8 @@ export class DispatchStore {
       effort:
         input.action === 'dispatch' ? (input.effort as DispatchEffort | undefined) : undefined,
       status: 'ringing',
+      chainRunId: input.chainRunId,
+      chainStep: input.chainStep,
       createdAt: now,
       updatedAt: now,
     };
@@ -415,6 +431,8 @@ export class DispatchStore {
       pid: record.pid,
       exitCode: record.exitCode,
       resultTail: record.resultTail,
+      chainRunId: record.chainRunId,
+      chainStep: record.chainStep,
     };
   }
 

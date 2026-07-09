@@ -359,6 +359,44 @@ export class EmployeeStore {
     this.finish(emp, now, 'crisis-resolved', {});
   }
 
+  /** A dispatch run tagged with this employee's id exited (v2 mechanic G3 —
+   *  the one integration point Employees consumes for dispatch-driven XP
+   *  growth, GAME-DESIGN §7.3). Exit 0 pays XP_DISPATCH_EXIT_0; any other
+   *  exit pays the smaller XP_DISPATCH_EXIT_NONZERO — real observed event
+   *  either way (never token volume). No-op on an unknown id (a chain step
+   *  can reference an employee that was fired/deleted after the chain was
+   *  authored — an honest no-op, not a crash). */
+  recordDispatchExit(id: string, exitCode: number, now: number = Date.now()): void {
+    const emp = this.getExisting(id, now);
+    if (!emp) return;
+    emp.xp += exitCode === 0 ? XP_DISPATCH_EXIT_0 : XP_DISPATCH_EXIT_NONZERO;
+    emp.lastActiveAt = now;
+    this.finish(emp, now, 'dispatch-exit', { exitCode });
+  }
+
+  /** GAME-DESIGN §7.3 — reads exactly the 4 REAL record fields (an earlier
+   *  draft named homeMachine/defaultCwd, which don't exist on this record).
+   *  Consumed at three call sites (CallModal prefill, ChainStepDef,
+   *  StandingOrder) — explicit fields at those call sites always win over
+   *  these defaults, this is a prefill convenience only. */
+  resolveEmployeeDefaults(id: string):
+    | {
+        machine: string;
+        projectDir: string;
+        defaultProvider: 'claude' | 'codex';
+        defaultModel?: string;
+      }
+    | undefined {
+    const emp = this.getExisting(id, Date.now());
+    if (!emp) return undefined;
+    return {
+      machine: emp.machine,
+      projectDir: emp.projectDir,
+      defaultProvider: emp.defaultProvider,
+      defaultModel: emp.defaultModel,
+    };
+  }
+
   // ── Verbs (GAME-DESIGN §4.6) ────────────────────────────────────────
 
   train(id: string, track: ScoreTrack, now: number = Date.now()): EmployeeVerbResult {
