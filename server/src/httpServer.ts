@@ -20,11 +20,13 @@ import { contractStore } from './contractStore.js';
 import { renderDigest } from './digest.js';
 import { dispatchStore } from './dispatchStore.js';
 import { dispatchTemplateStore } from './dispatchTemplateStore.js';
+import { dossierStore } from './dossierStore.js';
 import type { PerkId } from './economyConstants.js';
 import { PERK_IDS } from './economyConstants.js';
 import { economyStore } from './economyStore.js';
 import type { Employee, ScoreTrack } from './employeeStore.js';
 import { employeeStore } from './employeeStore.js';
+import { matchDayStore, toMatchDayEvent } from './matchDayStore.js';
 import {
   createBudgetPauseNotifier,
   createEmployeeQuitNotifier,
@@ -36,10 +38,14 @@ import { RoomType as RoomTypeValues } from './officeLayoutTypes.js';
 import { outputRingStore, outputStreamKey } from './outputRingStore.js';
 import { applyPollStates, parsePollBody, startPollStateSweep } from './pollStateHandler.js';
 import { progression } from './progressionStore.js';
+import { reworkBinStore } from './reworkBinStore.js';
+import { rivalryStore } from './rivalryStore.js';
 import { shiftStats } from './shiftStats.js';
 import type { StandingOrderSchedule } from './standingOrderStore.js';
 import { standingOrderStore } from './standingOrderStore.js';
+import { studioContractStore } from './studioContractStore.js';
 import type { AgentState } from './types.js';
+import { v3StoreEnabled } from './v3Flags.js';
 import { worldEventStore } from './worldEventStore.js';
 
 /** Options for creating the HTTP + WebSocket server. */
@@ -1301,6 +1307,91 @@ function registerWebSocketRoute(
     });
     safeSend(socket, { type: 'budgetUpdate', ...budgetStore.getSnapshot() });
 
+    // ── v3 Living Studio planes (WS-C stage 1 — KICKOFF-v3.1 §3) ──────
+    // Same pure-forwarding rationale as the planes above, with one twist:
+    // each plane is gated by its source-data feature flag (v3Flags.ts) —
+    // default ON only when REAL source data exists (a plane with nothing
+    // observed stays silent rather than broadcasting fiction), env-
+    // overridable per store. The flag is evaluated per send, not captured
+    // at connect, so a plane lights up mid-session the moment its first
+    // real record lands. These flags gate ONLY the game-face broadcast
+    // planes — no real functionality (dispatch, chains, STOP ALL) is ever
+    // behind them (hard rule 2).
+    const v3ContractsEnabled = () =>
+      v3StoreEnabled(
+        'CONTRACTS',
+        () => !!process.env['WAR_ROOM_TODO_DIR'] || studioContractStore.hasRecords(),
+      );
+    const unsubscribeStudioContracts = studioContractStore.onChange((contract) => {
+      if (v3ContractsEnabled()) safeSend(socket, { type: 'contractsUpdated', contract });
+    });
+    if (v3ContractsEnabled()) {
+      for (const contract of studioContractStore.getActive()) {
+        safeSend(socket, { type: 'contractsUpdated', contract });
+      }
+    }
+
+    const v3DossiersEnabled = () =>
+      v3StoreEnabled(
+        'DOSSIERS',
+        () => employeeStore.getAll().length > 0 || dossierStore.hasRecords(),
+      );
+    const unsubscribeDossiers = dossierStore.onChange((dossier) => {
+      if (v3DossiersEnabled()) safeSend(socket, { type: 'dossierUpdated', dossier });
+    });
+    if (v3DossiersEnabled()) {
+      for (const dossier of dossierStore.getAll()) {
+        safeSend(socket, { type: 'dossierUpdated', dossier });
+      }
+    }
+
+    const v3MatchDayEnabled = () =>
+      v3StoreEnabled(
+        'MATCH_DAY',
+        () => chainStore.getRuns().length > 0 || matchDayStore.hasRecords(),
+      );
+    const unsubscribeMatchDay = matchDayStore.onChange((fixture) => {
+      if (v3MatchDayEnabled()) {
+        safeSend(socket, toMatchDayEvent(fixture) as unknown as Record<string, unknown>);
+      }
+    });
+    if (v3MatchDayEnabled()) {
+      for (const fixture of matchDayStore.getActive()) {
+        safeSend(socket, toMatchDayEvent(fixture) as unknown as Record<string, unknown>);
+      }
+    }
+
+    // Rework bin's source IS observed failures — before the first one
+    // exists there is nothing real to show, so the store's own records
+    // are the availability signal.
+    const v3ReworkBinEnabled = () =>
+      v3StoreEnabled('REWORK_BIN', () => reworkBinStore.hasRecords());
+    const unsubscribeReworkBin = reworkBinStore.onChange((item) => {
+      if (v3ReworkBinEnabled()) safeSend(socket, { type: 'reworkBinUpdated', item });
+    });
+    if (v3ReworkBinEnabled()) {
+      for (const item of reworkBinStore.getPiled()) {
+        safeSend(socket, { type: 'reworkBinUpdated', item });
+      }
+    }
+
+    // Rivalries derive from live worktree/repo overlap — possible only
+    // with ≥2 live agents with known project dirs (or already-derived
+    // pairs persisted from an earlier session).
+    const v3RivalriesEnabled = () =>
+      v3StoreEnabled(
+        'RIVALRIES',
+        () => rivalryStore.hasRecords() || countLiveAgentDirs(store) >= 2,
+      );
+    const unsubscribeRivalries = rivalryStore.onChange((pair) => {
+      if (v3RivalriesEnabled()) safeSend(socket, { type: 'rivalryUpdated', pair });
+    });
+    if (v3RivalriesEnabled()) {
+      for (const pair of rivalryStore.getAll()) {
+        safeSend(socket, { type: 'rivalryUpdated', pair });
+      }
+    }
+
     // Live output tail (KICKOFF-v2.0 Phase 2 — streaming plane).
     // SUBSCRIPTION-GATED, deliberately unlike every broadcast plane above:
     // outputChunk messages go ONLY to sockets that sent a matching
@@ -1359,6 +1450,11 @@ function registerWebSocketRoute(
       unsubscribeChainRuns();
       unsubscribeStandingOrders();
       unsubscribeBudget();
+      unsubscribeStudioContracts();
+      unsubscribeDossiers();
+      unsubscribeMatchDay();
+      unsubscribeReworkBin();
+      unsubscribeRivalries();
       // Socket close implicitly unsubscribes every tail (protocol contract
       // on TailUnsubscribe) — drop the registry with the fan-out listener.
       tailSubscriptions.clear();
@@ -1393,6 +1489,16 @@ export const OUTPUT_TAIL_MAX_BUFFERED_BYTES = 1024 * 1024;
  *  socket without a bufferedAmount (unit-test fakes) is never shed. */
 export function isTailSocketBackpressured(socket: { bufferedAmount?: number }): boolean {
   return (socket.bufferedAmount ?? 0) > OUTPUT_TAIL_MAX_BUFFERED_BYTES;
+}
+
+/** Live agents with a known real project dir — the rivalry plane's
+ *  source-data signal (overlapping checkouts require ≥2 of these). */
+function countLiveAgentDirs(store: AgentStateStore): number {
+  let n = 0;
+  for (const agent of store.values()) {
+    if (agent.projectDir) n++;
+  }
+  return n;
 }
 
 function safeSend(
