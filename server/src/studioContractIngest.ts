@@ -174,6 +174,17 @@ export class StudioContractIngest {
 
       // Todo disappearance = done. Only decidable when the file was
       // actually readable (parsed !== null) — checked above.
+      //
+      // KNOWN LIMITATION (no stable per-todo identity): this keys purely on
+      // normalizedKey(text). The todo-compiler (outside this repo) rotates
+      // its daily top-3 by design, and if it ever rewords a still-open item
+      // between daily files, that rewording is indistinguishable here from
+      // real completion — it pays out on nothing. studioContractStore's
+      // terminal-cooldown dedup (mintFromTodo) bounds the resulting
+      // repeat-payout exposure for a RECURRING identical line, but does not
+      // fix a one-off false-complete from either rotation or rewording. A
+      // real fix needs a stable id threaded from the compiler; out of this
+      // repo's scope (WAR_ROOM_TODO_DIR is an external read-only source).
       const present = new Set(parsed.todos.map((t) => normalizedKey(t.text)));
       for (const contract of this.store.getActive()) {
         if (present.has(normalizedKey(contract.sourceTodo.text))) continue;
