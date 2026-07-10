@@ -11,11 +11,13 @@
  * Keyed by (source, id) — the dispatch queue UUID (source 'dispatch') or
  * the session/transcript id (source 'agent'). Each key holds one append-
  * ordered chunk list shared across its streams, with a PER-STREAM byte
- * budget (default 128KB): when a stream exceeds its budget, its oldest
- * chunks are evicted (never the just-appended one) and the stream is marked
- * history-lost, so every LATER replay delivers that stream's first retained
- * chunk with `truncated: true` — a late subscriber honestly knows it is
- * seeing a tail, not the full output.
+ * budget (default 128KB) AND a per-stream retained-chunk-count cap (default
+ * 1024 — bounds the object-overhead a tiny-chunk flood can retain): when a
+ * stream exceeds either limit, its oldest chunks are evicted (never the
+ * just-appended one) and the stream is marked history-lost, so every LATER
+ * replay delivers that stream's first retained chunk with `truncated: true`
+ * — a late subscriber honestly knows it is seeing a tail, not the full
+ * output.
  *
  * `seq` is monotonic per (source, id, stream) and survives eviction (it
  * counts appends, not retained chunks) — a client can order chunks and
@@ -44,12 +46,22 @@ export interface OutputChunkBroadcast {
 
 /** Per-stream byte budget (KICKOFF-v2.0 Phase 2 spec: ~64–256KB/stream). */
 export const OUTPUT_STREAM_BYTE_BUDGET = 128 * 1024;
+/** Per-stream retained CHUNK-COUNT cap. The byte budget counts payload
+ *  bytes only — a flood of tiny (e.g. 1-byte) chunks would otherwise retain
+ *  ~131k broadcast objects per stream (~150x the nominal budget in real
+ *  memory, and an O(n) eviction rebuild over all of them on every
+ *  over-budget append). The count cap bounds both: retained entries and the
+ *  rebuild's n. Evicting past it marks history lost exactly like the byte
+ *  budget does. */
+export const OUTPUT_STREAM_MAX_CHUNKS = 1024;
 
 interface StreamState {
   /** Next seq to assign — counts appends, so it survives eviction. */
   nextSeq: number;
   /** Bytes currently retained for this stream (UTF-8). */
   bytes: number;
+  /** Chunks currently retained for this stream. */
+  count: number;
   /** True once any chunk of this stream was evicted by the byte budget —
    *  replays mark the stream's first retained chunk `truncated: true`. */
   historyLost: boolean;
@@ -73,9 +85,14 @@ export class OutputRingStore {
   private readonly entries = new Map<string, RingEntry>();
   private listeners: Array<(chunk: OutputChunkBroadcast) => void> = [];
   private readonly byteBudget: number;
+  private readonly maxChunks: number;
 
-  constructor(byteBudget: number = OUTPUT_STREAM_BYTE_BUDGET) {
+  constructor(
+    byteBudget: number = OUTPUT_STREAM_BYTE_BUDGET,
+    maxChunks: number = OUTPUT_STREAM_MAX_CHUNKS,
+  ) {
     this.byteBudget = byteBudget;
+    this.maxChunks = maxChunks;
   }
 
   /** Subscribe to live chunk appends. Returns an unsubscribe function.
@@ -108,7 +125,7 @@ export class OutputRingStore {
     }
     let state = entry.streams.get(stream);
     if (!state) {
-      state = { nextSeq: 0, bytes: 0, historyLost: false };
+      state = { nextSeq: 0, bytes: 0, count: 0, historyLost: false };
       entry.streams.set(stream, state);
     }
 
@@ -125,6 +142,7 @@ export class OutputRingStore {
     };
     entry.chunks.push(broadcast);
     state.bytes += Buffer.byteLength(chunk, 'utf8');
+    state.count += 1;
     this.evictOverBudget(entry, stream, state, broadcast);
 
     for (const listener of this.listeners) {
@@ -166,20 +184,26 @@ export class OutputRingStore {
     this.entries.delete(outputStreamKey(source, id));
   }
 
-  /** Evict the oldest chunks of `stream` until it fits its byte budget.
-   *  The just-appended chunk is never evicted, even if it alone exceeds the
-   *  budget — a subscriber always sees at least the newest chunk. */
+  /** Evict the oldest chunks of `stream` until it fits BOTH its byte budget
+   *  and its retained-chunk-count cap. The just-appended chunk is never
+   *  evicted, even if it alone exceeds the budget — a subscriber always
+   *  sees at least the newest chunk. */
   private evictOverBudget(
     entry: RingEntry,
     stream: OutputStreamName,
     state: StreamState,
     newest: OutputChunkBroadcast,
   ): void {
-    if (state.bytes <= this.byteBudget) return;
+    if (state.bytes <= this.byteBudget && state.count <= this.maxChunks) return;
     const retained: OutputChunkBroadcast[] = [];
     for (const c of entry.chunks) {
-      if (c.stream === stream && c !== newest && state.bytes > this.byteBudget) {
+      if (
+        c.stream === stream &&
+        c !== newest &&
+        (state.bytes > this.byteBudget || state.count > this.maxChunks)
+      ) {
         state.bytes -= Buffer.byteLength(c.chunk, 'utf8');
+        state.count -= 1;
         state.historyLost = true;
         continue;
       }

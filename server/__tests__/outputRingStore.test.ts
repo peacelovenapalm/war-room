@@ -7,7 +7,11 @@
 
 import { describe, expect, it, vi } from 'vitest';
 
-import { OUTPUT_STREAM_BYTE_BUDGET, OutputRingStore } from '../src/outputRingStore.js';
+import {
+  OUTPUT_STREAM_BYTE_BUDGET,
+  OUTPUT_STREAM_MAX_CHUNKS,
+  OutputRingStore,
+} from '../src/outputRingStore.js';
 
 describe('OutputRingStore', () => {
   // ── seq monotonicity ─────────────────────────────────────────────
@@ -65,6 +69,50 @@ describe('OutputRingStore', () => {
     const replay = store.replay('dispatch', 'run-1');
     expect(replay.map((c) => c.chunk)).toEqual(['oversized-chunk']);
     expect(replay[0].truncated).toBe(true);
+  });
+
+  // ── chunk-count cap (object-overhead bound) ──────────────────────
+
+  it('bounds retained chunk COUNT per stream — a tiny-chunk flood cannot dodge the byte budget', () => {
+    // Payload-only byte accounting would retain a 1-byte chunk ~131k times
+    // under the default budget (~150x the nominal budget in real object
+    // memory). The count cap bounds retained entries independently of bytes.
+    const store = new OutputRingStore(1024 * 1024, 5);
+    for (let i = 0; i < 50; i++) store.append('dispatch', 'run-1', 'stdout', 'x');
+    const replay = store.replay('dispatch', 'run-1');
+    expect(replay.length).toBe(5);
+    expect(replay.map((c) => c.seq)).toEqual([45, 46, 47, 48, 49]); // newest kept
+    expect(replay[0].truncated).toBe(true); // lost history honestly marked
+  });
+
+  it('counts the chunk cap per stream, not per (source, id)', () => {
+    const store = new OutputRingStore(1024 * 1024, 2);
+    store.append('dispatch', 'run-1', 'stdout', 'o-0');
+    store.append('dispatch', 'run-1', 'stderr', 'e-0');
+    store.append('dispatch', 'run-1', 'stdout', 'o-1');
+    store.append('dispatch', 'run-1', 'stderr', 'e-1');
+    // Each stream holds 2 — neither is over ITS cap, nothing evicts.
+    expect(store.replay('dispatch', 'run-1').map((c) => c.chunk)).toEqual([
+      'o-0',
+      'e-0',
+      'o-1',
+      'e-1',
+    ]);
+    store.append('dispatch', 'run-1', 'stdout', 'o-2'); // stdout over cap
+    expect(store.replay('dispatch', 'run-1').map((c) => c.chunk)).toEqual([
+      'e-0',
+      'o-1',
+      'e-1',
+      'o-2',
+    ]);
+  });
+
+  it('a default instance bounds a 1-byte flood to OUTPUT_STREAM_MAX_CHUNKS entries', () => {
+    const store = new OutputRingStore();
+    for (let i = 0; i < OUTPUT_STREAM_MAX_CHUNKS + 200; i++) {
+      store.append('dispatch', 'run-flood', 'stdout', 'x');
+    }
+    expect(store.replay('dispatch', 'run-flood').length).toBe(OUTPUT_STREAM_MAX_CHUNKS);
   });
 
   it('accounts the budget in UTF-8 bytes, not string length', () => {
