@@ -548,7 +548,11 @@ body,
   background: #101318;
   border: 1px solid #8a94a8;
   font-size: 11px;
-  z-index: 30;
+  /* Above the HUD (60) and every modal (45/46): the HUD's one-tap chips
+     stay clickable above open panels (hud z-index comment above), so the
+     sheet they open must win too — otherwise it opens invisibly under the
+     modal backdrop and the tap looks dead. */
+  z-index: 65;
 }
 
 .real-sheet__head {
