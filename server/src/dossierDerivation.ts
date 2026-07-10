@@ -86,6 +86,10 @@ const REF_CAP = 10;
 /** Timestamped-event ring caps (window queries need history, bounded). */
 const EVENT_CAP = 200;
 const SESSION_ID_CAP = 50;
+/** Bounded dedupe set for processed terminal dispatch ids — the same guard
+ *  studioContractIngest keeps on the identical broadcast stream (a
+ *  redelivered terminal broadcast must not double-count exits/kills). */
+const PROCESSED_DISPATCH_CAP = 500;
 
 interface TsRef {
   ts: number;
@@ -158,6 +162,7 @@ export class DossierDerivation {
   private readonly dossiers: DossierStore;
   private readonly resolveDisplayName: (staffId: string) => string | undefined;
   private subscribed = false;
+  private readonly processedDispatchIds = new Set<string>();
 
   constructor(
     dossiers: DossierStore = dossierStore,
@@ -290,7 +295,10 @@ export class DossierDerivation {
   }
 
   /** A dispatch reached a terminal state — resolve its (machine, cwd) via
-   *  the queue record and log the outcome for the owning staff lineage. */
+   *  the queue record and log the outcome for the owning staff lineage.
+   *  Deduped by dispatch id (a redelivered terminal broadcast must not
+   *  double-count Steady-Hands exits or kill history — the same guard
+   *  studioContractIngest keeps on this exact stream). */
   onDispatchUpdate(
     broadcast: DispatchBroadcast,
     dispatch: Pick<DispatchStore, 'getRecord'> = dispatchStore,
@@ -298,8 +306,10 @@ export class DossierDerivation {
   ): void {
     if (broadcast.action !== 'dispatch') return;
     if (broadcast.status !== 'exited' && broadcast.status !== 'killed') return;
+    if (this.processedDispatchIds.has(broadcast.id)) return;
     const record = dispatch.getRecord(broadcast.id);
     if (!record?.cwd) return;
+    this.rememberProcessed(broadcast.id);
     const t = this.touch(record.machine, record.cwd, record.cwd, now);
     if (broadcast.status === 'killed') {
       pushEvent(t.kills, { ts: now, ref: `dispatch:${broadcast.id}` });
@@ -320,6 +330,14 @@ export class DossierDerivation {
   }
 
   // ── Internal ────────────────────────────────────────────────────────
+
+  private rememberProcessed(id: string): void {
+    this.processedDispatchIds.add(id);
+    if (this.processedDispatchIds.size > PROCESSED_DISPATCH_CAP) {
+      const oldest = this.processedDispatchIds.values().next().value;
+      if (oldest !== undefined) this.processedDispatchIds.delete(oldest);
+    }
+  }
 
   private touch(
     machine: string | undefined,

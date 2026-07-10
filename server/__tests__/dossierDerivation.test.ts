@@ -107,6 +107,27 @@ describe('DossierDerivation — identity + history', () => {
     expect(history).toContain('3.5k output tokens');
   });
 
+  it('DEDUP: a redelivered terminal DispatchBroadcast never double-counts exits or kills', () => {
+    // Regression (panel finding, dossierDerivation.ts:264): the sibling
+    // studioContractIngest consuming the SAME broadcast stream keeps a
+    // processed-ids set for exactly this; this file lacked the guard, so a
+    // WS-replay/duplicate 'exited' inflated dispatchExits (Steady Hands
+    // input) and 'killed' inflated the kill history.
+    const { derivation } = makeDerivation();
+    const lookup = lookupFor({
+      'd-dup': { machine: MACHINE, cwd: PROJECT },
+      'd-kill': { machine: MACHINE, cwd: PROJECT },
+    });
+    derivation.onDispatchUpdate(terminal('d-dup', 'exited', 0), lookup, atHour(9));
+    derivation.onDispatchUpdate(terminal('d-dup', 'exited', 0), lookup, atHour(9, 1));
+    derivation.onDispatchUpdate(terminal('d-kill', 'killed'), lookup, atHour(9, 2));
+    derivation.onDispatchUpdate(terminal('d-kill', 'killed'), lookup, atHour(9, 3));
+
+    const t = derivation.getTelemetry(STAFF_ID)!;
+    expect(t.dispatchExits).toHaveLength(1);
+    expect(t.kills).toHaveLength(1);
+  });
+
   it('SESSION BASELINES: two concurrent sessions in one checkout never corrupt burn deltas', () => {
     // Regression (panel finding, dossierDerivation.ts:210): the cumulative
     // baseline was keyed per staff identity, so concurrent sessions in the
