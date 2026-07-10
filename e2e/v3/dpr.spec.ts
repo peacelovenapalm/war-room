@@ -65,6 +65,13 @@ const EXPECTED_TALLY = '◉ 3 · ▶ 1 · ⚠ 2 · ✗ 0';
 /** Chunks replayed by the mock when a client subscribes to agent 2's tail. */
 const MOCK_TAIL_CHUNKS = ['● Bash(npm test)\n', 'Running 46 tests…\n'];
 
+interface AssetStoreStatsLike {
+  manifestState: 'idle' | 'loading' | 'ready' | 'failed';
+  chunksLoaded: number;
+  chunksTotal: number | null;
+  spritesKnown: number;
+}
+
 declare global {
   interface Window {
     /** Installed by webview-v3/src/testHooks.ts under the e2e flag. */
@@ -73,6 +80,11 @@ declare global {
       getAgentCount: () => number;
       getResolution: () => number;
       getCameraState: () => { zoom: number; offsetX: number; offsetY: number } | null;
+      getAssetStats: () => {
+        props: AssetStoreStatsLike;
+        characters: AssetStoreStatsLike;
+        images: AssetStoreStatsLike;
+      };
     };
   }
 }
@@ -237,6 +249,10 @@ interface RunResult {
   resolution: number;
   camera: { zoom: number; offsetX: number; offsetY: number };
   agentCount: number;
+  /** Real WS-B sprite sheets that actually decoded (KICKOFF-v3.1 "wire real
+   *  sprites in") — chunksLoaded > 0, not just the placeholder fallback. */
+  propSheetsLoaded: number;
+  characterSheetsLoaded: number;
 }
 
 async function runAtDsf(
@@ -277,11 +293,35 @@ async function runAtDsf(
   await expect(page.getByTestId('hud-connection')).toHaveText('● LIVE');
   await expect(page.getByTestId('hud-agents')).toHaveText(EXPECTED_TALLY);
 
+  // Real sprite sheets actually decoded — not just the skeleton-first
+  // placeholder art. The office geometry (floor/wall/desk/coffee/plant)
+  // requests its sheets unconditionally from frame 1 (webview-v3/src/App.tsx
+  // mount effect), and occupied desks pull in a character sheet once real
+  // agents land above. Real PNG decode over localhost, so a slightly longer
+  // timeout than the render/agent polls above.
+  await expect
+    .poll(
+      () =>
+        page.evaluate(() => window.__warRoomV3TestHooks?.getAssetStats().props.chunksLoaded ?? 0),
+      { timeout: 20_000 },
+    )
+    .toBeGreaterThan(0);
+  await expect
+    .poll(
+      () =>
+        page.evaluate(
+          () => window.__warRoomV3TestHooks?.getAssetStats().characters.chunksLoaded ?? 0,
+        ),
+      { timeout: 20_000 },
+    )
+    .toBeGreaterThan(0);
+
   const metrics = await page.evaluate(() => {
     const element = document.querySelector('[data-testid="iso-canvas"]');
     if (!(element instanceof HTMLCanvasElement)) return null;
     const rect = element.getBoundingClientRect();
     const hooks = window.__warRoomV3TestHooks;
+    const assetStats = hooks?.getAssetStats();
     return {
       pageDpr: window.devicePixelRatio,
       cssWidth: rect.width,
@@ -291,6 +331,8 @@ async function runAtDsf(
       resolution: hooks?.getResolution() ?? -1,
       camera: hooks?.getCameraState() ?? null,
       agentCount: hooks?.getAgentCount() ?? -1,
+      propSheetsLoaded: assetStats?.props.chunksLoaded ?? 0,
+      characterSheetsLoaded: assetStats?.characters.chunksLoaded ?? 0,
     };
   });
   if (!metrics || !metrics.camera) throw new Error('canvas metrics/test hooks unavailable');
@@ -316,6 +358,8 @@ async function runAtDsf(
     resolution: metrics.resolution,
     camera: metrics.camera,
     agentCount: metrics.agentCount,
+    propSheetsLoaded: metrics.propSheetsLoaded,
+    characterSheetsLoaded: metrics.characterSheetsLoaded,
   };
 }
 
@@ -359,6 +403,18 @@ test('DPR-3 WebKit 390x664: non-blank iso canvas, capped resolution, DSF-1 frami
     //    the poll above; re-checked here so the report shows the counts).
     expect(dsf3.agentCount).toBe(MOCK_AGENT_COUNT);
     expect(dsf1.agentCount).toBe(MOCK_AGENT_COUNT);
+
+    // 6. Real WS-B sprite sheets loaded and drew — not just placeholder
+    //    art — at BOTH densities (asserted per-run via the poll above;
+    //    re-checked here so the report shows the counts, and distinctColors
+    //    is meaningfully higher than the old placeholder-only baseline
+    //    given real art's shading/texture variety).
+    expect(dsf3.propSheetsLoaded).toBeGreaterThan(0);
+    expect(dsf3.characterSheetsLoaded).toBeGreaterThan(0);
+    expect(dsf1.propSheetsLoaded).toBeGreaterThan(0);
+    expect(dsf1.characterSheetsLoaded).toBeGreaterThan(0);
+    expect(dsf3.distinctColors).toBeGreaterThan(20);
+    expect(dsf1.distinctColors).toBeGreaterThan(20);
   } finally {
     await host.close();
   }
