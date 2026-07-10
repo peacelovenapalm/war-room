@@ -1,0 +1,13 @@
+{
+  "name": "war-room-asset-pipeline",
+  "private": true,
+  "type": "module",
+  "description": "WS-B QA tooling: manifest schema validator + viewer screenshot capture. Not part of the root workspaces array — scoped entirely to tools/asset-pipeline/.",
+  "scripts": {
+    "validate": "node validate-manifest.mjs",
+    "screenshot": "node screenshot-viewer.mjs"
+  },
+  "devDependencies": {
+    "playwright": "1.58.2"
+  }
+}

@@ -1,0 +1,183 @@
+{
+  "version": 1,
+  "styleBlock": "STYLE (locked, war-room v3 anchor): warm night-office mood — amber desk-lamp key light from screen-left, deep teal-navy shadow tones, muted terracotta / teal / moss accent palette; pixel-art-adjacent painterly digital illustration with crisp clean edges and flat chunky color planes; cozy late-night studio feel; NO photorealism, NO watermarks, NO signature.",
+  "portraitBlock": "FRAMING: dossier bust portrait — head and shoulders only, subject turned slightly left of camera, calm neutral relaxed expression (no smile, no frown, no raised eyebrows), plain dark warm-brown background with a soft amber rim light on screen-left. PERSONALITY-NEUTRAL: no props, no badges, no logos, no jewelry statements, no expression cues — a plain staff-file photo.",
+  "assets": [
+    {
+      "name": "portrait_01",
+      "category": "portraits",
+      "genSize": "1024x1024",
+      "finalSize": [512, 512],
+      "purpose": "Staff dossier portrait 01 of 12 — personality-neutral bust for the dossier panel; STYLE ANCHOR for the whole imagegen lane",
+      "prompt": "A woman in her late 20s, East Asian, chin-length black bob haircut, wearing a plain teal crew-neck shirt."
+    },
+    {
+      "name": "portrait_02",
+      "category": "portraits",
+      "genSize": "1024x1024",
+      "finalSize": [512, 512],
+      "purpose": "Staff dossier portrait 02 of 12 — personality-neutral bust for the dossier panel",
+      "prompt": "A man in his 30s, Black, short cropped hair, wearing a plain rust-orange henley shirt."
+    },
+    {
+      "name": "portrait_03",
+      "category": "portraits",
+      "genSize": "1024x1024",
+      "finalSize": [512, 512],
+      "purpose": "Staff dossier portrait 03 of 12 — personality-neutral bust for the dossier panel",
+      "prompt": "A woman in her 40s, South Asian, long dark braid over one shoulder, wearing a plain moss-green cardigan over a cream top."
+    },
+    {
+      "name": "portrait_04",
+      "category": "portraits",
+      "genSize": "1024x1024",
+      "finalSize": [512, 512],
+      "purpose": "Staff dossier portrait 04 of 12 — personality-neutral bust for the dossier panel",
+      "prompt": "A man in his 50s, white, neat gray beard and short gray hair, thin round glasses, wearing a plain slate-blue button-up shirt."
+    },
+    {
+      "name": "portrait_05",
+      "category": "portraits",
+      "genSize": "1024x1024",
+      "finalSize": [512, 512],
+      "purpose": "Staff dossier portrait 05 of 12 — personality-neutral bust for the dossier panel",
+      "prompt": "An androgynous person in their 20s, Latino, dark curly hair in an undercut, wearing a plain mustard-yellow t-shirt."
+    },
+    {
+      "name": "portrait_06",
+      "category": "portraits",
+      "genSize": "1024x1024",
+      "finalSize": [512, 512],
+      "purpose": "Staff dossier portrait 06 of 12 — personality-neutral bust for the dossier panel",
+      "prompt": "A woman in her 30s, Middle Eastern, dark wavy shoulder-length hair, wearing a plain terracotta blouse."
+    },
+    {
+      "name": "portrait_07",
+      "category": "portraits",
+      "genSize": "1024x1024",
+      "finalSize": [512, 512],
+      "purpose": "Staff dossier portrait 07 of 12 — personality-neutral bust for the dossier panel",
+      "prompt": "A man in his early 20s, East Asian, slightly messy black hair, wearing a plain olive-green overshirt over a dark tee."
+    },
+    {
+      "name": "portrait_08",
+      "category": "portraits",
+      "genSize": "1024x1024",
+      "finalSize": [512, 512],
+      "purpose": "Staff dossier portrait 08 of 12 — personality-neutral bust for the dossier panel",
+      "prompt": "A woman in her 50s, Black, natural coily hair with silver streaks, wearing a plain plum-colored sweater."
+    },
+    {
+      "name": "portrait_09",
+      "category": "portraits",
+      "genSize": "1024x1024",
+      "finalSize": [512, 512],
+      "purpose": "Staff dossier portrait 09 of 12 — personality-neutral bust for the dossier panel",
+      "prompt": "A man in his 40s, Latino, dark hair combed back with graying temples, light stubble, wearing a plain navy polo shirt."
+    },
+    {
+      "name": "portrait_10",
+      "category": "portraits",
+      "genSize": "1024x1024",
+      "finalSize": [512, 512],
+      "purpose": "Staff dossier portrait 10 of 12 — personality-neutral bust for the dossier panel",
+      "prompt": "A woman in her 20s, white with freckles, auburn-red hair in a loose low bun, wearing a plain charcoal-gray hoodie."
+    },
+    {
+      "name": "portrait_11",
+      "category": "portraits",
+      "genSize": "1024x1024",
+      "finalSize": [512, 512],
+      "purpose": "Staff dossier portrait 11 of 12 — personality-neutral bust for the dossier panel",
+      "prompt": "A man in his 30s, South Asian, short black hair and a short trimmed beard, wearing a plain teal-and-gray flannel shirt."
+    },
+    {
+      "name": "portrait_12",
+      "category": "portraits",
+      "genSize": "1024x1024",
+      "finalSize": [512, 512],
+      "purpose": "Staff dossier portrait 12 of 12 — personality-neutral bust for the dossier panel",
+      "prompt": "A woman in her 60s, white, short white hair, wearing a plain warm-brown cardigan over a dark top."
+    },
+    {
+      "name": "poster_stop_all",
+      "category": "posters",
+      "genSize": "1024x1536",
+      "finalSize": null,
+      "purpose": "STOP ALL safety poster — wall prop art; octagon SHAPE + text carry the signal (colorblind-safe, survives grayscale)",
+      "prompt": "A vintage industrial workplace-safety wall poster on aged warm cream paper. Dominant centered element: a large red stop-sign OCTAGON with bold white capital letters reading STOP ALL inside it. Below the octagon, bold dark capital letters read: HALT EVERY RUNNING AGENT. Small footer caption in capitals: PULL BEFORE YOU PANIC. High contrast, extremely legible typography, flat print style, slight paper grain, thin dark border."
+    },
+    {
+      "name": "poster_ship_it",
+      "category": "posters",
+      "genSize": "1024x1536",
+      "finalSize": null,
+      "purpose": "SHIP IT motivational poster — wall prop art for the office walls",
+      "prompt": "A vintage WPA-style motivational workroom poster. Giant bold condensed capital letters reading SHIP IT in warm cream, stacked on a deep teal-navy field, with stylized amber sunburst rays radiating behind the letters. A narrow footer band reads in small capitals: DONE IS A FEATURE. Crisp, extremely legible typography, flat screen-print texture, thin border."
+    },
+    {
+      "name": "placard_wing_a",
+      "category": "posters",
+      "genSize": "1536x1024",
+      "finalSize": null,
+      "purpose": "WING A wayfinding placard — wall prop art; letter + arrow shape carry the signal",
+      "prompt": "An interior wayfinding sign: a wide rectangular brushed-brass plate mounted on a warm dark walnut wood backing board. Engraved large capital letters read WING A on the left side, and a clean engraved arrow points to the RIGHT on the right side. Minimal, premium, extremely legible, straight-on view, soft warm overhead lighting."
+    },
+    {
+      "name": "placard_wing_b",
+      "category": "posters",
+      "genSize": "1536x1024",
+      "finalSize": null,
+      "purpose": "WING B wayfinding placard — wall prop art; letter + arrow shape carry the signal",
+      "prompt": "An interior wayfinding sign: a wide rectangular brushed-brass plate mounted on a warm dark walnut wood backing board. Engraved large capital letters read WING B on the left side, and a clean engraved arrow points to the LEFT on the right side. Minimal, premium, extremely legible, straight-on view, soft warm overhead lighting."
+    },
+    {
+      "name": "poster_help_chart",
+      "category": "posters",
+      "genSize": "1024x1536",
+      "finalSize": null,
+      "purpose": "HELP vocabulary wall chart — wall prop art listing the 8 board verbs with plain-language glosses",
+      "prompt": "An office reference wall chart, flat print style on warm cream paper. Across the top, a solid amber header band with bold dark capital letters reading HELP. Below, a single-column vocabulary list of exactly eight rows, each row a bold capital keyword followed by a short lowercase gloss, extremely legible with generous line spacing: DISPATCH send an agent. APPROVE clear a gate. ACK mark a crisis seen. SWEEP clear stale alerts. REWORK retry a failure. DISMISS drop a crate. CALL open a live line. STOP ALL halt everything. Thin dark rule lines between rows, thin border around the chart."
+    },
+    {
+      "name": "board_logo",
+      "category": "posters",
+      "genSize": "1536x1024",
+      "finalSize": null,
+      "purpose": "Studio logo lobby board — wall prop art; the WAR ROOM wordmark",
+      "prompt": "A studio lobby logo board: a rectangular dark walnut wood board with the wordmark WAR ROOM in large inlaid brass capital letters, and a smaller brass sub-line underneath reading OPERATIONS STUDIO. A subtle warm spotlight glow from above, straight-on view, minimal, premium, extremely legible."
+    },
+    {
+      "name": "tex_wood_floor",
+      "category": "textures",
+      "genSize": "1024x1024",
+      "finalSize": null,
+      "purpose": "Seamless-ish wood plank floor texture — canvas floor fill",
+      "prompt": "A seamless tileable top-down texture of warm oak wood plank flooring: staggered planks, subtle grain variation between planks, matte finish. Perfectly even diffuse lighting, no shadows, no vignette, no perspective — flat orthographic top-down, edges designed to tile."
+    },
+    {
+      "name": "tex_carpet",
+      "category": "textures",
+      "genSize": "1024x1024",
+      "finalSize": null,
+      "purpose": "Seamless-ish office carpet texture — canvas floor fill",
+      "prompt": "A seamless tileable top-down texture of low-pile office carpet in muted heathered teal-gray with tiny warm terracotta flecks. Perfectly even diffuse lighting, no shadows, no vignette, no perspective — flat orthographic top-down, edges designed to tile."
+    },
+    {
+      "name": "tex_brick",
+      "category": "textures",
+      "genSize": "1024x1024",
+      "finalSize": null,
+      "purpose": "Seamless-ish brick wall texture — canvas wall fill",
+      "prompt": "A seamless tileable texture of a warm terracotta brick wall in running bond pattern, slightly worn mortar joints, muted saturation. Perfectly even diffuse lighting, no shadows, no vignette, no perspective — flat straight-on view, edges designed to tile."
+    },
+    {
+      "name": "tex_corkboard",
+      "category": "textures",
+      "genSize": "1024x1024",
+      "finalSize": null,
+      "purpose": "Seamless-ish corkboard texture — pinboard prop fill",
+      "prompt": "A seamless tileable texture of a corkboard surface: fine warm-tan cork granules with a few subtle scattered pin holes, matte. Perfectly even diffuse lighting, no shadows, no vignette, no perspective — flat straight-on view, edges designed to tile."
+    }
+  ]
+}

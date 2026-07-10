@@ -1,0 +1,204 @@
+{
+  "version": 1,
+  "generator": "codex $imagegen (gpt-image), rectangular RGB only \u2014 no alpha in this lane",
+  "images": [
+    {
+      "name": "portrait_01",
+      "path": "imagegen/portraits/portrait_01.png",
+      "size": [
+        512,
+        512
+      ],
+      "purpose": "Staff dossier portrait 01 of 12 \u2014 personality-neutral bust for the dossier panel; STYLE ANCHOR for the whole imagegen lane"
+    },
+    {
+      "name": "portrait_02",
+      "path": "imagegen/portraits/portrait_02.png",
+      "size": [
+        512,
+        512
+      ],
+      "purpose": "Staff dossier portrait 02 of 12 \u2014 personality-neutral bust for the dossier panel"
+    },
+    {
+      "name": "portrait_03",
+      "path": "imagegen/portraits/portrait_03.png",
+      "size": [
+        512,
+        512
+      ],
+      "purpose": "Staff dossier portrait 03 of 12 \u2014 personality-neutral bust for the dossier panel"
+    },
+    {
+      "name": "portrait_04",
+      "path": "imagegen/portraits/portrait_04.png",
+      "size": [
+        512,
+        512
+      ],
+      "purpose": "Staff dossier portrait 04 of 12 \u2014 personality-neutral bust for the dossier panel"
+    },
+    {
+      "name": "portrait_05",
+      "path": "imagegen/portraits/portrait_05.png",
+      "size": [
+        512,
+        512
+      ],
+      "purpose": "Staff dossier portrait 05 of 12 \u2014 personality-neutral bust for the dossier panel"
+    },
+    {
+      "name": "portrait_06",
+      "path": "imagegen/portraits/portrait_06.png",
+      "size": [
+        512,
+        512
+      ],
+      "purpose": "Staff dossier portrait 06 of 12 \u2014 personality-neutral bust for the dossier panel"
+    },
+    {
+      "name": "portrait_07",
+      "path": "imagegen/portraits/portrait_07.png",
+      "size": [
+        512,
+        512
+      ],
+      "purpose": "Staff dossier portrait 07 of 12 \u2014 personality-neutral bust for the dossier panel"
+    },
+    {
+      "name": "portrait_08",
+      "path": "imagegen/portraits/portrait_08.png",
+      "size": [
+        512,
+        512
+      ],
+      "purpose": "Staff dossier portrait 08 of 12 \u2014 personality-neutral bust for the dossier panel"
+    },
+    {
+      "name": "portrait_09",
+      "path": "imagegen/portraits/portrait_09.png",
+      "size": [
+        512,
+        512
+      ],
+      "purpose": "Staff dossier portrait 09 of 12 \u2014 personality-neutral bust for the dossier panel"
+    },
+    {
+      "name": "portrait_10",
+      "path": "imagegen/portraits/portrait_10.png",
+      "size": [
+        512,
+        512
+      ],
+      "purpose": "Staff dossier portrait 10 of 12 \u2014 personality-neutral bust for the dossier panel"
+    },
+    {
+      "name": "portrait_11",
+      "path": "imagegen/portraits/portrait_11.png",
+      "size": [
+        512,
+        512
+      ],
+      "purpose": "Staff dossier portrait 11 of 12 \u2014 personality-neutral bust for the dossier panel"
+    },
+    {
+      "name": "portrait_12",
+      "path": "imagegen/portraits/portrait_12.png",
+      "size": [
+        512,
+        512
+      ],
+      "purpose": "Staff dossier portrait 12 of 12 \u2014 personality-neutral bust for the dossier panel"
+    },
+    {
+      "name": "poster_stop_all",
+      "path": "imagegen/posters/poster_stop_all.png",
+      "size": [
+        1024,
+        1536
+      ],
+      "purpose": "STOP ALL safety poster \u2014 wall prop art; octagon SHAPE + text carry the signal (colorblind-safe, survives grayscale)"
+    },
+    {
+      "name": "poster_ship_it",
+      "path": "imagegen/posters/poster_ship_it.png",
+      "size": [
+        1024,
+        1536
+      ],
+      "purpose": "SHIP IT motivational poster \u2014 wall prop art for the office walls"
+    },
+    {
+      "name": "placard_wing_a",
+      "path": "imagegen/posters/placard_wing_a.png",
+      "size": [
+        1536,
+        1024
+      ],
+      "purpose": "WING A wayfinding placard \u2014 wall prop art; letter + arrow shape carry the signal"
+    },
+    {
+      "name": "placard_wing_b",
+      "path": "imagegen/posters/placard_wing_b.png",
+      "size": [
+        1536,
+        1024
+      ],
+      "purpose": "WING B wayfinding placard \u2014 wall prop art; letter + arrow shape carry the signal"
+    },
+    {
+      "name": "poster_help_chart",
+      "path": "imagegen/posters/poster_help_chart.png",
+      "size": [
+        1024,
+        1536
+      ],
+      "purpose": "HELP vocabulary wall chart \u2014 wall prop art listing the 8 board verbs with plain-language glosses"
+    },
+    {
+      "name": "board_logo",
+      "path": "imagegen/posters/board_logo.png",
+      "size": [
+        1536,
+        1024
+      ],
+      "purpose": "Studio logo lobby board \u2014 wall prop art; the WAR ROOM wordmark"
+    },
+    {
+      "name": "tex_wood_floor",
+      "path": "imagegen/textures/tex_wood_floor.png",
+      "size": [
+        1024,
+        1024
+      ],
+      "purpose": "Seamless-ish wood plank floor texture \u2014 canvas floor fill"
+    },
+    {
+      "name": "tex_carpet",
+      "path": "imagegen/textures/tex_carpet.png",
+      "size": [
+        1024,
+        1024
+      ],
+      "purpose": "Seamless-ish office carpet texture \u2014 canvas floor fill"
+    },
+    {
+      "name": "tex_brick",
+      "path": "imagegen/textures/tex_brick.png",
+      "size": [
+        1024,
+        1024
+      ],
+      "purpose": "Seamless-ish brick wall texture \u2014 canvas wall fill"
+    },
+    {
+      "name": "tex_corkboard",
+      "path": "imagegen/textures/tex_corkboard.png",
+      "size": [
+        1024,
+        1024
+      ],
+      "purpose": "Seamless-ish corkboard texture \u2014 pinboard prop fill"
+    }
+  ]
+}
