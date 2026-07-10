@@ -10,6 +10,47 @@ do about it.
 
 ---
 
+## [KICKOFF v3.1] Delegation policy AMENDED by Greg (2026-07-10, live) — codex implementer-allowed
+
+Greg's live instruction during the v3.1 sprint ("we can delegate to codex
+5.6 sol and to sonnet 5 agents when possible if scope is clearly defined
+and work is capable for those models") AMENDS KICKOFF-v2.0 0.5's
+"cross-model reviewer/second-opinion ONLY, never implementer" rule for
+this sprint and forward: codex may implement clearly-scoped mechanical
+chunks behind agent review; Sonnet 5 carries well-scoped implementation
+stages; Fable reserves for orchestration, adversarial verification, and
+merges. Applied mid-sprint via stage-boundary retiering (A3/A4, B3/B4 →
+Sonnet; verifies stayed Fable).
+
+---
+
+## [KICKOFF v3.1] No remote-answer API for interactive sessions — board APPROVE is honest-explainer — REVIEW-ON-RETURN
+
+WS-A stage 2 verified the wire has NO remote approve gate for blocked
+interactive sessions (no ClientMessage, no HTTP route; the needs-input
+poller is report-only) — same constraint v1 documented ("live
+blocked-session steering is OUT"). Shipped treatment: ✓ APPROVE on
+dispatch-gated rows is REAL (runner owns the gate); on interactive-session
+rows the verb explains itself ("⊘ NO REMOTE GATE — ▸ DESK → COPY ID /
+KILL") instead of faking success; debris ACK has a real 5s undo. **Greg:**
+ratify this treatment or fund a remote-answer plane as its own future
+project (it is not a panel — it is a new containment surface).
+
+---
+
+## [KICKOFF v3.1] Economy items awaiting Greg review (hard-rule-adjacent) — REVIEW-ON-RETURN
+
+Two shipped-but-gated designs need Greg's eyes before they count as
+settled: (1) studio-contract reward wiring (bonus-only +25 CASH via
+economyStore with receipts; target formula documented in
+studioContractIngest.ts — ~2x trailing natural pace); (2) Match Day W/D/L
+honest mapping (documented in matchDayDerivation.ts: W = completed +
+all-exit-0, L = run failed, D = terminal-not-failed; burn axis always
+NO_DATA — no per-dispatch token attribution exists). Both live behind
+v3Flags source-data gating; neither touches real functionality.
+
+---
+
 ## [KICKOFF v1.1] Deploy gates blocked by the harness permission classifier — RESOLVED 2026-07-10
 
 **RESOLVED by the v2.0 run (KICKOFF-v2.0 0.2/0.3):** Greg was present at the
