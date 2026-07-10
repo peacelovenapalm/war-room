@@ -50,3 +50,7 @@ agent-orchestrator.yaml
 .ao/
 .serena/
 tasks/
+
+# webview-v3: generated mirror of webview-v3-assets/ (source of truth),
+# copied in by scripts/sync-assets.mjs — never a second source of truth.
+webview-v3/public/
