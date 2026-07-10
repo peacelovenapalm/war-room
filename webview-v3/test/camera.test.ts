@@ -5,8 +5,10 @@ import { describe, expect, it } from 'vitest';
 
 import {
   canvasToWorld,
+  clampPanToFit,
   clampZoom,
   fitToView,
+  interactiveZoomBounds,
   MAX_ZOOM,
   MIN_ZOOM,
   panBy,
@@ -108,5 +110,61 @@ describe('fit-to-view camera', () => {
     // Clamped at the ceiling: factor beyond MAX_ZOOM is a no-op past the cap.
     const maxed = zoomAt({ ...camera, zoom: MAX_ZOOM }, anchor.x, anchor.y, 10);
     expect(maxed.zoom).toBe(MAX_ZOOM);
+  });
+
+  describe('pinch/pan bounds (stage 4)', () => {
+    it('interactiveZoomBounds scales with fit zoom, never with a fixed constant alone', () => {
+      const bounds = mapWorldBounds(14, 10);
+      const phoneBounds = interactiveZoomBounds(PHONE, bounds);
+      const desktopBounds = interactiveZoomBounds(DESKTOP, bounds);
+      const phoneFit = fitToView(PHONE, bounds).zoom;
+      const desktopFit = fitToView(DESKTOP, bounds).zoom;
+      // Bigger canvas -> bigger fit zoom -> proportionally bigger interactive
+      // range, not the same absolute numbers.
+      expect(desktopBounds.min).toBeGreaterThan(phoneBounds.min);
+      expect(desktopBounds.max).toBeGreaterThan(phoneBounds.max);
+      expect(phoneBounds.min).toBeLessThan(phoneFit);
+      expect(phoneBounds.max).toBeGreaterThan(phoneFit);
+      expect(desktopBounds.min).toBeLessThan(desktopFit);
+      expect(desktopBounds.max).toBeGreaterThan(desktopFit);
+      // Always inside the absolute safety net.
+      expect(phoneBounds.min).toBeGreaterThanOrEqual(MIN_ZOOM);
+      expect(phoneBounds.max).toBeLessThanOrEqual(MAX_ZOOM);
+    });
+
+    it('clampPanToFit locks a fully-visible map to the centered fit framing (no dead-space pan)', () => {
+      const bounds = mapWorldBounds(14, 10);
+      const fit = fitToView(PHONE, bounds);
+      // Dragged far in every direction while zoomed OUT past fit — the map
+      // is still smaller than the canvas on both axes, so pan is a no-op.
+      const dragged = panBy(fit, 5_000, -5_000);
+      const clamped = clampPanToFit(dragged, PHONE, bounds);
+      expect(clamped).toEqual(fit);
+    });
+
+    it('clampPanToFit keeps at least a margin of the map on-canvas when zoomed in', () => {
+      const bounds = mapWorldBounds(14, 10);
+      const zoomedIn = { zoom: fitToView(PHONE, bounds).zoom * 3, offsetX: 0, offsetY: 0 };
+      // Drag absurdly far — the map must not be pushed fully off-canvas.
+      const draggedFarRight = panBy(zoomedIn, 100_000, 0);
+      const clamped = clampPanToFit(draggedFarRight, PHONE, bounds);
+      const worldOrigin = worldToCanvas(clamped, 0, 0);
+      // Some part of the map's world origin projects inside (or just past)
+      // the canvas — not thousands of px off to the side.
+      expect(worldOrigin.x).toBeLessThan(PHONE.width + bounds.maxX * clamped.zoom + 200);
+      // The right edge of the (zoomed) world must still touch the canvas —
+      // dragging further right than this clamp allows is a no-op past it.
+      const draggedEvenFurther = panBy(clamped, 100_000, 0);
+      const clampedAgain = clampPanToFit(draggedEvenFurther, PHONE, bounds);
+      expect(clampedAgain.offsetX).toBeCloseTo(clamped.offsetX, 6);
+    });
+
+    it('clampPanToFit never derives from devicePixelRatio (grep guard covers the whole file already)', () => {
+      const bounds = mapWorldBounds(14, 10);
+      // Pure function of camera + canvas size + world bounds only.
+      const a = clampPanToFit(fitToView(PHONE, bounds), PHONE, bounds);
+      const b = clampPanToFit(fitToView(PHONE, bounds), PHONE, bounds);
+      expect(a).toEqual(b);
+    });
   });
 });

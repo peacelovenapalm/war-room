@@ -120,6 +120,10 @@ body,
   position: absolute;
   inset: 0;
   display: block;
+  /* Pinch/pan owns this element's gestures (engine/gesture.ts) — without
+     this the browser's native pinch-zoom-page / scroll intercepts touches
+     before our pointer handlers see them. */
+  touch-action: none;
 }
 
 .surfaces[data-view='board'] .world {

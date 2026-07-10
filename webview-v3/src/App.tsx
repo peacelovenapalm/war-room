@@ -1,3 +1,4 @@
+import type { PointerEvent as ReactPointerEvent } from 'react';
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 
 import type { ClientMessage } from '../../core/src/messages.js';
@@ -18,8 +19,15 @@ import { RealSheet } from './components/RealSheet';
 import { SettingsModal } from './components/SettingsModal';
 import { ShiftPanel } from './components/ShiftPanel';
 import { TriageBoard } from './components/TriageBoard';
-import { type CameraState, fitToView } from './engine/camera';
+import { type CameraState, clampPanToFit, fitToView } from './engine/camera';
 import { easeInOut, focusCamera, mixCamera, walkProgress } from './engine/focus';
+import {
+  EMPTY_GESTURE,
+  gesturePointerDown,
+  gesturePointerMove,
+  gesturePointerUp,
+  type GestureState,
+} from './engine/gesture';
 import type { HotspotKind } from './engine/hotspots';
 import { mapWorldBounds } from './engine/iso';
 import { renderWorld } from './engine/renderer';
@@ -97,6 +105,13 @@ export default function App() {
   const lastCameraRef = useRef<CameraState | null>(null);
   const walkRef = useRef<WalkState>({ targetAgentId: null, from: null, startTs: 0 });
   const rafRef = useRef<number | null>(null);
+  // Pinch/pan (KICKOFF-v3.1 WS-A item 4): the user's free camera, layered
+  // OVER fit-to-view. null = no interaction yet, draw() uses `fit`. A desk
+  // walk (▸ DESK) always wins and clears this (startWalk below) — the two
+  // never fight for the same frame.
+  const gestureRef = useRef<GestureState>(EMPTY_GESTURE);
+  const userCameraRef = useRef<CameraState | null>(null);
+  const gestureRafRef = useRef<number | null>(null);
   const managerRef = useRef<TailManager | null>(null);
   const connectionRef = useRef<ServerConnection | null>(null);
   const prevPinsRef = useRef<readonly number[]>([]);
@@ -161,9 +176,14 @@ export default function App() {
       walk.targetAgentId !== null
         ? occupiedDeskAnchors(occupantsRef.current).find((a) => a.agentId === walk.targetAgentId)
         : undefined;
+    // Re-clamp on every draw (not just on the gesture that set it) so a
+    // resize/rotate never leaves the free camera pointing off-bounds.
+    const userCamera = userCameraRef.current
+      ? clampPanToFit(userCameraRef.current, cssSize, bounds)
+      : null;
     const target = desk
       ? focusCamera(cssSize, { worldX: desk.deskWorldX, worldY: desk.deskWorldY }, fit)
-      : fit;
+      : (userCamera ?? fit);
     let camera = target;
     if (walk.from !== null) {
       const t = walkProgress(walk.startTs, performance.now());
@@ -212,6 +232,9 @@ export default function App() {
 
   const startWalk = useCallback(
     (agentId: number | null) => {
+      // A desk walk (▸ DESK / drawer close) always overrides free pan/zoom —
+      // the two camera sources never compose in the same frame.
+      userCameraRef.current = null;
       walkRef.current = {
         targetAgentId: agentId,
         from: lastCameraRef.current,
@@ -221,6 +244,68 @@ export default function App() {
     },
     [ensureWalkLoop],
   );
+
+  /** RAF-coalesced redraw for pointermove — a pinch/pan gesture can fire
+   *  many samples per frame; only the LAST one before paint matters. */
+  const scheduleGestureDraw = useCallback(() => {
+    if (gestureRafRef.current !== null) return;
+    gestureRafRef.current = requestAnimationFrame(() => {
+      gestureRafRef.current = null;
+      draw();
+    });
+  }, [draw]);
+
+  /** Canvas-relative CSS-px point for a pointer event (world/camera math is
+   *  CSS px throughout — never DPR). */
+  const pointerPoint = useCallback((e: { clientX: number; clientY: number }) => {
+    const rect = containerRef.current?.getBoundingClientRect();
+    return { x: e.clientX - (rect?.left ?? 0), y: e.clientY - (rect?.top ?? 0) };
+  }, []);
+
+  const handlePointerDown = useCallback(
+    (e: ReactPointerEvent<HTMLCanvasElement>) => {
+      e.currentTarget.setPointerCapture(e.pointerId);
+      const point = pointerPoint(e);
+      gestureRef.current = gesturePointerDown(gestureRef.current, {
+        id: e.pointerId,
+        x: point.x,
+        y: point.y,
+      });
+    },
+    [pointerPoint],
+  );
+
+  const handlePointerMove = useCallback(
+    (e: ReactPointerEvent<HTMLCanvasElement>) => {
+      // A desk-walk animation (bounded theater, ≤2s) owns the camera —
+      // never let a stray touch fight it mid-flight.
+      if (walkRef.current.from !== null) return;
+      const container = containerRef.current;
+      if (!container) return;
+      const rect = container.getBoundingClientRect();
+      const cssSize = { width: Math.max(1, rect.width), height: Math.max(1, rect.height) };
+      const bounds = mapWorldBounds(DEFAULT_COLS, DEFAULT_ROWS, DEFAULT_MAX_ELEVATION);
+      const camera = userCameraRef.current ?? lastCameraRef.current ?? fitToView(cssSize, bounds);
+      const point = pointerPoint(e);
+      const result = gesturePointerMove(
+        gestureRef.current,
+        { id: e.pointerId, x: point.x, y: point.y },
+        camera,
+        cssSize,
+        bounds,
+      );
+      gestureRef.current = result.state;
+      if (result.camera) {
+        userCameraRef.current = result.camera;
+        scheduleGestureDraw();
+      }
+    },
+    [pointerPoint, scheduleGestureDraw],
+  );
+
+  const handlePointerUp = useCallback((e: ReactPointerEvent<HTMLCanvasElement>) => {
+    gestureRef.current = gesturePointerUp(gestureRef.current, e.pointerId);
+  }, []);
 
   // Redraw on container resize (covers first mount too).
   useEffect(() => {
@@ -551,7 +636,14 @@ export default function App() {
       />
       <div className="surfaces" data-view={view}>
         <div className="world" ref={containerRef}>
-          <canvas data-testid="iso-canvas" ref={canvasRef} />
+          <canvas
+            data-testid="iso-canvas"
+            ref={canvasRef}
+            onPointerDown={handlePointerDown}
+            onPointerMove={handlePointerMove}
+            onPointerUp={handlePointerUp}
+            onPointerCancel={handlePointerUp}
+          />
           <ChipLayer frame={chipFrame} occupants={occupants} onChipClick={handleDesk} />
           {/* Room-is-interface half of the desktop chrome model — desktop
               only (CSS-hidden on phone, matching the pin dock's own
