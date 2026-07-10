@@ -995,21 +995,24 @@ body,
 }
 
 @media (max-width: 700px) {
+  /* In-flow on phone (last row of the .app flex column), never an overlay:
+     the absolute bottom-right dock obscured the FLOOR FEED's newest lines
+     (stage-5 finding). One horizontally scrollable row, and the text labels
+     STAY — glyph-only buttons failed the shape+label audit (▤/▦/▥ are
+     indistinguishable shapes; hard rule 1). */
   .panel-dock {
+    position: static;
+    flex: 0 0 auto;
     flex-direction: row;
-    flex-wrap: wrap;
-    left: 10px;
-    right: 10px;
-    justify-content: flex-end;
+    overflow-x: auto;
+    padding: 4px 10px;
+    border-top: 1px solid #3a4150;
   }
 
   .panel-dock__item {
+    flex: 0 0 auto;
     min-height: 44px;
     min-width: 44px;
-  }
-
-  .panel-dock__label {
-    display: none;
   }
 
   .dispatch-tray {

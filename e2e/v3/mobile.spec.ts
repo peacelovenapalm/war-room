@@ -252,6 +252,56 @@ test.describe('phone layout (stage 4)', () => {
     }
   });
 
+  test('panel dock on phone: labeled, 44px, in-flow below the FLOOR FEED (never an overlay)', async ({
+    browser,
+  }) => {
+    const host = await serveV3Dist();
+    const context = await browser.newContext({
+      viewport: VIEWPORT,
+      isMobile: true,
+      hasTouch: true,
+    });
+    try {
+      const page = await context.newPage();
+      await page.goto(`${host.url}/`);
+      await expect(page.getByTestId('hud-connection')).toHaveText('● LIVE', { timeout: 20_000 });
+
+      // Stage-5 finding: the absolute bottom dock obscured the feed's newest
+      // lines and dropped its text labels (glyph-only ▤/▦/▥ fails the
+      // shape+label hard rule). Locked in: every dock button shows its text
+      // label at ≥44px, and the dock sits BELOW the feed in flow.
+      const dock = page.getByTestId('panel-dock');
+      await expect(dock).toBeVisible();
+      for (const [kind, label] of [
+        ['call', 'CALL'],
+        ['shift', 'SHIFT'],
+        ['contracts', 'CONTRACTS'],
+        ['briefing', 'BRIEFING'],
+        ['help', 'HELP'],
+      ] as const) {
+        const item = page.getByTestId(`dock-${kind}`);
+        await expect(item.locator('.panel-dock__label')).toHaveText(label);
+        await expect(item.locator('.panel-dock__label')).toBeVisible();
+        const box = await item.boundingBox();
+        expect(box).not.toBeNull();
+        expect(box!.height).toBeGreaterThanOrEqual(44);
+        expect(box!.width).toBeGreaterThanOrEqual(44);
+      }
+
+      const feed = page.getByTestId('floor-feed-log');
+      await expect(feed).toContainText('war-room building…', { timeout: 20_000 });
+      const feedBox = await feed.boundingBox();
+      const dockBox = await dock.boundingBox();
+      expect(feedBox).not.toBeNull();
+      expect(dockBox).not.toBeNull();
+      // Feed ends at or above the dock's top edge — no overlap.
+      expect(feedBox!.y + feedBox!.height).toBeLessThanOrEqual(dockBox!.y + 1);
+    } finally {
+      await context.close();
+      await host.close();
+    }
+  });
+
   test('an invalid/absent deep link never auto-opens a drawer (honest no-op)', async ({
     browser,
   }) => {
