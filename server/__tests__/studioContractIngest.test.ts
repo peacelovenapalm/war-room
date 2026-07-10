@@ -11,7 +11,7 @@ import * as os from 'os';
 import * as path from 'path';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
-import type { DispatchBroadcast } from '../src/dispatchStore.js';
+import type { DispatchBroadcast, DispatchStore } from '../src/dispatchStore.js';
 import { STUDIO_CONTRACT_REWARD_CASH } from '../src/economyConstants.js';
 import {
   MAX_WINDOW_DAYS,
@@ -75,6 +75,22 @@ function exitBroadcast(id: string, exitCode: number): DispatchBroadcast {
     status: 'exited',
     machine: 'TESTMACH',
     exitCode,
+  };
+}
+
+/** Fake dispatch-record lookup (Pick<DispatchStore, 'getRecord'>) — the
+ *  contractId is the ONLY honest dispatch→contract linkage (explicit,
+ *  never string-matched). */
+function lookupFor(
+  records: Record<string, { contractId?: string }>,
+): Pick<DispatchStore, 'getRecord'> {
+  return {
+    getRecord: (id: string) =>
+      id in records
+        ? ({ id, machine: 'TESTMACH', status: 'exited', ...records[id] } as ReturnType<
+            DispatchStore['getRecord']
+          >)
+        : undefined,
   };
 }
 
@@ -225,56 +241,89 @@ describe('StudioContractIngest — quiet expiry', () => {
   });
 });
 
-describe('StudioContractIngest — observed-event progress', () => {
-  it('records dispatch exit-0 progress ONLY on accepted contracts, with a source ref', () => {
+describe('StudioContractIngest — observed-event progress (honest attribution)', () => {
+  // Panel finding (studioContractIngest.ts:254): progress used to be
+  // attributed to EVERY accepted contract on ANY exit-0 anywhere. The only
+  // honest linkage is the dispatch record's explicit contractId; without
+  // one, progress is recorded on NONE (honest-nothing beats
+  // dishonest-everything — one-tap-real).
+  it('attributes exit-0 progress ONLY to the contract the dispatch was explicitly called for', () => {
+    writeTodoFile('2026-07-10', ['Task A', 'Task B', 'Task C']);
+    const { store, ingest } = makeIngest();
+    ingest.sweep();
+    const [a, b, c] = store.getAll();
+    store.accept(a.id);
+    store.accept(b.id);
+
+    ingest.onDispatchUpdate(
+      exitBroadcast('disp-1', 0),
+      lookupFor({ 'disp-1': { contractId: a.id } }),
+    );
+    const linked = store.getById(a.id)!;
+    expect(linked.status).toBe('progressing');
+    expect(linked.progress).toHaveLength(1);
+    expect(linked.progress[0].sourceRef).toBe('dispatch:disp-1');
+    // The OTHER accepted contract records nothing — its todo saw no work.
+    expect(store.getById(b.id)!.progress).toHaveLength(0);
+    expect(store.getById(b.id)!.status).toBe('accepted');
+    expect(store.getById(c.id)!.progress).toHaveLength(0);
+
+    // The same terminal broadcast never records twice.
+    ingest.onDispatchUpdate(
+      exitBroadcast('disp-1', 0),
+      lookupFor({ 'disp-1': { contractId: a.id } }),
+    );
+    expect(store.getById(a.id)!.progress).toHaveLength(1);
+  });
+
+  it('HONESTY: an exit-0 with no contract linkage records progress on NOTHING', () => {
+    writeTodoFile('2026-07-10', ['Task A']);
+    const { store, ingest } = makeIngest();
+    ingest.sweep();
+    const [a] = store.getAll();
+    store.accept(a.id);
+
+    // Record exists but carries no contractId (a manual CALL, a chain step).
+    ingest.onDispatchUpdate(exitBroadcast('disp-1', 0), lookupFor({ 'disp-1': {} }));
+    // Record unknown entirely (restart raced the broadcast).
+    ingest.onDispatchUpdate(exitBroadcast('disp-2', 0), lookupFor({}));
+    // Linked to a contract id that is not an open studio contract.
+    ingest.onDispatchUpdate(
+      exitBroadcast('disp-3', 0),
+      lookupFor({ 'disp-3': { contractId: 'v2-contract-uuid' } }),
+    );
+    expect(store.getById(a.id)!.progress).toHaveLength(0);
+    expect(store.getById(a.id)!.status).toBe('accepted');
+  });
+
+  it('records nothing for nonzero exits, focus actions, or un-accepted contracts', () => {
     writeTodoFile('2026-07-10', ['Task A', 'Task B']);
     const { store, ingest } = makeIngest();
     ingest.sweep();
     const [a, b] = store.getAll();
     store.accept(a.id);
+    // b stays offered.
 
-    ingest.onDispatchUpdate(exitBroadcast('disp-1', 0));
-    const accepted = store.getById(a.id)!;
-    const offered = store.getById(b.id)!;
-    expect(accepted.status).toBe('progressing');
-    expect(accepted.progress).toHaveLength(1);
-    expect(accepted.progress[0].sourceRef).toBe('dispatch:disp-1');
-    expect(offered.progress).toHaveLength(0); // never on un-accepted contracts
-
-    // The same terminal broadcast never records twice.
-    ingest.onDispatchUpdate(exitBroadcast('disp-1', 0));
-    expect(store.getById(a.id)!.progress).toHaveLength(1);
-  });
-
-  it('records nothing for nonzero exits or focus actions', () => {
-    writeTodoFile('2026-07-10', ['Task A']);
-    const { store, ingest } = makeIngest();
-    ingest.sweep();
-    const [a] = store.getAll();
-    store.accept(a.id);
-
-    ingest.onDispatchUpdate(exitBroadcast('disp-fail', 3));
-    ingest.onDispatchUpdate({
-      type: 'dispatchUpdate',
-      id: 'focus-1',
-      action: 'focus',
-      status: 'exited',
-      machine: 'TESTMACH',
-      exitCode: 0,
-    });
+    ingest.onDispatchUpdate(
+      exitBroadcast('disp-fail', 3),
+      lookupFor({ 'disp-fail': { contractId: a.id } }),
+    );
+    ingest.onDispatchUpdate(
+      {
+        type: 'dispatchUpdate',
+        id: 'focus-1',
+        action: 'focus',
+        status: 'exited',
+        machine: 'TESTMACH',
+        exitCode: 0,
+      },
+      lookupFor({ 'focus-1': { contractId: a.id } }),
+    );
+    ingest.onDispatchUpdate(
+      exitBroadcast('disp-offered', 0),
+      lookupFor({ 'disp-offered': { contractId: b.id } }),
+    );
     expect(store.getById(a.id)!.progress).toHaveLength(0);
-  });
-
-  it('records an observed crisis resolution as progress with a crisis ref', () => {
-    writeTodoFile('2026-07-10', ['Task A']);
-    const { store, ingest } = makeIngest();
-    ingest.sweep();
-    const [a] = store.getAll();
-    store.accept(a.id);
-
-    ingest.recordCrisisResolved('NEXUS', '/code/war-room', 7);
-    const contract = store.getById(a.id)!;
-    expect(contract.progress).toHaveLength(1);
-    expect(contract.progress[0].sourceRef).toBe('crisis:agent:7@NEXUS');
+    expect(store.getById(b.id)!.progress).toHaveLength(0); // never on un-accepted contracts
   });
 });

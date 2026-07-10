@@ -7,10 +7,16 @@
  *    BRIEFING panel reads — briefingProvider.ts) is parsed for its
  *    "Start now" items; each unseen item becomes an `offered` contract
  *    carrying the VERBATIM item text + file + 1-based line number.
- *  - PROGRESS: only from real observed events — a dispatch run exiting 0
- *    (dispatchStore's terminal broadcast) or an OBSERVED crisis resolution
- *    (pollStateHandler's blocked→unblocked transition, never a stale
- *    sweep). Every progress event carries a sourceRef (one-tap-real).
+ *  - PROGRESS: only from real observed events HONESTLY LINKED to the
+ *    contract — a dispatch run exiting 0 whose queue record carries this
+ *    contract's id via the EXPLICIT contractId correlation field (set by
+ *    the webview's contract→DISPATCH prefill, never string-matched). A
+ *    dispatch with no contract linkage records progress on NO contract:
+ *    honest-nothing beats dishonest-everything (one-tap-real — an
+ *    "evidence" ref implying unrelated work advanced a todo is a lie).
+ *    Crisis resolutions carry no per-contract linkage at all, so they
+ *    record nothing here (they still feed dossier/economy planes). Every
+ *    progress event carries a sourceRef (one-tap-real).
  *  - DONE: todo disappearance. When the latest todo file no longer carries
  *    a contract's source line, the underlying todo left the compiled list
  *    — the real completion signal. A read failure or missing file NEVER
@@ -136,10 +142,10 @@ export class StudioContractIngest {
 
   /** Subscribe the dispatch-progress feed. Idempotent — call exactly once
    *  at process startup (same call-site discipline as chainOrchestrator). */
-  start(dispatch: Pick<DispatchStore, 'onUpdate'> = dispatchStore): void {
+  start(dispatch: Pick<DispatchStore, 'onUpdate' | 'getRecord'> = dispatchStore): void {
     if (this.subscribed) return;
     this.subscribed = true;
-    dispatch.onUpdate((broadcast) => this.onDispatchUpdate(broadcast));
+    dispatch.onUpdate((broadcast) => this.onDispatchUpdate(broadcast, dispatch));
   }
 
   /**
@@ -200,33 +206,35 @@ export class StudioContractIngest {
 
   /** A dispatch reached a terminal state. Exit 0 is a REAL observed unit
    *  of studio work — recorded as a progress event (with its dispatch ref)
-   *  on every contract the player has actually accepted. Non-zero exits
-   *  and focus actions record nothing. */
-  onDispatchUpdate(broadcast: DispatchBroadcast, now: number = Date.now()): void {
+   *  ONLY on the contract the dispatch was explicitly called for
+   *  (record.contractId, the same explicit correlation the v2 plane uses —
+   *  never string-matched, never fanned out to every open contract). No
+   *  linkage, unknown record, non-zero exit, focus action, or a contractId
+   *  that is not an accepted/progressing studio contract: nothing is
+   *  recorded (see the file header — honest-nothing). NOTE: the v3
+   *  ContractsPanel does not yet send studio-contract ids on dispatch, so
+   *  today this records progress only for callers that thread the id; that
+   *  is deliberate — better no evidence than fabricated evidence. */
+  onDispatchUpdate(
+    broadcast: DispatchBroadcast,
+    dispatch: Pick<DispatchStore, 'getRecord'> = dispatchStore,
+    now: number = Date.now(),
+  ): void {
     if (broadcast.action !== 'dispatch') return;
     if (broadcast.status !== 'exited' || broadcast.exitCode !== 0) return;
     if (this.processedDispatchIds.has(broadcast.id)) return;
     this.rememberProcessed(broadcast.id);
-    this.recordProgressOnAccepted(
-      `dispatch:${broadcast.id}`,
-      `dispatch exited 0 on ${broadcast.machine}`,
-      now,
-    );
-  }
-
-  /** An OBSERVED crisis resolution (pollStateHandler's blocked→unblocked
-   *  transition — never the stale sweep, never the vanished clear). */
-  recordCrisisResolved(
-    machine: string | undefined,
-    projectDir: string,
-    agentId: number,
-    now: number = Date.now(),
-  ): void {
-    this.recordProgressOnAccepted(
-      `crisis:agent:${agentId}@${machine ?? 'LOCAL'}`,
-      `crisis resolved in ${projectDir}`,
-      now,
-    );
+    const contractId = dispatch.getRecord(broadcast.id)?.contractId;
+    if (contractId === undefined) return;
+    const contract = this.store
+      .getActive()
+      .find((c) => c.id === contractId && (c.status === 'accepted' || c.status === 'progressing'));
+    if (!contract) return;
+    this.store.recordProgress(contract.id, {
+      ts: now,
+      sourceRef: `dispatch:${broadcast.id}`,
+      summary: `dispatch exited 0 on ${broadcast.machine}`,
+    });
   }
 
   /** See the file-header formula. Exported for direct unit testing. */
@@ -249,13 +257,6 @@ export class StudioContractIngest {
   private openContractForText(text: string): boolean {
     const key = normalizedKey(text);
     return this.store.getActive().some((c) => normalizedKey(c.sourceTodo.text) === key);
-  }
-
-  private recordProgressOnAccepted(sourceRef: string, summary: string, now: number): void {
-    for (const contract of this.store.getActive()) {
-      if (contract.status !== 'accepted' && contract.status !== 'progressing') continue;
-      this.store.recordProgress(contract.id, { ts: now, sourceRef, summary });
-    }
   }
 
   private rememberProcessed(id: string): void {

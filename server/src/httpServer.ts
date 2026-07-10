@@ -466,7 +466,10 @@ function registerPollRoute(app: FastifyInstance, options: HttpServerOptions): vo
           },
           onCrisisResolved: (m, projectDir, agentId, durationMs, now) => {
             dossierDerivation.recordCrisisResolved(m, projectDir, agentId, durationMs, now);
-            studioContractIngest.recordCrisisResolved(m, projectDir, agentId, now);
+            // studioContractIngest deliberately NOT fed here: a crisis
+            // resolution has no per-contract linkage, and fanning it out
+            // to every accepted contract fabricated progress evidence
+            // (honest-nothing — see studioContractIngest.ts header).
             perfectOpsDay.recordCrisisResolved(`agent:${agentId}`, durationMs, now);
           },
           onCrisisAbandoned: (m, projectDir, agentId, waitingFor, now) => {
