@@ -1,6 +1,7 @@
 /* webview-v3 base styles. Layout/colors for the DOM chrome live in CSS
    (the eslint no-inline-colors rule covers TS/TSX; canvas colors live in
-   src/constants.ts). */
+   src/constants.ts). Color is REINFORCEMENT only — every signal is carried
+   by shape + text and must survive the GRAYSCALE filter below. */
 
 * {
   box-sizing: border-box;
@@ -24,6 +25,7 @@ body,
   flex-direction: column;
   width: 100%;
   height: 100%;
+  position: relative;
 }
 
 /* GRAYSCALE toggle target: the whole app, canvas included. Signals must
@@ -32,10 +34,12 @@ body,
   filter: grayscale(1);
 }
 
+/* ── HUD strip ─────────────────────────────────────────────── */
+
 .hud {
   display: flex;
   align-items: center;
-  gap: 12px;
+  gap: 8px;
   padding: 6px 10px;
   font-size: 12px;
   line-height: 1;
@@ -55,10 +59,25 @@ body,
   padding: 4px 6px;
   border: 1px solid #2c3240;
   background: #1b1f27;
+  color: inherit;
+  font: inherit;
+  line-height: 1;
 }
 
-.hud button {
+.hud .chip--tap {
+  cursor: pointer;
+}
+
+.hud .chip--warn {
+  border-color: #8a94a8;
+  font-weight: 700;
+}
+
+.hud__spacer {
   margin-left: auto;
+}
+
+.hud button:not(.chip) {
   padding: 6px 8px;
   font: inherit;
   color: inherit;
@@ -68,8 +87,23 @@ body,
   min-height: 28px;
 }
 
+.hud button[disabled] {
+  opacity: 0.45;
+  cursor: not-allowed;
+}
+
 .hud button[aria-pressed='true'] {
   background: #3a4150;
+}
+
+/* ── World + chip layer ────────────────────────────────────── */
+
+.surfaces {
+  position: relative;
+  flex: 1 1 auto;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
 }
 
 .world {
@@ -82,4 +116,478 @@ body,
   position: absolute;
   inset: 0;
   display: block;
+}
+
+.surfaces[data-view='board'] .world {
+  display: none;
+}
+
+.chip-layer {
+  position: absolute;
+  inset: 0;
+  overflow: hidden;
+  pointer-events: none;
+}
+
+.desk-chip {
+  position: absolute;
+  transform: translateX(-50%);
+  pointer-events: auto;
+  padding: 4px 6px;
+  font: inherit;
+  font-size: 11px;
+  line-height: 1;
+  color: #f2f4f8;
+  background: #14171dee;
+  border: 1px solid #3a4150;
+  white-space: nowrap;
+  cursor: pointer;
+}
+
+.desk-chip--loud {
+  color: #14171d;
+  background: #f2f4f8;
+  border-color: #f2f4f8;
+  font-weight: 700;
+}
+
+/* ── Triage board ──────────────────────────────────────────── */
+
+.triage-board {
+  display: flex;
+  flex-direction: column;
+  min-height: 0;
+  background: #171b22f2;
+  border: 1px solid #3a4150;
+  font-size: 12px;
+}
+
+/* Desktop floor view: the board is the office whiteboard, pinned top-left
+   over the world. */
+@media (min-width: 701px) {
+  .surfaces[data-view='floor'] .triage-board {
+    position: absolute;
+    top: 10px;
+    left: 10px;
+    width: 420px;
+    max-height: 70%;
+  }
+}
+
+.surfaces[data-view='board'] .triage-board {
+  position: static;
+  flex: 1 1 auto;
+  width: auto;
+  max-height: none;
+}
+
+.triage-board__header {
+  padding: 8px 10px;
+  font-weight: 700;
+  letter-spacing: 0.06em;
+  border-bottom: 1px solid #2c3240;
+}
+
+.triage-board__clear {
+  padding: 14px 10px;
+}
+
+.triage-board__rows {
+  overflow-y: auto;
+  min-height: 0;
+}
+
+.triage-row {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  padding: 8px 10px;
+  border-bottom: 1px solid #232936;
+}
+
+.triage-row--loud {
+  background: #f2f4f8;
+  color: #14171d;
+}
+
+.triage-row__facts {
+  display: flex;
+  align-items: baseline;
+  gap: 10px;
+}
+
+.triage-row__stage {
+  font-weight: 700;
+  flex: 0 0 auto;
+}
+
+.triage-row__identity {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  flex: 1 1 auto;
+}
+
+.triage-row__age {
+  font-variant-numeric: tabular-nums;
+  flex: 0 0 auto;
+}
+
+.triage-row__detail {
+  display: flex;
+  gap: 10px;
+  opacity: 0.9;
+}
+
+.triage-row--loud .triage-row__detail {
+  opacity: 1;
+}
+
+.triage-row__cause {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  flex: 1 1 auto;
+}
+
+.triage-row__forecast {
+  flex: 0 0 auto;
+  font-variant-numeric: tabular-nums;
+}
+
+.triage-row__verbs {
+  display: flex;
+  gap: 8px;
+}
+
+.triage-row__notice {
+  padding: 6px 8px;
+  border: 1px dashed #8a94a8;
+  font-size: 11px;
+}
+
+/* ── Shared verb buttons ───────────────────────────────────── */
+
+.verb {
+  padding: 6px 10px;
+  font: inherit;
+  font-size: 12px;
+  line-height: 1;
+  color: inherit;
+  background: #1b1f27;
+  border: 1px solid #3a4150;
+  cursor: pointer;
+}
+
+.triage-row--loud .verb {
+  background: #e6e9ef;
+  color: #14171d;
+  border-color: #14171d;
+}
+
+.verb[disabled] {
+  opacity: 0.45;
+  cursor: not-allowed;
+}
+
+.verb--gateless {
+  border-style: dashed;
+  opacity: 0.75;
+}
+
+.verb--undo,
+.verb--confirm {
+  font-weight: 700;
+}
+
+/* ── Tail sheet ────────────────────────────────────────────── */
+
+.tail-sheet {
+  display: flex;
+  flex-direction: column;
+  /* Never collapses below a readable log, even in the 64% phone sheet. */
+  min-height: 140px;
+  flex: 1 1 140px;
+  border-top: 1px solid #2c3240;
+}
+
+.tail-sheet__bar {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 6px 8px;
+  font-size: 11px;
+}
+
+.tail-sheet__title {
+  font-weight: 700;
+  letter-spacing: 0.06em;
+}
+
+.tail-sheet__paused-count {
+  padding: 2px 6px;
+  border: 1px solid #8a94a8;
+  font-weight: 700;
+}
+
+.tail-sheet__bar-spacer {
+  margin-left: auto;
+}
+
+.tail-sheet__log {
+  flex: 1 1 auto;
+  min-height: 80px;
+  overflow-y: auto;
+  padding: 6px 8px;
+  background: #101318;
+  font-size: 11px;
+  line-height: 1.45;
+  white-space: pre-wrap;
+  word-break: break-word;
+  user-select: text;
+}
+
+.tail-sheet__chunk--stderr {
+  font-weight: 700;
+}
+
+.tail-sheet__truncated,
+.tail-sheet__empty {
+  opacity: 0.7;
+}
+
+/* ── Pin dock (desktop-only strip) ─────────────────────────── */
+
+.pin-dock {
+  flex: 0 0 auto;
+  border-top: 1px solid #2c3240;
+  background: #14171d;
+  font-size: 11px;
+}
+
+.pin-dock__notice {
+  padding: 6px 10px;
+  border-bottom: 1px dashed #8a94a8;
+  font-weight: 700;
+}
+
+.pin-dock__slots {
+  display: flex;
+  gap: 1px;
+}
+
+.pin-slot {
+  flex: 1 1 0;
+  min-width: 0;
+  border-right: 1px solid #232936;
+  padding: 6px 8px;
+}
+
+.pin-slot__head {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.pin-slot__promote {
+  flex: 1 1 auto;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  text-align: left;
+  font: inherit;
+  color: inherit;
+  background: none;
+  border: none;
+  cursor: pointer;
+  padding: 4px 0;
+}
+
+.pin-slot__tail {
+  margin-top: 4px;
+  max-height: 40px;
+  overflow: hidden;
+  white-space: pre-wrap;
+  word-break: break-word;
+  opacity: 0.85;
+}
+
+@media (max-width: 700px) {
+  .pin-dock {
+    display: none;
+  }
+}
+
+/* ── Agent drawer ──────────────────────────────────────────── */
+
+.drawer {
+  position: absolute;
+  top: 0;
+  right: 0;
+  bottom: 0;
+  width: min(440px, 92vw);
+  display: flex;
+  flex-direction: column;
+  background: #171b22;
+  border-left: 1px solid #3a4150;
+  font-size: 12px;
+  z-index: 20;
+}
+
+.drawer__head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  padding: 8px 10px;
+  border-bottom: 1px solid #2c3240;
+}
+
+.drawer__title {
+  font-weight: 700;
+  letter-spacing: 0.05em;
+}
+
+.drawer__facts {
+  padding: 4px 10px;
+  /* Facts yield to the tail when space is tight (phone bottom sheet) —
+     the LIVE TAIL always keeps its minimum share below. */
+  overflow-y: auto;
+  flex: 0 1 auto;
+  min-height: 0;
+}
+
+.drawer-row {
+  display: flex;
+  justify-content: space-between;
+  align-items: baseline;
+  gap: 12px;
+  padding: 5px 0;
+  border-bottom: 1px solid #232936;
+}
+
+.drawer-row__label {
+  flex: 0 0 auto;
+  font-weight: 700;
+  opacity: 0.75;
+}
+
+.drawer-row__value {
+  text-align: right;
+  word-break: break-all;
+  user-select: text;
+}
+
+.drawer__warn {
+  padding: 6px 10px;
+  font-weight: 700;
+}
+
+.drawer__gone {
+  padding: 14px 10px;
+}
+
+.drawer__verbs {
+  display: flex;
+  justify-content: flex-end;
+  gap: 8px;
+  padding: 8px 10px;
+}
+
+/* ── One-tap-real sheet ────────────────────────────────────── */
+
+.real-sheet {
+  position: absolute;
+  top: 48px;
+  left: 50%;
+  transform: translateX(-50%);
+  width: min(680px, 94vw);
+  max-height: 70%;
+  display: flex;
+  flex-direction: column;
+  background: #101318;
+  border: 1px solid #8a94a8;
+  font-size: 11px;
+  z-index: 30;
+}
+
+.real-sheet__head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  padding: 8px 10px;
+  border-bottom: 1px solid #2c3240;
+}
+
+.real-sheet__title {
+  font-weight: 700;
+  letter-spacing: 0.05em;
+}
+
+.real-sheet__lines {
+  overflow-y: auto;
+  padding: 8px 10px;
+  user-select: text;
+}
+
+.real-sheet__line {
+  padding: 2px 0;
+  white-space: pre-wrap;
+  word-break: break-word;
+}
+
+/* ── Phone layout (≤700px real breakpoint) ─────────────────── */
+
+@media (max-width: 700px) {
+  /* HUD wraps instead of scrolling sideways: GRAYSCALE and the view toggle
+     must stay VISIBLE on phone (the hidden-on-phone pattern was explicitly
+     rejected in the V3 design panel — hard rule 1 adjacency). */
+  .hud {
+    flex-wrap: wrap;
+    overflow-x: visible;
+    row-gap: 6px;
+  }
+
+  /* Office strip: the whole floor at a glance; triage below carries the
+     verbs. Strip + board are both above the fold (crisis-first cold open). */
+  .surfaces[data-view='floor'] .world {
+    flex: 0 0 280px;
+  }
+
+  .surfaces[data-view='floor'] .triage-board {
+    position: static;
+    flex: 1 1 auto;
+    width: auto;
+    max-height: none;
+    border-left: none;
+    border-right: none;
+  }
+
+  /* One-hand touch grammar: every row/verb ≥44px. */
+  .triage-row {
+    min-height: 44px;
+  }
+
+  .verb {
+    min-height: 44px;
+    min-width: 44px;
+  }
+
+  .desk-chip {
+    min-height: 32px;
+  }
+
+  /* Drawer becomes a bottom sheet (64% height). */
+  .drawer {
+    top: auto;
+    left: 0;
+    right: 0;
+    bottom: 0;
+    width: auto;
+    height: 64%;
+    border-left: none;
+    border-top: 1px solid #8a94a8;
+  }
 }

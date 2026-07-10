@@ -41,12 +41,29 @@ const MOCK_SERVER_SCRIPT: object[] = [
     externalAgents: {},
     machines: { '1': 'MACBOOK', '2': 'MACBOOK' },
     providers: { '1': 'claude', '2': 'claude' },
+    sessionIds: { '2': 'sess-e2e-2' },
+    cwds: { '2': '/Users/greg/code/turffinder' },
+    pids: { '2': 4242 },
   },
   { type: 'agentCreated', id: 3, folderName: 'brain2-vault', machine: 'NEXUS' },
   { type: 'agentStatus', id: 1, status: 'active' },
   { type: 'agentStatus', id: 3, status: 'waiting', awaitingInput: true },
+  // Poll-driven blocked crisis, 150s old → a ▲ FIRE row on the triage board
+  // (stage thresholds: fire at 90s, alarm at 240s).
+  {
+    type: 'agentPollState',
+    id: 2,
+    state: 'blocked',
+    waitingFor: 'Approve: apply migration 0042? (y/n)',
+    ageMs: 150_000,
+  },
+  { type: 'agentTokenUsage', id: 2, inputTokens: 12_345, outputTokens: 678 },
 ];
 const MOCK_AGENT_COUNT = 3;
+/** id1 WORKING · id2 poll-blocked + id3 awaitingInput NEEDS INPUT · none down. */
+const EXPECTED_TALLY = '◉ 3 · ▶ 1 · ⚠ 2 · ✗ 0';
+/** Chunks replayed by the mock when a client subscribes to agent 2's tail. */
+const MOCK_TAIL_CHUNKS = ['● Bash(npm test)\n', 'Running 46 tests…\n'];
 
 declare global {
   interface Window {
@@ -138,11 +155,32 @@ async function serveV3Dist(): Promise<StaticHost> {
   wss.on('connection', (socket) => {
     socket.on('message', (data: Buffer) => {
       try {
-        const message = JSON.parse(data.toString()) as { type?: string };
+        const message = JSON.parse(data.toString()) as {
+          type?: string;
+          source?: string;
+          id?: string;
+        };
         if (message.type === 'webviewReady') {
           for (const serverMessage of MOCK_SERVER_SCRIPT) {
             socket.send(JSON.stringify(serverMessage));
           }
+        }
+        // Streaming plane: replay agent 2's retained tail on subscribe (the
+        // same replay semantics as server/src/clientMessageHandler.ts).
+        if (message.type === 'tailSubscribe' && message.source === 'agent' && message.id === '2') {
+          MOCK_TAIL_CHUNKS.forEach((chunk, seq) => {
+            socket.send(
+              JSON.stringify({
+                type: 'outputChunk',
+                source: 'agent',
+                id: '2',
+                seq,
+                stream: 'transcript',
+                chunk,
+                truncated: false,
+              }),
+            );
+          });
         }
       } catch {
         // Ignore non-JSON frames.
@@ -237,7 +275,7 @@ async function runAtDsf(
     })
     .toBe(MOCK_AGENT_COUNT);
   await expect(page.getByTestId('hud-connection')).toHaveText('● LIVE');
-  await expect(page.getByTestId('hud-agents')).toHaveText(`◉ AGENTS ${String(MOCK_AGENT_COUNT)}`);
+  await expect(page.getByTestId('hud-agents')).toHaveText(EXPECTED_TALLY);
 
   const metrics = await page.evaluate(() => {
     const element = document.querySelector('[data-testid="iso-canvas"]');
@@ -322,6 +360,77 @@ test('DPR-3 WebKit 390x664: non-blank iso canvas, capped resolution, DSF-1 frami
     expect(dsf3.agentCount).toBe(MOCK_AGENT_COUNT);
     expect(dsf1.agentCount).toBe(MOCK_AGENT_COUNT);
   } finally {
+    await host.close();
+  }
+});
+
+test('crisis surfaces at DSF-3: board order+verbs, honest gates, drawer facts, live tail, grayscale', async ({
+  browser,
+}) => {
+  const host = await serveV3Dist();
+  const context = await browser.newContext({
+    viewport: VIEWPORT,
+    deviceScaleFactor: 3,
+    isMobile: true,
+    hasTouch: true,
+  });
+  try {
+    const page = await context.newPage();
+    await page.addInitScript(() => {
+      (window as unknown as { __PIXEL_AGENTS_E2E?: boolean }).__PIXEL_AGENTS_E2E = true;
+    });
+    await page.goto(`${host.url}/`);
+
+    // Board: two crisis rows ordered age × severity — the 2:30 FIRE (poll-
+    // blocked) above the fresh SMOKE (awaitingInput).
+    const rows = page.getByTestId('triage-row');
+    await expect(rows).toHaveCount(2, { timeout: 20_000 });
+    await expect(rows.nth(0)).toHaveAttribute('data-stage', 'fire');
+    await expect(rows.nth(0)).toContainText('▲ FIRE');
+    await expect(rows.nth(0)).toContainText('#2 [MACBOOK] turffinder');
+    await expect(rows.nth(0)).toContainText('Approve: apply migration 0042? (y/n)');
+    await expect(rows.nth(0)).toContainText('→ ✱ ALARM at 4:00');
+    await expect(rows.nth(1)).toHaveAttribute('data-stage', 'smoke');
+
+    // One-hand touch grammar: rows and verbs ≥44px at phone size.
+    const rowBox = await rows.nth(0).boundingBox();
+    expect(rowBox).not.toBeNull();
+    expect(rowBox!.height).toBeGreaterThanOrEqual(44);
+    const approve = rows.nth(0).getByTestId('verb-approve');
+    const approveBox = await approve.boundingBox();
+    expect(approveBox).not.toBeNull();
+    expect(approveBox!.height).toBeGreaterThanOrEqual(44);
+    expect(approveBox!.width).toBeGreaterThanOrEqual(44);
+
+    // Honest gate: the wire has no remote approve — one tap and the row
+    // SAYS SO instead of faking a success.
+    await approve.click();
+    await expect(rows.nth(0).getByTestId('gate-notice')).toContainText('⊘ NO REMOTE GATE');
+
+    // ▸ DESK → bottom-sheet drawer with the full v1 fact set + live tail
+    // (tailSubscribe → mock ring replay).
+    await rows.nth(0).getByTestId('verb-desk').click();
+    const drawer = page.getByTestId('agent-drawer');
+    await expect(drawer).toBeVisible();
+    await expect(drawer).toContainText('sess-e2e-2');
+    await expect(drawer).toContainText('/Users/greg/code/turffinder');
+    await expect(drawer).toContainText('⚠ NEEDS INPUT');
+    await expect(drawer).toContainText('12.3k in · 678 out');
+    // KILL is honestly unavailable: pid known but no live runner behind the
+    // static host (GET /api/dispatch/machines 404s → empty list).
+    await expect(drawer.getByTestId('kill-disabled-reason')).toContainText('NO RUNNER');
+    await expect(drawer.getByTestId('tail-log')).toContainText('● Bash(npm test)');
+    await expect(drawer.getByTestId('tail-log')).toContainText('Running 46 tests…');
+
+    fs.mkdirSync(SCREENSHOT_DIR, { recursive: true });
+    await page.screenshot({ path: path.join(SCREENSHOT_DIR, 'dsf3-crisis.png') });
+
+    // ◑ GRAYSCALE actually applies the filter (colorblind hard-rule gate).
+    await page.getByTestId('hud-grayscale').click();
+    await expect(page.locator('.app')).toHaveClass(/grayscale/);
+    await page.screenshot({ path: path.join(SCREENSHOT_DIR, 'dsf3-crisis-grayscale.png') });
+  } finally {
+    await context.close();
     await host.close();
   }
 });
