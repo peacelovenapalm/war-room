@@ -3,8 +3,10 @@
  *
  *   backing store = CSS size x resolution   (resolution.ts — capped DPR)
  *   world pass    = setTransform(resolution * zoom, ..., resolution * offset)
- *   label pass    = setTransform(resolution, ...) — canvas/CSS space, so
- *                   text stays a fixed on-screen size at any camera zoom.
+ *
+ * Stage-2 contract: the canvas draws ONLY world geometry + glow. ALL text
+ * (desk chips, board, tails, HUD) is DOM, positioned by the caller via
+ * worldToCanvas — crisp, selectable, decluttered (engine/chipLayout.ts).
  *
  * The camera is computed by the caller from CSS size only; this module
  * never reads display density (it receives `resolution` as a plain number
@@ -12,6 +14,7 @@
  */
 
 import {
+  COLOR_DESK_GLOW,
   COLOR_DESK_LEFT,
   COLOR_DESK_RIGHT,
   COLOR_DESK_TOP,
@@ -26,10 +29,10 @@ import {
   COLOR_PROP_TOP,
   COLOR_WORLD_BG,
 } from '../constants';
-import { type CameraState, type Size, worldToCanvas } from './camera';
+import type { CameraState, Size } from './camera';
 import { sortByDepth } from './depthSort';
-import { tileToWorld } from './iso';
-import { type BoxPalette, drawDiamondTile, drawIsoBox, drawLabel } from './placeholder';
+import { TILE_H, TILE_W, tileToWorld } from './iso';
+import { type BoxPalette, drawDiamondTile, drawIsoBox } from './placeholder';
 import type { WorldProp } from './world';
 
 export interface RenderInput {
@@ -58,14 +61,16 @@ const PROP_PALETTE: BoxPalette = {
   right: COLOR_PROP_RIGHT,
 };
 
-const PROP_SHAPES: Record<WorldProp['kind'], { height: number; footprint: number }> = {
+export const PROP_SHAPES: Record<WorldProp['kind'], { height: number; footprint: number }> = {
   desk: { height: 18, footprint: 0.8 },
   plant: { height: 22, footprint: 0.35 },
   coffee: { height: 26, footprint: 0.5 },
   door: { height: 30, footprint: 0.6 },
 };
 
-const LABEL_FONT_PX = 11;
+/** Monitor-glow ellipse half-extents (world px) under an occupied desk. */
+const GLOW_HALF_W = TILE_W * 0.9;
+const GLOW_HALF_H = TILE_H * 0.9;
 
 export function renderWorld(ctx: CanvasRenderingContext2D, input: RenderInput): void {
   const { cssSize, resolution, camera, cols, rows, props } = input;
@@ -93,6 +98,17 @@ export function renderWorld(ctx: CanvasRenderingContext2D, input: RenderInput): 
     drawDiamondTile(ctx, worldX, worldY, checker, COLOR_FLOOR_EDGE);
   }
 
+  // Monitor glow under occupied desks (color is REINFORCEMENT only — the
+  // occupancy signal itself is the occupant block + the DOM chip's text).
+  for (const prop of props) {
+    if (prop.kind !== 'desk' || !prop.occupant) continue;
+    const { worldX, worldY } = tileToWorld(prop.tileX, prop.tileY, prop.elevation ?? 0);
+    ctx.beginPath();
+    ctx.ellipse(worldX, worldY, GLOW_HALF_W, GLOW_HALF_H, 0, 0, Math.PI * 2);
+    ctx.fillStyle = COLOR_DESK_GLOW;
+    ctx.fill();
+  }
+
   // Props (painter's order).
   const sortedProps = sortByDepth(props.map((prop) => ({ ...prop, layer: 1 })));
   for (const prop of sortedProps) {
@@ -104,20 +120,5 @@ export function renderWorld(ctx: CanvasRenderingContext2D, input: RenderInput): 
       // Occupant block sits on the desk top.
       drawIsoBox(ctx, worldX, worldY - shape.height, 14, 0.4, OCCUPANT_PALETTE);
     }
-  }
-
-  // Label pass (canvas space — fixed on-screen text size).
-  ctx.setTransform(resolution, 0, 0, resolution, 0, 0);
-  for (const prop of sortedProps) {
-    if (prop.kind !== 'desk' || !prop.occupant) continue;
-    const { worldX, worldY } = tileToWorld(prop.tileX, prop.tileY, prop.elevation ?? 0);
-    const anchor = worldToCanvas(camera, worldX, worldY - PROP_SHAPES.desk.height - 22);
-    drawLabel(
-      ctx,
-      anchor.x,
-      anchor.y,
-      `${prop.occupant.statusGlyph} ${prop.occupant.name} · ${prop.occupant.statusWord}`,
-      LABEL_FONT_PX,
-    );
   }
 }

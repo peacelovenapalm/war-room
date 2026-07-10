@@ -31,6 +31,6 @@ export const COLOR_PROP_TOP = '#6f7a8f';
 export const COLOR_PROP_LEFT = '#4d5568';
 export const COLOR_PROP_RIGHT = '#3f4658';
 
-/** World-space text labels drawn on the canvas. */
-export const COLOR_LABEL_TEXT = '#f2f4f8';
-export const COLOR_LABEL_BG = '#14171d';
+/** Monitor glow under an occupied desk (reinforcement only — the signal
+ *  is the occupant block + the DOM chip's shape+text). */
+export const COLOR_DESK_GLOW = 'rgba(224, 178, 90, 0.16)';

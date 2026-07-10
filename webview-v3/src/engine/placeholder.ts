@@ -8,7 +8,7 @@
  * resolution transform. Colors come from ../constants.ts only.
  */
 
-import { COLOR_BOX_OUTLINE, COLOR_LABEL_BG, COLOR_LABEL_TEXT } from '../constants';
+import { COLOR_BOX_OUTLINE } from '../constants';
 import { TILE_H, TILE_W } from './iso';
 
 export interface BoxPalette {
@@ -102,27 +102,6 @@ export function drawIsoBox(
   ctx.stroke();
 }
 
-/**
- * Text label with a contrast backing plate, drawn in CANVAS space (the
- * renderer calls this AFTER resetting the camera transform so labels stay
- * legible at any zoom). Shape+text is the primary signal channel.
- */
-export function drawLabel(
-  ctx: CanvasRenderingContext2D,
-  canvasX: number,
-  canvasY: number,
-  text: string,
-  fontPx: number,
-): void {
-  ctx.font = `${String(fontPx)}px ui-monospace, Menlo, monospace`;
-  ctx.textAlign = 'center';
-  ctx.textBaseline = 'middle';
-  const metrics = ctx.measureText(text);
-  const padX = 4;
-  const width = metrics.width + padX * 2;
-  const height = fontPx + 6;
-  ctx.fillStyle = COLOR_LABEL_BG;
-  ctx.fillRect(canvasX - width / 2, canvasY - height / 2, width, height);
-  ctx.fillStyle = COLOR_LABEL_TEXT;
-  ctx.fillText(text, canvasX, canvasY);
-}
+// NOTE: stage 2 moved all text to the DOM chip layer (KICKOFF-v3.1 "tails
+// and text are DOM ALWAYS") — the canvas-space drawLabel that lived here in
+// stage 1 was deleted with its call site in renderer.ts.
