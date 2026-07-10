@@ -72,6 +72,13 @@ function terminalAt(contract: StudioContract): number | undefined {
   return contract.completedAt ?? contract.expiredAt;
 }
 
+/** Guarded Record lookup — dunder ids (__proto__, constructor, …) must
+ *  resolve to undefined, not Object.prototype members, so the not-found
+ *  guards on player-suppliable :id params stay sound. */
+function ownRecord<T>(rec: Record<string, T>, id: string): T | undefined {
+  return Object.prototype.hasOwnProperty.call(rec, id) ? rec[id] : undefined;
+}
+
 export class StudioContractStore {
   private data: StudioContractData | null = null;
   private readonly persistence: V3JsonPersistence<StudioContractData>;
@@ -96,7 +103,7 @@ export class StudioContractStore {
   }
 
   getById(id: string): StudioContract | undefined {
-    return this.ensureLoaded().contracts[id];
+    return ownRecord(this.ensureLoaded().contracts, id);
   }
 
   /** Non-terminal contracts — the WS connect replay set. */
@@ -155,7 +162,7 @@ export class StudioContractStore {
 
   /** Player accepts an offered contract. */
   accept(id: string, now: number = Date.now()): StudioContractResult {
-    const contract = this.ensureLoaded().contracts[id];
+    const contract = ownRecord(this.ensureLoaded().contracts, id);
     if (!contract) return { ok: false, reason: 'not-found' };
     if (contract.status !== 'offered') return { ok: false, reason: 'not-offered' };
     contract.status = 'accepted';
@@ -169,7 +176,7 @@ export class StudioContractStore {
   recordProgress(id: string, event: StudioContractProgressEvent): StudioContractResult {
     if (event.sourceRef.trim() === '') return { ok: false, reason: 'missing-source-ref' };
     if (event.summary.trim() === '') return { ok: false, reason: 'missing-summary' };
-    const contract = this.ensureLoaded().contracts[id];
+    const contract = ownRecord(this.ensureLoaded().contracts, id);
     if (!contract) return { ok: false, reason: 'not-found' };
     if (contract.status !== 'accepted' && contract.status !== 'progressing') {
       return { ok: false, reason: 'not-accepted' };
@@ -181,7 +188,7 @@ export class StudioContractStore {
   }
 
   complete(id: string, now: number = Date.now()): StudioContractResult {
-    const contract = this.ensureLoaded().contracts[id];
+    const contract = ownRecord(this.ensureLoaded().contracts, id);
     if (!contract) return { ok: false, reason: 'not-found' };
     if (!OPEN_STATUSES.has(contract.status)) return { ok: false, reason: 'not-open' };
     contract.status = 'completed';

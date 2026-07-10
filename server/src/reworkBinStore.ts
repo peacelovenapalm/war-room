@@ -44,6 +44,13 @@ function emptyData(): ReworkBinData {
   return { items: {} };
 }
 
+/** Guarded Record lookup — dunder ids (__proto__, constructor, …) must
+ *  resolve to undefined, not Object.prototype members, so the not-found
+ *  guards on player-suppliable :id params stay sound. */
+function ownRecord<T>(rec: Record<string, T>, id: string): T | undefined {
+  return Object.prototype.hasOwnProperty.call(rec, id) ? rec[id] : undefined;
+}
+
 export class ReworkBinStore {
   private data: ReworkBinData | null = null;
   private readonly persistence: V3JsonPersistence<ReworkBinData>;
@@ -68,7 +75,7 @@ export class ReworkBinStore {
   }
 
   getById(id: string): ReworkBinItem | undefined {
-    return this.ensureLoaded().items[id];
+    return ownRecord(this.ensureLoaded().items, id);
   }
 
   /** Crates still in the bin — the WS connect replay set. */
@@ -134,7 +141,7 @@ export class ReworkBinStore {
     reason: string | undefined,
     now: number,
   ): ReworkBinResult {
-    const item = this.ensureLoaded().items[id];
+    const item = ownRecord(this.ensureLoaded().items, id);
     if (!item) return { ok: false, reason: 'not-found' };
     if (item.status !== 'piled') return { ok: false, reason: 'not-piled' };
     item.status = status;

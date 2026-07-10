@@ -112,4 +112,11 @@ describe('ReworkBinStore', () => {
     expect(reloaded.getPiled()).toHaveLength(1);
     expect(reloaded.getById(piled.item.id)?.failureRef).toEqual(REF);
   });
+  it('dunder ids never resolve through Object.prototype (containment hardening)', () => {
+    const store = new ReworkBinStore(filePath);
+    for (const id of ['__proto__', 'constructor', 'prototype']) {
+      expect(store.getById(id)).toBeUndefined();
+      expect(store.dismiss(id).ok).toBe(false);
+    }
+  });
 });

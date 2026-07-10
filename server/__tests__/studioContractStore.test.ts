@@ -168,4 +168,11 @@ describe('StudioContractStore', () => {
     expect(store.getAll()).toEqual([]);
     expect(store.hasRecords()).toBe(false);
   });
+  it('dunder ids never resolve through Object.prototype (containment hardening)', () => {
+    const store = new StudioContractStore(filePath);
+    for (const id of ['__proto__', 'constructor', 'prototype']) {
+      expect(store.getById(id)).toBeUndefined();
+      expect(store.accept(id)).toEqual({ ok: false, reason: 'not-found' });
+    }
+  });
 });
