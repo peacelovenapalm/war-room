@@ -16,11 +16,18 @@
  * Bounded theater (hard rule 6) does NOT apply here in the "≤2s" sense —
  * these are CONTINUOUS ambient loops, not one-shot transit animations —
  * but they are still driven by real state (never decorative-only): the
- * janitor only patrols while actually connected to a live office, and
+ * janitor/cat only patrol while actually connected to a live office, and
  * drift/pace only exist for agents the caller classified from real
  * telemetry (state/ambient.ts).
+ *
+ * Each pose also carries a `rotation` (N/E/S/W) so the renderer can pick
+ * the matching walk-cycle sprite variant — derived from actual direction of
+ * travel (finite difference of the same pure position function, never an
+ * authored/guessed default), so a walker always visually faces where it's
+ * headed.
  */
 
+import type { Rotation } from '../assets/manifest';
 import { staticPropTile } from './world';
 
 export type WalkerBehavior = 'idle' | 'blocked';
@@ -34,9 +41,15 @@ export interface WalkerAgentInput {
 
 export interface WalkerPose {
   id: string;
-  kind: 'janitor' | 'drift' | 'pace';
+  kind: 'janitor' | 'drift' | 'pace' | 'cat-curl' | 'cat-walk';
   tileX: number;
   tileY: number;
+  rotation: Rotation;
+  /** Present for drift/pace (real agent behind the pose) — absent for
+   *  janitor/cat, which aren't tied to any one agent. Lets the renderer
+   *  dress a drifting/pacing agent in the same outfit as their desk
+   *  sprite (engine/world.ts's outfitForAgent). */
+  agentId?: number;
 }
 
 interface TilePoint {
@@ -67,6 +80,29 @@ const PACE_AMPLITUDE_TILES = 0.55;
  *  prop/occupant block itself. */
 const PACE_OFFSET_TILES = 0.9;
 
+/** Curl spot + short loop beside the coffee station — small offsets so the
+ *  cat reads as "near coffee", never overlapping the coffee_station prop's
+ *  own tile. */
+const CAT_CURL_SPOT: TilePoint = {
+  tileX: COFFEE_TILE.tileX - 0.9,
+  tileY: COFFEE_TILE.tileY + 0.4,
+};
+const CAT_WALK_ROUTE: readonly TilePoint[] = [
+  CAT_CURL_SPOT,
+  { tileX: COFFEE_TILE.tileX - 1.7, tileY: COFFEE_TILE.tileY + 0.7 },
+  { tileX: COFFEE_TILE.tileX - 0.9, tileY: COFFEE_TILE.tileY + 1.1 },
+  CAT_CURL_SPOT,
+];
+/** Full curl<->walk cycle; most of it curled, a short walk at the end —
+ *  "occasional walk" (KICKOFF-v3.1 flavor item), not a constant patrol. */
+export const CAT_CYCLE_MS = 42_000;
+export const CAT_WALK_MS = 9_000;
+
+/** Finite-difference step (ms) used to derive a pose's direction of travel
+ *  from its own pure position function — small enough to be a faithful
+ *  instantaneous heading, large enough to stay well clear of float noise. */
+const ROTATION_SAMPLE_MS = 40;
+
 function lerpTile(a: TilePoint, b: TilePoint, t: number): TilePoint {
   return { tileX: a.tileX + (b.tileX - a.tileX) * t, tileY: a.tileY + (b.tileY - a.tileY) * t };
 }
@@ -89,39 +125,92 @@ function phaseOffset(agentId: number, periodMs: number): number {
   return (Math.abs(agentId) * 2_654_435_761) % Math.max(1, periodMs);
 }
 
+/** Compass rotation whose authored front-facing direction (iso.ts/rig.py
+ *  convention: N = -tileY, E = +tileX, S = +tileY, W = -tileX) best matches
+ *  a (dx, dy) direction of travel. Dominant axis wins on a diagonal; a
+ *  near-zero delta (stationary) keeps the default 'S' (the pipeline's own
+ *  authored-facing default). */
+function directionToRotation(dx: number, dy: number): Rotation {
+  if (Math.abs(dx) < 1e-6 && Math.abs(dy) < 1e-6) return 'S';
+  if (Math.abs(dx) >= Math.abs(dy)) return dx >= 0 ? 'E' : 'W';
+  return dy >= 0 ? 'S' : 'N';
+}
+
+/** Sample `positionFn` at `now` and a moment earlier to derive a heading,
+ *  and package it with the position into a full WalkerPose. */
+function poseWithRotation(
+  id: string,
+  kind: WalkerPose['kind'],
+  positionFn: (t: number) => TilePoint,
+  now: number,
+  agentId?: number,
+): WalkerPose {
+  const pos = positionFn(now);
+  const prior = positionFn(Math.max(0, now - ROTATION_SAMPLE_MS));
+  const rotation = directionToRotation(pos.tileX - prior.tileX, pos.tileY - prior.tileY);
+  return { id, kind, tileX: pos.tileX, tileY: pos.tileY, rotation, agentId };
+}
+
 function janitorPose(now: number): WalkerPose {
-  const pos = positionAlongRoute(JANITOR_ROUTE, JANITOR_LOOP_MS, now);
-  return { id: 'janitor', kind: 'janitor', ...pos };
+  return poseWithRotation(
+    'janitor',
+    'janitor',
+    (t) => positionAlongRoute(JANITOR_ROUTE, JANITOR_LOOP_MS, t),
+    now,
+  );
 }
 
 /** Idle agents drift desk <-> coffee station and back (triangle wave). */
 function driftPose(input: WalkerAgentInput, now: number): WalkerPose {
   const phase = phaseOffset(input.agentId, DRIFT_LOOP_MS);
-  const t = ((now + phase) % DRIFT_LOOP_MS) / DRIFT_LOOP_MS;
-  const legT = t < 0.5 ? t * 2 : (1 - t) * 2; // 0 -> 1 -> 0 across the loop
   const desk = { tileX: input.deskTileX, tileY: input.deskTileY };
-  const pos = lerpTile(desk, COFFEE_TILE, legT);
-  return { id: `drift-${String(input.agentId)}`, kind: 'drift', ...pos };
+  const positionFn = (t: number): TilePoint => {
+    const wrapped = ((t + phase) % DRIFT_LOOP_MS) / DRIFT_LOOP_MS;
+    const legT = wrapped < 0.5 ? wrapped * 2 : (1 - wrapped) * 2; // 0 -> 1 -> 0 across the loop
+    return lerpTile(desk, COFFEE_TILE, legT);
+  };
+  return poseWithRotation(
+    `drift-${String(input.agentId)}`,
+    'drift',
+    positionFn,
+    now,
+    input.agentId,
+  );
 }
 
 /** Blocked agents pace a short back-and-forth beside their own desk. */
 function pacePose(input: WalkerAgentInput, now: number): WalkerPose {
   const phase = phaseOffset(input.agentId, PACE_PERIOD_MS);
-  const swing = Math.sin(((now + phase) / PACE_PERIOD_MS) * Math.PI * 2);
-  return {
-    id: `pace-${String(input.agentId)}`,
-    kind: 'pace',
-    tileX: input.deskTileX + swing * PACE_AMPLITUDE_TILES,
-    tileY: input.deskTileY + PACE_OFFSET_TILES,
+  const positionFn = (t: number): TilePoint => {
+    const swing = Math.sin(((t + phase) / PACE_PERIOD_MS) * Math.PI * 2);
+    return {
+      tileX: input.deskTileX + swing * PACE_AMPLITUDE_TILES,
+      tileY: input.deskTileY + PACE_OFFSET_TILES,
+    };
   };
+  return poseWithRotation(`pace-${String(input.agentId)}`, 'pace', positionFn, now, input.agentId);
+}
+
+/** Curled most of the cycle, a short walk loop the rest — "occasional
+ *  walk" beside the coffee station (KICKOFF-v3.1 flavor item). */
+function catPose(now: number): WalkerPose {
+  const curlMs = CAT_CYCLE_MS - CAT_WALK_MS;
+  const positionFn = (t: number): TilePoint => {
+    const wrapped = ((t % CAT_CYCLE_MS) + CAT_CYCLE_MS) % CAT_CYCLE_MS;
+    if (wrapped < curlMs) return CAT_CURL_SPOT;
+    return positionAlongRoute(CAT_WALK_ROUTE, CAT_WALK_MS, wrapped - curlMs);
+  };
+  const wrapped = ((now % CAT_CYCLE_MS) + CAT_CYCLE_MS) % CAT_CYCLE_MS;
+  const walking = wrapped >= curlMs;
+  return poseWithRotation('cat', walking ? 'cat-walk' : 'cat-curl', positionFn, now);
 }
 
 /**
- * All ambient walker poses for this frame. `connected` gates the janitor —
- * no ambient "alive office" theater over a dead connection with nobody
- * home. Idle/blocked walkers exist ONLY for agents the caller already
- * classified from real telemetry (state/ambient.ts) — this function never
- * invents a walker for an agent it wasn't told about.
+ * All ambient walker poses for this frame. `connected` gates the janitor
+ * and cat — no ambient "alive office" theater over a dead connection with
+ * nobody home. Idle/blocked walkers exist ONLY for agents the caller
+ * already classified from real telemetry (state/ambient.ts) — this
+ * function never invents a walker for an agent it wasn't told about.
  */
 export function computeWalkers(
   agentInputs: readonly WalkerAgentInput[],
@@ -129,7 +218,11 @@ export function computeWalkers(
   now: number,
 ): WalkerPose[] {
   const poses: WalkerPose[] = [];
-  if (connected && agentInputs.length > 0) poses.push(janitorPose(now));
+  const officeAlive = connected && agentInputs.length > 0;
+  if (officeAlive) {
+    poses.push(janitorPose(now));
+    poses.push(catPose(now));
+  }
   for (const input of agentInputs) {
     poses.push(input.behavior === 'idle' ? driftPose(input, now) : pacePose(input, now));
   }

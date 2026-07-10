@@ -1,6 +1,8 @@
 import { describe, expect, it } from 'vitest';
 
 import {
+  CAT_CYCLE_MS,
+  CAT_WALK_MS,
   computeWalkers,
   DRIFT_LOOP_MS,
   JANITOR_LOOP_MS,
@@ -80,9 +82,49 @@ describe('computeWalkers', () => {
     );
   });
 
-  it('produces exactly one pose per agent input plus the janitor', () => {
+  it('produces exactly one pose per agent input plus the janitor and the cat', () => {
     const poses = computeWalkers([DESK, BLOCKED], true, 500);
-    expect(poses).toHaveLength(3);
-    expect(new Set(poses.map((p) => p.id)).size).toBe(3);
+    expect(poses).toHaveLength(4);
+    expect(new Set(poses.map((p) => p.id)).size).toBe(4);
+  });
+
+  it('every pose carries an N/E/S/W rotation', () => {
+    const poses = computeWalkers([DESK, BLOCKED], true, 500);
+    for (const pose of poses) {
+      expect(['N', 'E', 'S', 'W']).toContain(pose.rotation);
+    }
+  });
+
+  describe('cat', () => {
+    it('no cat when disconnected or office empty (same gate as the janitor)', () => {
+      expect(computeWalkers([DESK], false, 0).some((p) => p.id === 'cat')).toBe(false);
+      expect(computeWalkers([], true, 0).some((p) => p.id === 'cat')).toBe(false);
+    });
+
+    it('curled near (not on) the coffee tile for most of the cycle', () => {
+      const coffee = staticPropTile('coffee');
+      const cat = computeWalkers([DESK], true, 1_000).find((p) => p.id === 'cat')!;
+      expect(cat.kind).toBe('cat-curl');
+      expect(Math.hypot(cat.tileX - coffee.tileX, cat.tileY - coffee.tileY)).toBeGreaterThan(0.1);
+      expect(Math.hypot(cat.tileX - coffee.tileX, cat.tileY - coffee.tileY)).toBeLessThan(2);
+    });
+
+    it('walks for a short window at the end of the cycle, then returns to curling', () => {
+      const walkStart = CAT_CYCLE_MS - CAT_WALK_MS;
+      const walking = computeWalkers([DESK], true, walkStart + CAT_WALK_MS / 2).find(
+        (p) => p.id === 'cat',
+      )!;
+      expect(walking.kind).toBe('cat-walk');
+      const curledAgain = computeWalkers([DESK], true, CAT_CYCLE_MS + 100).find(
+        (p) => p.id === 'cat',
+      )!;
+      expect(curledAgain.kind).toBe('cat-curl');
+    });
+
+    it('is a pure function of (inputs, connected, now)', () => {
+      const a = computeWalkers([DESK], true, 30_000).find((p) => p.id === 'cat');
+      const b = computeWalkers([DESK], true, 30_000).find((p) => p.id === 'cat');
+      expect(a).toEqual(b);
+    });
   });
 });
