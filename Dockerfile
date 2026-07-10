@@ -27,7 +27,13 @@ COPY . .
 RUN npm run build
 
 FROM ${BASE_IMAGE}
+# Deploy identity for GET /api/version — passed by the deploy runbook
+# (the rsync'd build context has no .git to derive a SHA from).
+ARG GIT_SHA=unknown
+ARG BUILT_AT=unknown
 ENV NODE_ENV=production
+ENV GIT_SHA=${GIT_SHA}
+ENV BUILT_AT=${BUILT_AT}
 WORKDIR /app
 COPY package.json package-lock.json ./
 COPY server/package.json server/package.json

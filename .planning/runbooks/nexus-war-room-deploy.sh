@@ -5,9 +5,13 @@
 # Deploys the War Room server to NEXUS:
 #   1. refresh the half-baked tracker copy on nexus (/data/repos/completion-2026-07)
 #   2. rsync the repo to nexus:~/apps/war-room-src
-#   3. docker build + run, bound to 127.0.0.1:3141 ON NEXUS (host loopback only),
-#      with read-only briefing mounts (todo dir from the vault-notifier clone +
-#      the completion tracker)
+#   3. docker build (GIT_SHA/BUILT_AT baked in for /api/version) + run, bound to
+#      127.0.0.1:3141 ON NEXUS (host loopback only), with read-only briefing
+#      mounts (todo dir from the vault-notifier clone + the completion tracker)
+#      and a PERSISTENT state volume (~/apps/war-room/state -> /root/.pixel-agents;
+#      added 2026-07-10, KICKOFF-v2.0 0.2 — before this, every recreate wiped
+#      the app's entire state. A one-time docker cp migration rescues the live
+#      container's state into the host dir before the first volume-backed run.)
 #   4. tailscale serve --bg --https=8484 (TAILNET ONLY — same pattern as the
 #      projects-board :10001 and amc :10000 serves; no sudo, NEVER the funnel)
 #
@@ -28,7 +32,12 @@ APP_PORT=3141
 REPO_DIR="$(cd "$(dirname "$0")/../.." && pwd)"
 REMOTE_SRC="~/apps/war-room-src"
 REMOTE_ENV_DIR="~/apps/war-room"
+REMOTE_STATE_DIR="~/apps/war-room/state"   # persistent state volume (2026-07-10)
 TS="$(date +%Y%m%d-%H%M%S)"
+# Baked into the image for GET /api/version (KICKOFF-v2.0 0.4) — the rsync'd
+# source has no .git, so the SHA must be computed here and passed as a build arg.
+GIT_SHA="$(git -C "${REPO_DIR}" rev-parse HEAD 2>/dev/null || echo unknown)"
+BUILT_AT="$(date -u +%Y-%m-%dT%H:%M:%SZ)"
 # Briefing data sources ON NEXUS (read-only binds into the container):
 #  - todo dir: inside the vault-notifier Brain2 clone (hard-resets to origin/main
 #    every 15 min via the notifier cron, so it stays fresh without new sync jobs)
@@ -90,10 +99,26 @@ rsync -a --delete \
   "${REPO_DIR}/" "${NEXUS_HOST}:${REMOTE_SRC}/" \
   && ok "source synced to ${NEXUS_HOST}:${REMOTE_SRC}" || fail "rsync failed"
 
-ssh "${NEXUS_HOST}" "docker build -t war-room:latest ${REMOTE_SRC}" \
-  && ok "image war-room:latest built" || fail "docker build failed"
+ssh "${NEXUS_HOST}" "docker build --build-arg GIT_SHA=${GIT_SHA} --build-arg BUILT_AT=${BUILT_AT} -t war-room:latest ${REMOTE_SRC}" \
+  && ok "image war-room:latest built (GIT_SHA=${GIT_SHA})" || fail "docker build failed"
 
-# ── Run container (host-loopback publish ONLY + read-only briefing mounts) ───
+# ── One-time state migration (2026-07-10, KICKOFF-v2.0 0.2) ─────────────────
+# Rescue the live container's state dir into the host volume path BEFORE the
+# container is removed. Idempotent: once the host dir has state files (any
+# .json), the volume is the source of truth and the copy is skipped — a stale
+# container's files must never clobber newer volume-backed state.
+ssh "${NEXUS_HOST}" "mkdir -p ${REMOTE_STATE_DIR}"
+if ssh "${NEXUS_HOST}" "ls ${REMOTE_STATE_DIR}/*.json >/dev/null 2>&1"; then
+  ok "state volume already populated — migration skipped (volume is source of truth)"
+elif ssh "${NEXUS_HOST}" "docker ps -a --format '{{.Names}}' | grep -qx war-room"; then
+  ssh "${NEXUS_HOST}" "docker cp war-room:/root/.pixel-agents/. ${REMOTE_STATE_DIR}/" \
+    && ok "live container state migrated -> ${REMOTE_STATE_DIR}" \
+    || fail "state migration (docker cp) failed — aborting BEFORE docker rm, live state intact"
+else
+  ok "no existing war-room container — starting with an empty state volume"
+fi
+
+# ── Run container (host-loopback publish ONLY + ro briefing mounts + state vol) ─
 ssh "${NEXUS_HOST}" "docker rm -f war-room >/dev/null 2>&1 || true"
 ssh "${NEXUS_HOST}" "docker run -d --name war-room --restart unless-stopped \
   --env-file ${REMOTE_ENV_DIR}/war-room.env \
@@ -101,8 +126,9 @@ ssh "${NEXUS_HOST}" "docker run -d --name war-room --restart unless-stopped \
   -e WAR_ROOM_TRACKER_STATE=/briefing/tracker/STATE.md \
   -v ${TODO_DIR_NEXUS}:/briefing/todo:ro \
   -v ${TRACKER_DIR_NEXUS}:/briefing/tracker:ro \
+  -v ${REMOTE_STATE_DIR}:/root/.pixel-agents \
   -p 127.0.0.1:${APP_PORT}:3141 war-room:latest" >/dev/null \
-  && ok "container war-room running (127.0.0.1:${APP_PORT} on nexus, briefing mounts ro)" || fail "docker run failed"
+  && ok "container war-room running (127.0.0.1:${APP_PORT}, briefing ro, state vol rw)" || fail "docker run failed"
 
 # ── Bark wrapper network (2026-07-09): WAR_ROOM_BARK_URL=http://notify:8581/notify
 # resolves only on the notify container's compose network — rejoin after every
@@ -126,7 +152,9 @@ else
     && ok "tailscale serve :${SERVE_PORT} -> 127.0.0.1:${APP_PORT} (tailnet only)" \
     || fail "tailscale serve failed — check 'tailscale serve status' on nexus"
 fi
-ssh "${NEXUS_HOST}" "tailscale funnel status 2>/dev/null | grep -q ':${SERVE_PORT}'" \
+# (tailnet only)-annotated lines are NOT funnel exposure — the old bare grep
+# false-positived on every deploy (TUNING.md [G2] BATCH-1 entry, fixed 2026-07-10).
+ssh "${NEXUS_HOST}" "tailscale funnel status 2>/dev/null | grep -v '(tailnet only)' | grep -q ':${SERVE_PORT}'" \
   && fail "SAFETY: :${SERVE_PORT} appears in FUNNEL status — run 'tailscale funnel --https=${SERVE_PORT} off' NOW" \
   || ok "funnel check clean — :${SERVE_PORT} is tailnet-only"
 
