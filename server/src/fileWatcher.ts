@@ -40,6 +40,7 @@ import {
 } from './constants.js';
 import type { DismissalTracker } from './dismissalTracker.js';
 import { cancelPermissionTimer, cancelWaitingTimer, clearAgentActivity } from './timerManager.js';
+import { tapTranscriptLine } from './transcriptOutputTap.js';
 import { processTranscriptLine } from './transcriptParser.js';
 import type { AgentState } from './types.js';
 
@@ -227,6 +228,12 @@ export function readNewLines(
     for (const line of lines) {
       if (!line.trim()) continue;
       processTranscriptLine(agentId, line, agents, waitingTimers, permissionTimers);
+      // Live output tail (KICKOFF-v2.0 Phase 2 slice 2.4) — ADDITIVE tap
+      // only: feeds assistant-text/tool-use lines into the output ring as
+      // telemetry. Parses its own copy of the line and never throws; all
+      // existing behavior above (parser state, /clear detection, timers)
+      // is untouched.
+      tapTranscriptLine(agentId, line);
     }
   } catch (e) {
     // ENOENT is expected for hook-detected agents where the JSONL file hasn't been created yet

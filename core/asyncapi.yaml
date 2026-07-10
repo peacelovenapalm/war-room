@@ -695,8 +695,9 @@ components:
           type: string
           description: >-
             Stream owner id within `source`: the dispatch queue UUID
-            (source "dispatch") or the session/transcript id (source
-            "agent").
+            (source "dispatch") or the webview-facing numeric agent id,
+            stringified (source "agent" — the same id agentCreated/
+            agentStatus carry, so no session-id lookup is needed).
         seq:
           type: integer
           description: >-

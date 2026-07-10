@@ -247,6 +247,16 @@ export async function createHttpServer(options: HttpServerOptions): Promise<Http
   });
   app.addHook('onClose', () => unsubscribeOutputEvict());
 
+  // Agent-plane twin of the dispatch eviction above (slice 2.4): the store's
+  // 'agentRemoved' is the single choke point every removal path (stale
+  // external cleanup, teammate dismissal, SessionEnd, orphaned terminal)
+  // funnels through, so the transcript tail's ring entry can never outlive
+  // its agent. Same ephemerality rationale — the durable record stays the
+  // transcript file itself.
+  const onAgentRemovedEvict = (id: number) => outputRingStore.evict('agent', String(id));
+  options.store?.on('agentRemoved', onAgentRemovedEvict);
+  app.addHook('onClose', () => options.store?.off('agentRemoved', onAgentRemovedEvict));
+
   // ── Listen ──────────────────────────────────────────────────
 
   await app.listen({ host: options.host ?? '127.0.0.1', port: options.port ?? 0 });
