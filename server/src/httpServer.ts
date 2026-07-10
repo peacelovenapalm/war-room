@@ -25,7 +25,11 @@ import { PERK_IDS } from './economyConstants.js';
 import { economyStore } from './economyStore.js';
 import type { Employee, ScoreTrack } from './employeeStore.js';
 import { employeeStore } from './employeeStore.js';
-import { notifyBigMoment } from './notifyBark.js';
+import {
+  createBudgetPauseNotifier,
+  createEmployeeQuitNotifier,
+  notifyBigMoment,
+} from './notifyBark.js';
 import { addRoom, buyFurniture, expandOffice, getOfficeLayout, sell } from './officeLayoutStore.js';
 import type { RoomType } from './officeLayoutTypes.js';
 import { RoomType as RoomTypeValues } from './officeLayoutTypes.js';
@@ -130,10 +134,18 @@ export async function createHttpServer(options: HttpServerOptions): Promise<Http
   // inside registerWebSocketRoute's per-connection handler; see
   // chainOrchestrator.ts's file header for why (start() is idempotent as
   // defense-in-depth, but call-site discipline is the real fix).
+  // Shared budget gate for chains + standing orders. The wrapper adds the
+  // edge-triggered budget-paused Bark push (KICKOFF-v2.0 0.6): one push per
+  // not-paused→paused transition across BOTH consumers, silent while the
+  // pause persists, re-armed when the budget recovers.
+  const budgetGate = createBudgetPauseNotifier(
+    (_machine: string | undefined, provider: string | undefined) =>
+      budgetStore.isAutomationPaused(provider, economyStore.getPerkFlags()),
+  );
+
   chainOrchestrator.configure({
     resolveEmployeeDefaults: (id) => employeeStore.resolveEmployeeDefaults(id),
-    isAutomationPaused: (_machine, provider) =>
-      budgetStore.isAutomationPaused(provider, economyStore.getPerkFlags()),
+    isAutomationPaused: budgetGate,
   });
   chainOrchestrator.start();
   const chainSweepTimer = setInterval(() => chainOrchestrator.sweep(), CHAIN_SWEEP_INTERVAL_MS);
@@ -148,7 +160,7 @@ export async function createHttpServer(options: HttpServerOptions): Promise<Http
   const standingOrderTimer = setInterval(() => {
     standingOrderStore.tick(
       Date.now(),
-      (_machine, provider) => budgetStore.isAutomationPaused(provider, economyStore.getPerkFlags()),
+      budgetGate,
       (id) => employeeStore.resolveEmployeeDefaults(id),
       (input) => dispatchStore.enqueue(input),
     );
@@ -197,12 +209,9 @@ export async function createHttpServer(options: HttpServerOptions): Promise<Http
   // Bark big-moment pushes (v2 mechanic G4, §6.5) — contract-completed and
   // chain-failed are wired here (subscribed once, at process startup, same
   // discipline as chainOrchestrator.start() above); STOP ALL is wired
-  // directly at its route below. employee-quit and budget-paused are NOT
-  // yet wired (see TUNING.md REVIEW-ON-RETURN) — employeeStore's quit path
-  // doesn't currently emit a change event at all (a pre-existing gap, not
-  // introduced here), and budget-paused needs edge-triggered state tracking
-  // neither BUILD-PLAN's task list nor this milestone's acceptance criteria
-  // required.
+  // directly at its route below; budget-paused rides the shared budgetGate
+  // wrapper above; employee-quit subscribes below (all 5 classes now live —
+  // KICKOFF-v2.0 0.6 closed the last two).
   const unsubscribeContractBark = contractStore.onCompleted((contract) => {
     notifyBigMoment(
       'contract-completed',
@@ -217,6 +226,12 @@ export async function createHttpServer(options: HttpServerOptions): Promise<Http
     }
   });
   app.addHook('onClose', () => unsubscribeChainBark());
+
+  // employee-quit (KICKOFF-v2.0 0.6) — edge-triggered per employee; the quit
+  // path persists+broadcasts since 5e26214 (v1.1 item 6), so onChange is a
+  // reliable signal for this now.
+  const unsubscribeEmployeeBark = employeeStore.onChange(createEmployeeQuitNotifier());
+  app.addHook('onClose', () => unsubscribeEmployeeBark());
 
   // ── Listen ──────────────────────────────────────────────────
 

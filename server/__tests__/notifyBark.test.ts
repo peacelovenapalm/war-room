@@ -13,6 +13,8 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import {
   BIG_MOMENT_CLASSES,
   type BigMomentClass,
+  createBudgetPauseNotifier,
+  createEmployeeQuitNotifier,
   getBarkUrl,
   maskUrlForLog,
   notifyBigMoment,
@@ -131,5 +133,97 @@ describe('Bark payload shape (KICKOFF v1.1 item 7)', () => {
       expect(body.task).toBe('War Room');
       expect(body.message).toBe(`${kind} happened`);
     }
+  });
+});
+
+describe('createEmployeeQuitNotifier (KICKOFF v2.0 0.6)', () => {
+  it('pushes once per active→quit transition, silent on repeat quit snapshots', () => {
+    const notify = vi.fn();
+    const onEmp = createEmployeeQuitNotifier(notify);
+    onEmp({ id: 'e1', name: 'Ada', status: 'active' });
+    expect(notify).not.toHaveBeenCalled();
+    onEmp({ id: 'e1', name: 'Ada', status: 'quit' });
+    expect(notify).toHaveBeenCalledTimes(1);
+    expect(notify).toHaveBeenCalledWith('employee-quit', expect.stringContaining('Ada'));
+    // Any further snapshot of the already-quit employee stays silent.
+    onEmp({ id: 'e1', name: 'Ada', status: 'quit' });
+    onEmp({ id: 'e1', name: 'Ada', status: 'quit' });
+    expect(notify).toHaveBeenCalledTimes(1);
+  });
+
+  it('re-arms after a rehire: quit → active → quit pushes twice total', () => {
+    const notify = vi.fn();
+    const onEmp = createEmployeeQuitNotifier(notify);
+    onEmp({ id: 'e1', name: 'Ada', status: 'quit' });
+    onEmp({ id: 'e1', name: 'Ada', status: 'active' }); // rehired
+    onEmp({ id: 'e1', name: 'Ada', status: 'quit' });
+    expect(notify).toHaveBeenCalledTimes(2);
+  });
+
+  it('tracks employees independently', () => {
+    const notify = vi.fn();
+    const onEmp = createEmployeeQuitNotifier(notify);
+    onEmp({ id: 'e1', name: 'Ada', status: 'quit' });
+    onEmp({ id: 'e2', name: 'Grace', status: 'quit' });
+    expect(notify).toHaveBeenCalledTimes(2);
+    expect(notify).toHaveBeenLastCalledWith('employee-quit', expect.stringContaining('Grace'));
+  });
+});
+
+describe('createBudgetPauseNotifier (KICKOFF v2.0 0.6)', () => {
+  it('passes the gate result through unchanged and forwards arguments', () => {
+    const gate = vi.fn((_machine: string | undefined, _provider: string | undefined) => ({
+      paused: false as const,
+    }));
+    const wrapped = createBudgetPauseNotifier(gate, vi.fn());
+    expect(wrapped('MACBOOK', 'claude')).toEqual({ paused: false });
+    expect(gate).toHaveBeenCalledWith('MACBOOK', 'claude');
+  });
+
+  it('pushes exactly once on the not-paused→paused edge, silent while paused persists', () => {
+    const notify = vi.fn();
+    let result: { paused: boolean; reason?: string } = { paused: false };
+    const wrapped = createBudgetPauseNotifier(() => result, notify);
+    wrapped();
+    expect(notify).not.toHaveBeenCalled();
+    result = { paused: true, reason: '5h-threshold' };
+    wrapped();
+    wrapped();
+    wrapped();
+    expect(notify).toHaveBeenCalledTimes(1);
+    expect(notify).toHaveBeenCalledWith('budget-paused', expect.stringContaining('5h budget'));
+  });
+
+  it('re-arms after recovery: paused → ok → paused pushes twice total', () => {
+    const notify = vi.fn();
+    let result: { paused: boolean; reason?: string } = { paused: true, reason: 'stale-snapshot' };
+    const wrapped = createBudgetPauseNotifier(() => result, notify);
+    wrapped(); // edge 1 (fail-safe default counts — it genuinely blocked automation)
+    result = { paused: false };
+    wrapped(); // recovery re-arms
+    result = { paused: true, reason: 'codex-cap-reached' };
+    wrapped(); // edge 2
+    expect(notify).toHaveBeenCalledTimes(2);
+    expect(notify).toHaveBeenNthCalledWith(
+      1,
+      'budget-paused',
+      expect.stringContaining('stale telemetry'),
+    );
+    expect(notify).toHaveBeenNthCalledWith(
+      2,
+      'budget-paused',
+      expect.stringContaining('codex cap'),
+    );
+  });
+
+  it('a pause starting on the very first call still pushes (initial state is not-paused)', () => {
+    const notify = vi.fn();
+    const wrapped = createBudgetPauseNotifier(
+      () => ({ paused: true as const, reason: '7d-threshold' }),
+      notify,
+    );
+    wrapped();
+    expect(notify).toHaveBeenCalledTimes(1);
+    expect(notify).toHaveBeenCalledWith('budget-paused', expect.stringContaining('7d budget'));
   });
 });

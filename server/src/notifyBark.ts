@@ -153,3 +153,59 @@ export function notifyBigMoment(
 export function resetNotifyBarkStateForTests(): void {
   lastMorningDigestDate = null;
 }
+
+// ── Edge-triggered big-moment notifiers (KICKOFF-v2.0 0.6) ─────────────────
+// The last two BIG_MOMENT_CLASSES gain real call sites. Both are factories
+// returning stateful handlers so the edge tracking is unit-testable with a
+// fake notify fn; httpServer.ts wires them once at process startup, same
+// discipline as the contract/chain subscriptions.
+
+/** Human phone-push wording per pause reason (server-side sibling of
+ *  webview budget.ts's reason→word map; raw reason as fallback). */
+const PAUSE_REASON_WORD: Record<string, string> = {
+  'stale-snapshot': 'stale telemetry',
+  '5h-threshold': '5h budget threshold',
+  '7d-threshold': '7d budget threshold',
+  'codex-cap-reached': 'codex cap',
+};
+
+/** employee-quit: pushes once per employee's active→quit transition — never
+ *  on every snapshot of an already-quit employee (onChange fires for ANY
+ *  mutation). A rehire (quit→active, employeeStore.rehire) re-arms the edge.
+ *  Reliable only since 5e26214 (v1.1 item 6) made the quit path broadcast. */
+export function createEmployeeQuitNotifier(
+  notify: typeof notifyBigMoment = notifyBigMoment,
+): (emp: { id: string; name: string; status: string }) => void {
+  const notified = new Set<string>();
+  return (emp) => {
+    if (emp.status === 'quit') {
+      if (notified.has(emp.id)) return;
+      notified.add(emp.id);
+      notify('employee-quit', `${emp.name} quit — mood hit bottom.`);
+    } else {
+      notified.delete(emp.id);
+    }
+  };
+}
+
+/** budget-paused: wraps an isAutomationPaused-shaped gate with an edge —
+ *  pushes on the not-paused→paused transition only, i.e. the first time a
+ *  pause actually blocks automation (the gate is only consulted when a
+ *  chain step or standing-order tick wants to run). Un-pausing re-arms it.
+ *  Every paused tick after the first is silent. */
+export function createBudgetPauseNotifier<
+  Gate extends (...args: never[]) => { paused: boolean; reason?: string },
+>(gate: Gate, notify: typeof notifyBigMoment = notifyBigMoment): Gate {
+  let wasPaused = false;
+  return ((...args: Parameters<Gate>) => {
+    const result = gate(...args);
+    if (result.paused && !wasPaused) {
+      notify(
+        'budget-paused',
+        `Automation paused — ${PAUSE_REASON_WORD[result.reason ?? ''] ?? result.reason ?? 'budget'}.`,
+      );
+    }
+    wasPaused = result.paused;
+    return result;
+  }) as Gate;
+}
