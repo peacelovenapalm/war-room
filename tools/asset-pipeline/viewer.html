@@ -1,0 +1,499 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<title>war-room v3 asset pipeline — sheet viewer / QA harness</title>
+<style>
+  :root {
+    color-scheme: dark;
+    --bg: #14181f;
+    --panel: #1c222c;
+    --line: #3a4353;
+    --text: #e8ecf3;
+    --dim: #8b95a8;
+    --guide: #ffd447;     /* diamond guide + anchor crosshair — bright, colorblind-safe on dark bg */
+    --ok: #e8ecf3;
+    --fail: #ff6b6b;
+  }
+  * { box-sizing: border-box; }
+  body {
+    margin: 0;
+    background: var(--bg);
+    color: var(--text);
+    font: 13px/1.4 -apple-system, "Segoe UI", sans-serif;
+    padding: 20px 24px 80px;
+  }
+  h1 { font-size: 20px; margin: 0 0 4px; }
+  h2 { font-size: 15px; margin: 36px 0 10px; border-bottom: 1px solid var(--line); padding-bottom: 6px; }
+  .sub { color: var(--dim); margin: 0 0 18px; }
+  #status {
+    font-family: ui-monospace, Menlo, monospace;
+    font-size: 12px;
+    white-space: pre-wrap;
+    background: var(--panel);
+    border: 1px solid var(--line);
+    border-radius: 6px;
+    padding: 10px 14px;
+    margin-bottom: 8px;
+  }
+  #status .fail { color: var(--fail); font-weight: 600; }
+  #status .ok { color: #7ee787; font-weight: 600; }
+  .counts {
+    display: flex; gap: 18px; flex-wrap: wrap;
+    font-family: ui-monospace, Menlo, monospace;
+    font-size: 12px; color: var(--dim); margin-bottom: 4px;
+  }
+  .counts b { color: var(--text); }
+
+  .grid { display: flex; flex-wrap: wrap; gap: 10px; }
+  .cell {
+    background: var(--panel);
+    border: 1px solid var(--line);
+    border-radius: 6px;
+    padding: 6px;
+    text-align: center;
+  }
+  .cell canvas {
+    display: block;
+    background-image:
+      linear-gradient(45deg, #2a3140 25%, transparent 25%),
+      linear-gradient(-45deg, #2a3140 25%, transparent 25%),
+      linear-gradient(45deg, transparent 75%, #2a3140 75%),
+      linear-gradient(-45deg, transparent 75%, #2a3140 75%);
+    background-size: 12px 12px;
+    background-position: 0 0, 0 6px, 6px -6px, -6px 0px;
+    background-color: #10131a;
+    border-radius: 3px;
+  }
+  .cell .label {
+    margin-top: 4px;
+    font-family: ui-monospace, Menlo, monospace;
+    font-size: 10px;
+    color: var(--dim);
+    line-height: 1.3;
+  }
+  .cell .label b { color: var(--text); }
+  .cell.fail { outline: 2px solid var(--fail); }
+
+  .row { margin-bottom: 18px; }
+  .row-title {
+    font-family: ui-monospace, Menlo, monospace;
+    font-size: 12px;
+    color: var(--text);
+    margin-bottom: 6px;
+  }
+  .row-title .fps { color: var(--dim); }
+
+  .imgrid { display: flex; flex-wrap: wrap; gap: 12px; }
+  .imgcell {
+    background: var(--panel);
+    border: 1px solid var(--line);
+    border-radius: 6px;
+    padding: 8px;
+    width: 180px;
+  }
+  .imgcell img { width: 100%; height: auto; display: block; border-radius: 3px; background: #10131a; }
+  .imgcell .label { margin-top: 6px; font-family: ui-monospace, Menlo, monospace; font-size: 10px; color: var(--dim); }
+  .imgcell .label b { color: var(--text); display: block; margin-bottom: 2px; }
+
+  .legend {
+    font-family: ui-monospace, Menlo, monospace;
+    font-size: 11px;
+    color: var(--dim);
+    margin-bottom: 6px;
+  }
+  .legend .swatch {
+    display: inline-block;
+    width: 10px; height: 10px;
+    background: var(--guide);
+    border-radius: 50%;
+    margin-right: 4px;
+    vertical-align: middle;
+  }
+</style>
+</head>
+<body>
+
+<h1>war-room v3 asset pipeline — sheet viewer</h1>
+<p class="sub">
+  Zero-dependency QA harness (WS-B Stage 4). Loads every staged
+  spritesheet + manifest straight from <code>webview-v3-assets/</code>
+  and re-implements the documented drawing rule
+  <code>screenOf(tile) − anchor</code> to prove sprite geometry is
+  self-consistent. Runtime DPR: <b id="dpr-readout">…</b>.
+</p>
+
+<div id="status">loading…</div>
+<div class="counts" id="counts"></div>
+
+<h2>A · Props — anchor-on-diamond check (16 props × 4 rotations = 64 frames)</h2>
+<p class="legend"><span class="swatch"></span>yellow diamond = the tile footprint; yellow dot = the tile's floor-contact point. The sprite is drawn at <code>screenOf(tile) − anchor</code> — the dot should land exactly on the prop's visual base in every rotation.</p>
+<div class="grid" id="props-grid"></div>
+
+<h2>B · Composite room — cross-manifest scene (bonus sanity check)</h2>
+<p class="legend">All 16 props + 4 outfits + both cats placed into one painter's-algorithm-sorted room, using the same <code>screenOf(tile) − anchor</code> rule as section A. Not authoritative floor-plan logic (that's WS-A's) — just proof the whole manifest set composites without seams, scale mismatches, or z-fighting.</p>
+<div class="grid" id="room-grid"></div>
+
+<h2>C · Characters — animation playback (18 sprites × 4 rotations)</h2>
+<p class="legend">Each canvas cycles its sprite's frame list at the manifest's declared <code>fps</code> (absent/0 = static, single frame held).</p>
+<div id="chars-container"></div>
+
+<h2>D · imagegen — portraits / posters / textures (22 assets)</h2>
+<div id="imagegen-container"></div>
+
+<script>
+const BASE = "../../webview-v3-assets/";
+const statusEl = document.getElementById("status");
+const countsEl = document.getElementById("counts");
+const errors = [];
+
+function fail(msg) {
+  errors.push(msg);
+  console.error("[viewer]", msg);
+}
+
+async function fetchJson(rel) {
+  const res = await fetch(BASE + rel);
+  if (!res.ok) { fail(`fetch ${rel}: HTTP ${res.status}`); return null; }
+  return res.json();
+}
+
+function loadImage(rel) {
+  return new Promise((resolve) => {
+    const img = new Image();
+    img.onload = () => resolve(img);
+    img.onerror = () => { fail(`image failed to load: ${rel}`); resolve(null); };
+    img.src = BASE + rel;
+  });
+}
+
+// ---- DPR-correct canvas: backing store scaled to devicePixelRatio so
+// screenshots taken at any deviceScaleFactor stay crisp instead of
+// blurring a CSS-upscaled bitmap. ----
+function makeCanvas(cssW, cssH) {
+  const dpr = window.devicePixelRatio || 1;
+  const c = document.createElement("canvas");
+  c.width = Math.round(cssW * dpr);
+  c.height = Math.round(cssH * dpr);
+  c.style.width = cssW + "px";
+  c.style.height = cssH + "px";
+  const ctx = c.getContext("2d");
+  ctx.scale(dpr, dpr);
+  ctx.imageSmoothingEnabled = false;
+  return { canvas: c, ctx };
+}
+
+function drawDiamondGuide(ctx, cx, cy, tilePx) {
+  const hw = tilePx / 2, hh = tilePx / 4;
+  ctx.save();
+  ctx.strokeStyle = "#ffd447";
+  ctx.lineWidth = 1;
+  ctx.beginPath();
+  ctx.moveTo(cx, cy - hh);
+  ctx.lineTo(cx + hw, cy);
+  ctx.lineTo(cx, cy + hh);
+  ctx.lineTo(cx - hw, cy);
+  ctx.closePath();
+  ctx.stroke();
+  ctx.fillStyle = "#ffd447";
+  ctx.beginPath();
+  ctx.arc(cx, cy, 2.5, 0, Math.PI * 2);
+  ctx.fill();
+  ctx.restore();
+}
+
+// draw a single (possibly animated) frame of `sprite` for rotation `rot`
+// at tile-space screen point (cx, cy), per the documented rule:
+// draw the frame at screenOf(tile) - anchor.
+function drawSpriteFrame(ctx, sheetImg, sprite, frame, cx, cy) {
+  const [w, h] = sprite.size;
+  const [ax, ay] = sprite.anchor;
+  ctx.drawImage(sheetImg, frame.x, frame.y, w, h, cx - ax, cy - ay, w, h);
+}
+
+function frameList(sprite, rot) {
+  const v = sprite.frames[rot];
+  return Array.isArray(v) ? v : [v];
+}
+
+(async function main() {
+  document.getElementById("dpr-readout").textContent =
+    `${window.devicePixelRatio || 1}x (window.devicePixelRatio)`;
+
+  const [propsManifest, charsManifest, imagegenManifest] = await Promise.all([
+    fetchJson("props.manifest.json"),
+    fetchJson("characters.manifest.json"),
+    fetchJson("imagegen/manifest.json"),
+  ]);
+
+  if (!propsManifest || !charsManifest || !imagegenManifest) {
+    statusEl.innerHTML = `<span class="fail">FAIL — a manifest failed to load. See errors below.</span>\n` + errors.join("\n");
+    return;
+  }
+
+  const propSheetImgs = await Promise.all(propsManifest.sheets.map(loadImage));
+  const charSheetImgs = await Promise.all(charsManifest.sheets.map(loadImage));
+  const imagegenImgs = await Promise.all(imagegenManifest.images.map((im) => loadImage(im.path)));
+
+  if (propSheetImgs.some((i) => !i) || charSheetImgs.some((i) => !i) || imagegenImgs.some((i) => !i)) {
+    statusEl.innerHTML = `<span class="fail">FAIL — one or more sheet/image files failed to load.</span>\n` + errors.join("\n");
+  }
+
+  // ---- counts strip, sourced live from the manifests (self-documenting) ----
+  const propFrameCount = propsManifest.sprites.reduce(
+    (a, s) => a + Object.values(s.frames).reduce((b, v) => b + (Array.isArray(v) ? v.length : 1), 0), 0);
+  const charFrameCount = charsManifest.sprites.reduce(
+    (a, s) => a + Object.values(s.frames).reduce((b, v) => b + (Array.isArray(v) ? v.length : 1), 0), 0);
+  countsEl.innerHTML = `
+    <div>props sprites: <b>${propsManifest.sprites.length}</b></div>
+    <div>props frames: <b>${propFrameCount}</b></div>
+    <div>props sheets: <b>${propsManifest.sheets.length}</b> (${propsManifest.sheets.join(", ")})</div>
+    <div>character sprites: <b>${charsManifest.sprites.length}</b></div>
+    <div>character frames: <b>${charFrameCount}</b></div>
+    <div>character sheets: <b>${charsManifest.sheets.length}</b> (${charsManifest.sheets.join(", ")})</div>
+    <div>imagegen assets: <b>${imagegenManifest.images.length}</b></div>
+  `;
+
+  // =========================================================
+  // A. Props — one diamond-guide canvas per (prop, rotation)
+  // =========================================================
+  const propsGrid = document.getElementById("props-grid");
+  const tilePx = propsManifest.tilePx;
+  let anchorMismatches = 0;
+
+  for (const sprite of propsManifest.sprites) {
+    for (const rot of sprite.rotations) {
+      const [w, h] = sprite.size;
+      const pad = 24;
+      const cssW = Math.max(w, tilePx) + pad * 2;
+      const cssH = Math.max(h, tilePx / 2) + pad * 2;
+      const { canvas, ctx } = makeCanvas(cssW, cssH);
+      const cx = cssW / 2, cy = cssH / 2;
+
+      const sheetImg = propSheetImgs[sprite.sheet];
+      const frame = frameList(sprite, rot)[0];
+      let mismatch = false;
+      if (sheetImg && frame) {
+        drawSpriteFrame(ctx, sheetImg, sprite, frame, cx, cy);
+      } else {
+        mismatch = true;
+      }
+      drawDiamondGuide(ctx, cx, cy, tilePx);
+
+      const cell = document.createElement("div");
+      cell.className = "cell" + (mismatch ? " fail" : "");
+      cell.appendChild(canvas);
+      const label = document.createElement("div");
+      label.className = "label";
+      label.innerHTML = `<b>${sprite.name}</b> / ${rot}<br>size ${w}×${h} · anchor ${sprite.anchor[0]},${sprite.anchor[1]}`;
+      cell.appendChild(label);
+      propsGrid.appendChild(cell);
+      if (mismatch) anchorMismatches++;
+    }
+  }
+
+  // =========================================================
+  // B. Composite room — painter's-algorithm scene using every prop +
+  //    every outfit + both cats, all placed via screenOf(tile) - anchor.
+  // =========================================================
+  const ROOM_COLS = 7, ROOM_ROWS = 6;
+  const roomPadX = 140, roomPadY = 60;
+  const halfW = tilePx / 2, quarterH = tilePx / 4;
+  const roomCssW = (ROOM_COLS + ROOM_ROWS) * halfW + roomPadX * 2;
+  const roomCssH = (ROOM_COLS + ROOM_ROWS) * quarterH + roomPadY * 2 + 220;
+  const originX = roomPadX + ROOM_ROWS * halfW;
+  const originY = roomPadY + 40;
+
+  function screenOf(col, row) {
+    return {
+      x: originX + (col - row) * halfW,
+      y: originY + (col + row) * quarterH,
+    };
+  }
+
+  const { canvas: roomCanvas, ctx: roomCtx } = makeCanvas(roomCssW, roomCssH);
+
+  const propByName = Object.fromEntries(propsManifest.sprites.map((s) => [s.name, s]));
+  const charByName = Object.fromEntries(charsManifest.sprites.map((s) => [s.name, s]));
+
+  // depth-sort key: draw back-to-front by (col + row), tie-broken by row
+  // (footprint used only to bias multi-tile props like the sofa forward)
+  const placements = [];
+  function place(kind, def, col, row, rot, frameIdx = 0) {
+    placements.push({ kind, def, col, row, rot, frameIdx });
+  }
+
+  // floor, 3-tile variety
+  const floorNames = ["floor_tile", "floor_tile_b", "floor_tile_c"];
+  for (let row = 0; row < ROOM_ROWS; row++) {
+    for (let col = 0; col < ROOM_COLS; col++) {
+      place("prop", propByName[floorNames[(col + row) % floorNames.length]], col, row, "S");
+    }
+  }
+  // back walls (north edge, row 0) + one corner
+  for (let col = 1; col < ROOM_COLS; col++) {
+    place("prop", propByName["wall_straight"], col, 0, "N");
+  }
+  place("prop", propByName["wall_corner"], 0, 0, "N");
+  place("prop", propByName["wall_window"], 3, 0, "N");
+  place("prop", propByName["whiteboard"], 1, 0, "N");
+  place("prop", propByName["trophy_shelf"], 5, 0, "N");
+
+  // furniture scattered around the floor
+  place("prop", propByName["desk_monitor"], 2, 2, "S");
+  place("prop", propByName["office_chair"], 2, 3, "N");
+  place("prop", propByName["bookshelf"], 0, 2, "E");
+  place("prop", propByName["plant"], 6, 1, "W");
+  place("prop", propByName["sofa"], 4, 4, "S");
+  place("prop", propByName["coffee_station"], 6, 3, "W");
+  place("prop", propByName["filing_cabinet"], 0, 4, "E");
+  place("prop", propByName["rework_bin"], 5, 5, "S");
+
+  // characters — one seated typist at the desk, one walker, one blocked,
+  // both cats. Static frame 0 for the composite (motion lives in section C).
+  place("char", charByName["worker_slate.sit"], 2, 3, "N", 0);
+  place("char", charByName["worker_teal.walk"], 3, 5, "S", 0);
+  place("char", charByName["worker_rust.blocked"], 1, 4, "S", 0);
+  place("char", charByName["cat.curl"], 4, 1, "S", 0);
+  place("char", charByName["cat.walk"], 5, 2, "E", 0);
+
+  placements.sort((a, b) => (a.col + a.row) - (b.col + b.row) || a.row - b.row);
+
+  let roomMismatch = 0;
+  for (const p of placements) {
+    if (!p.def) { roomMismatch++; continue; }
+    const pt = screenOf(p.col, p.row);
+    const sheetImgs = p.kind === "prop" ? propSheetImgs : charSheetImgs;
+    const sheetImg = sheetImgs[p.def.sheet];
+    const frames = frameList(p.def, p.rot);
+    const frame = frames[p.frameIdx % frames.length];
+    if (!sheetImg || !frame) { roomMismatch++; continue; }
+    drawSpriteFrame(roomCtx, sheetImg, p.def, frame, pt.x, pt.y);
+  }
+
+  const roomGrid = document.getElementById("room-grid");
+  const roomCell = document.createElement("div");
+  roomCell.className = "cell" + (roomMismatch ? " fail" : "");
+  roomCell.appendChild(roomCanvas);
+  const roomLabel = document.createElement("div");
+  roomLabel.className = "label";
+  roomLabel.innerHTML = `<b>composite room</b> — ${placements.length} placements (${ROOM_COLS}×${ROOM_ROWS} floor + 8 furniture + 5 characters/pets)`;
+  roomCell.appendChild(roomLabel);
+  roomGrid.appendChild(roomCell);
+
+  // =========================================================
+  // C. Characters — animated playback, 4 rotations per sprite
+  // =========================================================
+  const charsContainer = document.getElementById("chars-container");
+  const animators = [];
+
+  for (const sprite of charsManifest.sprites) {
+    const row = document.createElement("div");
+    row.className = "row";
+    const title = document.createElement("div");
+    title.className = "row-title";
+    title.innerHTML = `<b>${sprite.name}</b> <span class="fps">— fps: ${sprite.fps || "static"}</span>`;
+    row.appendChild(title);
+
+    const grid = document.createElement("div");
+    grid.className = "grid";
+
+    for (const rot of sprite.rotations) {
+      const [w, h] = sprite.size;
+      const pad = 20;
+      const cssW = Math.max(w, tilePx) + pad * 2;
+      const cssH = Math.max(h, tilePx / 2) + pad * 2;
+      const { canvas, ctx } = makeCanvas(cssW, cssH);
+      const cx = cssW / 2, cy = cssH / 2;
+      const sheetImg = charSheetImgs[sprite.sheet];
+      const frames = frameList(sprite, rot);
+
+      function render(frameIdx) {
+        ctx.clearRect(0, 0, cssW, cssH);
+        if (sheetImg) drawSpriteFrame(ctx, sheetImg, sprite, frames[frameIdx], cx, cy);
+        drawDiamondGuide(ctx, cx, cy, tilePx);
+      }
+      render(0);
+
+      if (frames.length > 1 && sprite.fps > 0) {
+        animators.push({
+          frames, render,
+          intervalMs: 1000 / sprite.fps,
+          idx: 0,
+          last: performance.now(),
+        });
+      }
+
+      const cell = document.createElement("div");
+      cell.className = "cell";
+      cell.appendChild(canvas);
+      const label = document.createElement("div");
+      label.className = "label";
+      label.innerHTML = `${rot} · ${frames.length}f`;
+      cell.appendChild(label);
+      grid.appendChild(cell);
+    }
+    row.appendChild(grid);
+    charsContainer.appendChild(row);
+  }
+
+  function tick(now) {
+    for (const a of animators) {
+      if (now - a.last >= a.intervalMs) {
+        a.idx = (a.idx + 1) % a.frames.length;
+        a.last = now;
+        a.render(a.idx);
+      }
+    }
+    requestAnimationFrame(tick);
+  }
+  requestAnimationFrame(tick);
+
+  // =========================================================
+  // D. imagegen — grid by category
+  // =========================================================
+  const imagegenContainer = document.getElementById("imagegen-container");
+  const byCategory = new Map();
+  imagegenManifest.images.forEach((im, i) => {
+    const cat = im.path.split("/")[1] || "misc"; // imagegen/<category>/file.png
+    if (!byCategory.has(cat)) byCategory.set(cat, []);
+    byCategory.get(cat).push({ im, img: imagegenImgs[i] });
+  });
+  for (const [cat, items] of byCategory) {
+    const h3 = document.createElement("div");
+    h3.className = "row-title";
+    h3.innerHTML = `<b>${cat}</b> (${items.length})`;
+    imagegenContainer.appendChild(h3);
+    const grid = document.createElement("div");
+    grid.className = "imgrid";
+    for (const { im, img } of items) {
+      const cell = document.createElement("div");
+      cell.className = "imgcell";
+      const imgEl = document.createElement("img");
+      if (img) imgEl.src = img.src;
+      cell.appendChild(imgEl);
+      const label = document.createElement("div");
+      label.className = "label";
+      label.innerHTML = `<b>${im.name}</b>${im.size[0]}×${im.size[1]}<br>${im.purpose}`;
+      cell.appendChild(label);
+      grid.appendChild(cell);
+    }
+    imagegenContainer.appendChild(grid);
+    imagegenContainer.appendChild(document.createElement("div")).style.height = "16px";
+  }
+
+  // =========================================================
+  // final status line
+  // =========================================================
+  const totalFail = errors.length + anchorMismatches + roomMismatch;
+  if (totalFail === 0) {
+    statusEl.innerHTML = `<span class="ok">OK ✓</span> — ${propsManifest.sprites.length} props, ${charsManifest.sprites.length} character sprites, ${imagegenManifest.images.length} imagegen assets loaded and rendered with zero errors.`;
+  } else {
+    statusEl.innerHTML = `<span class="fail">FAIL ✗</span> — ${totalFail} issue(s):\n` + errors.join("\n");
+  }
+  window.__viewerDone = true;
+  window.__viewerFailCount = totalFail;
+})();
+</script>
+</body>
+</html>

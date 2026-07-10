@@ -7,15 +7,19 @@
 #   make pack-chars     pack characters -> characters.*.sheet.png
 #   make preview PROP=desk_monitor           fast single-prop loop
 #   make preview-chars SPRITE=worker_teal.walk   fast single-sprite loop
+#   make validate        schema-validate every staged manifest (npm run validate)
+#   make screenshots      DPR-1 + DPR-3 viewer.html captures -> .planning/v3/screenshots/assets/
+#   make qa               validate + screenshots
 #   make clean          drop the out/ working dir
 
 BLENDER ?= /Applications/Blender.app/Contents/MacOS/Blender
 PY      ?= python3
+NPM     ?= npm
 OUT     := out
 STAGE   := ../../webview-v3-assets
 SAMPLES ?= 96
 
-.PHONY: all render pack render-chars pack-chars preview preview-chars clean
+.PHONY: all render pack render-chars pack-chars preview preview-chars validate screenshots qa clean
 
 all: render pack render-chars pack-chars
 
@@ -38,6 +42,14 @@ preview:
 preview-chars:
 	@test -n "$(SPRITE)" || (echo "usage: make preview-chars SPRITE=<name>"; exit 1)
 	$(BLENDER) -b -P blender/render_characters.py -- --out $(OUT)/preview-chars --sprites $(SPRITE) --samples 48
+
+validate:
+	$(NPM) run validate
+
+screenshots:
+	$(NPM) run screenshot
+
+qa: validate screenshots
 
 clean:
 	rm -rf $(OUT)
