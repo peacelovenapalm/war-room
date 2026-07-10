@@ -1,0 +1,21 @@
+{
+  "dpr1": {
+    "deviceScaleFactor": 1,
+    "tMounted": 295,
+    "tPixiReady": 301,
+    "canvasMetrics": {
+      "widthAttr": 390,
+      "heightAttr": 664
+    }
+  },
+  "dpr3": {
+    "deviceScaleFactor": 3,
+    "tMounted": 105,
+    "tPixiReady": 219,
+    "canvasMetrics": {
+      "widthAttr": 1170,
+      "heightAttr": 1992
+    }
+  },
+  "devicePixelRatioMultiplier": 9
+}

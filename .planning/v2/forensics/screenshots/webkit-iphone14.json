@@ -1,0 +1,402 @@
+{
+  "project": "webkit-iphone14",
+  "browserName": "webkit",
+  "viewportBefore": {
+    "width": 390,
+    "height": 664
+  },
+  "mounted": true,
+  "mountError": null,
+  "timing": {
+    "tMounted": 189,
+    "tSettled": 2198
+  },
+  "pixiInitCount": 1,
+  "canvasMetrics": {
+    "widthAttr": 1170,
+    "heightAttr": 1992,
+    "styleWidth": "390px",
+    "styleHeight": "664px",
+    "boundingClientRect": {
+      "width": 390,
+      "height": 664,
+      "top": 0,
+      "left": 0
+    },
+    "dpr": 3,
+    "innerWidth": 390,
+    "innerHeight": 664,
+    "documentScrollWidth": 390,
+    "documentScrollHeight": 664,
+    "visualViewportScale": 1,
+    "visualViewportWidth": 390
+  },
+  "canvasContent": {
+    "distinctColors": 27,
+    "hasContent": true,
+    "width": 1170,
+    "height": 1992
+  },
+  "glProbeCalls": [
+    {
+      "type": "2d",
+      "gotContext": true
+    },
+    {
+      "type": "2d",
+      "gotContext": true
+    },
+    {
+      "type": "2d",
+      "gotContext": true
+    },
+    {
+      "type": "webgl",
+      "options": {
+        "stencil": true,
+        "failIfMajorPerformanceCaveat": false
+      },
+      "gotContext": true,
+      "maxTextureSize": 16384,
+      "maxRenderbufferSize": 16384,
+      "maxViewportDims": [
+        16384,
+        16384
+      ],
+      "contextAttributes": {
+        "alpha": true,
+        "antialias": true,
+        "depth": true,
+        "failIfMajorPerformanceCaveat": false,
+        "powerPreference": "default",
+        "premultipliedAlpha": true,
+        "preserveDrawingBuffer": false,
+        "stencil": true
+      },
+      "unmaskedRenderer": "Apple GPU",
+      "unmaskedVendor": "Apple Inc."
+    },
+    {
+      "type": "webgl",
+      "options": {},
+      "gotContext": true,
+      "maxTextureSize": 16384,
+      "maxRenderbufferSize": 16384,
+      "maxViewportDims": [
+        16384,
+        16384
+      ],
+      "contextAttributes": {
+        "alpha": true,
+        "antialias": true,
+        "depth": true,
+        "failIfMajorPerformanceCaveat": false,
+        "powerPreference": "default",
+        "premultipliedAlpha": true,
+        "preserveDrawingBuffer": false,
+        "stencil": false
+      },
+      "unmaskedRenderer": "Apple GPU",
+      "unmaskedVendor": "Apple Inc."
+    },
+    {
+      "type": "webgl2",
+      "options": {
+        "alpha": true,
+        "premultipliedAlpha": true,
+        "antialias": false,
+        "stencil": true,
+        "preserveDrawingBuffer": false,
+        "powerPreference": "default"
+      },
+      "gotContext": true,
+      "maxTextureSize": 16384,
+      "maxRenderbufferSize": 16384,
+      "maxViewportDims": [
+        16384,
+        16384
+      ],
+      "contextAttributes": {
+        "alpha": true,
+        "antialias": false,
+        "depth": true,
+        "failIfMajorPerformanceCaveat": false,
+        "powerPreference": "default",
+        "premultipliedAlpha": true,
+        "preserveDrawingBuffer": false,
+        "stencil": true
+      },
+      "unmaskedRenderer": "Apple GPU",
+      "unmaskedVendor": "Apple Inc."
+    },
+    {
+      "type": "2d",
+      "gotContext": true
+    },
+    {
+      "type": "2d",
+      "gotContext": true
+    },
+    {
+      "type": "2d",
+      "gotContext": true
+    },
+    {
+      "type": "2d",
+      "gotContext": true
+    },
+    {
+      "type": "2d",
+      "gotContext": true
+    },
+    {
+      "type": "2d",
+      "gotContext": true
+    },
+    {
+      "type": "2d",
+      "gotContext": true
+    },
+    {
+      "type": "2d",
+      "gotContext": true
+    },
+    {
+      "type": "2d",
+      "gotContext": true
+    },
+    {
+      "type": "2d",
+      "gotContext": true
+    },
+    {
+      "type": "2d",
+      "gotContext": true
+    },
+    {
+      "type": "2d",
+      "gotContext": true
+    },
+    {
+      "type": "2d",
+      "gotContext": true
+    },
+    {
+      "type": "2d",
+      "gotContext": true
+    },
+    {
+      "type": "2d",
+      "gotContext": true
+    },
+    {
+      "type": "2d",
+      "gotContext": true
+    },
+    {
+      "type": "2d",
+      "gotContext": true
+    },
+    {
+      "type": "2d",
+      "gotContext": true
+    },
+    {
+      "type": "2d",
+      "gotContext": true
+    },
+    {
+      "type": "2d",
+      "gotContext": true
+    },
+    {
+      "type": "2d",
+      "gotContext": true
+    },
+    {
+      "type": "2d",
+      "gotContext": true
+    },
+    {
+      "type": "2d",
+      "gotContext": true
+    },
+    {
+      "type": "2d",
+      "gotContext": true
+    },
+    {
+      "type": "2d",
+      "gotContext": true
+    },
+    {
+      "type": "2d",
+      "gotContext": true
+    },
+    {
+      "type": "2d",
+      "gotContext": true
+    },
+    {
+      "type": "2d",
+      "gotContext": true
+    },
+    {
+      "type": "2d",
+      "gotContext": true
+    },
+    {
+      "type": "2d",
+      "gotContext": true
+    },
+    {
+      "type": "2d",
+      "gotContext": true
+    },
+    {
+      "type": "2d",
+      "gotContext": true
+    }
+  ],
+  "wsProbeLog": [
+    {
+      "at": 1783679085324,
+      "kind": "open"
+    },
+    {
+      "at": 1783679085325,
+      "kind": "message",
+      "msgType": "progressionUpdate",
+      "byteLen": 241
+    },
+    {
+      "at": 1783679085325,
+      "kind": "message",
+      "msgType": "economyUpdate",
+      "byteLen": 124
+    },
+    {
+      "at": 1783679085325,
+      "kind": "message",
+      "msgType": "budgetUpdate",
+      "byteLen": 173
+    },
+    {
+      "at": 1783679085343,
+      "kind": "message",
+      "msgType": "providerCapabilities",
+      "byteLen": 129
+    },
+    {
+      "at": 1783679085355,
+      "kind": "message",
+      "msgType": "characterSpritesLoaded",
+      "byteLen": 451849
+    },
+    {
+      "at": 1783679085358,
+      "kind": "message",
+      "msgType": "petSpritesLoaded",
+      "byteLen": 95041
+    },
+    {
+      "at": 1783679085359,
+      "kind": "message",
+      "msgType": "floorTilesLoaded",
+      "byteLen": 23385
+    },
+    {
+      "at": 1783679085359,
+      "kind": "message",
+      "msgType": "wallTilesLoaded",
+      "byteLen": 83013
+    },
+    {
+      "at": 1783679085361,
+      "kind": "message",
+      "msgType": "furnitureAssetsLoaded",
+      "byteLen": 195938
+    },
+    {
+      "at": 1783679085363,
+      "kind": "message",
+      "msgType": "layoutLoaded",
+      "byteLen": 12447
+    },
+    {
+      "at": 1783679085365,
+      "kind": "message",
+      "msgType": "settingsLoaded",
+      "byteLen": 217
+    },
+    {
+      "at": 1783679085365,
+      "kind": "message",
+      "msgType": "existingAgents",
+      "byteLen": 154
+    }
+  ],
+  "consoleErrors": [],
+  "consoleWarnings": [],
+  "consoleAll": [
+    {
+      "type": "log",
+      "text": "[Transport] WebSocket connected"
+    },
+    {
+      "type": "log",
+      "text": "[Webview] Received 6 pre-colored character sprites"
+    },
+    {
+      "type": "log",
+      "text": "[Webview] Received 2 pet sprites"
+    },
+    {
+      "type": "log",
+      "text": "[Webview] Received 9 floor tile patterns"
+    },
+    {
+      "type": "log",
+      "text": "[Webview] Received 1 wall tile set(s)"
+    },
+    {
+      "type": "log",
+      "text": "📦 Webview: Loaded 38 furniture assets"
+    },
+    {
+      "type": "log",
+      "text": "✓ Built dynamic catalog with 42 assets (25 visible, 7 rotation groups, 1 state pairs, 1 animation groups)"
+    }
+  ],
+  "pageErrors": [],
+  "networkFailed": [],
+  "networkRelevant": [
+    {
+      "url": "http://127.0.0.1:49474/assets/index-Dgu9l1vv.js",
+      "status": 200,
+      "method": "GET",
+      "resourceType": "script"
+    },
+    {
+      "url": "http://127.0.0.1:49474/assets/index-BreSEkrU.css",
+      "status": 200,
+      "method": "GET",
+      "resourceType": "stylesheet"
+    },
+    {
+      "url": "http://127.0.0.1:49474/assets/browserAll-FJIwy-Gz.js",
+      "status": 200,
+      "method": "GET",
+      "resourceType": "script"
+    },
+    {
+      "url": "http://127.0.0.1:49474/assets/init-C8UojItN.js",
+      "status": 200,
+      "method": "GET",
+      "resourceType": "script"
+    }
+  ],
+  "networkTotalRequests": 10,
+  "hostLogs": "[Pixel Agents] Loading assets...\n[AssetLoader] ✅ Loaded 6 character sprites (7 frames × 3 directions each)\n[AssetLoader] ✅ Loaded 2 pet sprites\n[AssetLoader] Loading floor tiles from: /Users/greg/code/war-room/dist/assets/floors\n[AssetLoader] ✅ Loaded 9 floor tile patterns from floors/\n[AssetLoader] Loading wall tiles from: /Users/greg/code/war-room/dist/assets/walls\n[AssetLoader] ✅ Loaded 1 wall tile set(s) (16 pieces total)\n[AssetLoader] workspaceRoot received: \"/Users/greg/code/war-room/dist\"\n[AssetLoader] Scanning furniture directory: /Users/greg/code/war-room/dist/assets/furniture\n📦 Found 25 furniture folders\n  ✓ Loaded 38 / 38 assets\n[AssetLoader] ✅ Successfully loaded 38 furniture sprites\n[AssetLoader] Loaded default layout (21×22, revision 1) from default-layout-1.json\n[Pixel Agents] Assets loaded: 6 characters, 2 pets, 38 furniture items\n{\"level\":30,\"time\":1783679085166,\"pid\":65851,\"hostname\":\"Gregs-MacBook-Pro.local\",\"msg\":\"Server listening at http://127.0.0.1:49474\"}\n[Pixel Agents] Server: listening on 127.0.0.1:49474\n[Pixel Agents] Machine label: GREGS-MACBOOK-PRO | ingest token: random per start\n[Pixel Agents] Scanning project dir: /var/folders/k2/rt4fzhv13752j5pfldm1rqcw0000gn/T/war-room-forensics-home-w5ADt4/.claude/projects/-private-var-folders-k2-rt4fzhv13752j5pfldm1rqcw0000gn-T-war-room-forensics-ws-PSY1zG\n\n  Pixel Agents server running at http://127.0.0.1:49474\n\n{\"level\":30,\"time\":1783679085209,\"pid\":65851,\"hostname\":\"Gregs-MacBook-Pro.local\",\"reqId\":\"req-1\",\"req\":{\"method\":\"GET\",\"url\":\"/api/health\",\"host\":\"127.0.0.1:49474\",\"remoteAddress\":\"127.0.0.1\",\"remotePort\":49479},\"msg\":\"incoming request\"}\n{\"level\":30,\"time\":1783679085212,\"pid\":65851,\"hostname\":\"Gregs-MacBook-Pro.local\",\"reqId\":\"req-1\",\"res\":{\"statusCode\":200},\"responseTime\":2.6375417709350586,\"msg\":\"request completed\"}\n{\"level\":30,\"time\":1783679085229,\"pid\":65851,\"hostname\":\"Gregs-MacBook-Pro.local\",\"reqId\":\"req-2\",\"req\":{\"method\":\"GET\",\"url\":\"/\",\"host\":\"127.0.0.1:49474\",\"remoteAddress\":\"127.0.0.1\",\"remotePort\":49480},\"msg\":\"incoming request\"}\n{\"level\":30,\"time\":1783679085232,\"pid\":65851,\"hostname\":\"Gregs-MacBook-Pro.local\",\"reqId\":\"req-2\",\"res\":{\"statusCode\":200},\"responseTime\":2.433709144592285,\"msg\":\"request completed\"}\n{\"level\":30,\"time\":1783679085247,\"pid\":65851,\"hostname\":\"Gregs-MacBook-Pro.local\",\"reqId\":\"req-3\",\"req\":{\"method\":\"GET\",\"url\":\"/assets/index-Dgu9l1vv.js\",\"host\":\"127.0.0.1:49474\",\"remoteAddress\":\"127.0.0.1\",\"remotePort\":49480},\"msg\":\"incoming request\"}\n{\"level\":30,\"time\":1783679085248,\"pid\":65851,\"hostname\":\"Gregs-MacBook-Pro.local\",\"reqId\":\"req-4\",\"req\":{\"method\":\"GET\",\"url\":\"/assets/index-BreSEkrU.css\",\"host\":\"127.0.0.1:49474\",\"remoteAddress\":\"127.0.0.1\",\"remotePort\":49481},\"msg\":\"incoming request\"}\n{\"level\":30,\"time\":1783679085249,\"pid\":65851,\"hostname\":\"Gregs-MacBook-Pro.local\",\"reqId\":\"req-5\",\"req\":{\"method\":\"GET\",\"url\":\"/registerSW.js\",\"host\":\"127.0.0.1:49474\",\"remoteAddress\":\"127.0.0.1\",\"remotePort\":49482},\"msg\":\"incoming request\"}\n{\"level\":30,\"time\":1783679085250,\"pid\":65851,\"hostname\":\"Gregs-MacBook-Pro.local\",\"reqId\":\"req-4\",\"res\":{\"statusCode\":200},\"responseTime\":1.3245000839233398,\"msg\":\"request completed\"}\n{\"level\":30,\"time\":1783679085250,\"pid\":65851,\"hostname\":\"Gregs-MacBook-Pro.local\",\"reqId\":\"req-5\",\"res\":{\"statusCode\":200},\"responseTime\":1.5214576721191406,\"msg\":\"request completed\"}\n{\"level\":30,\"time\":1783679085251,\"pid\":65851,\"hostname\":\"Gregs-MacBook-Pro.local\",\"reqId\":\"req-6\",\"req\":{\"method\":\"GET\",\"url\":\"/manifest.webmanifest\",\"host\":\"127.0.0.1:49474\",\"remoteAddress\":\"127.0.0.1\",\"remotePort\":49481},\"msg\":\"incoming request\"}\n{\"level\":30,\"time\":1783679085252,\"pid\":65851,\"hostname\":\"Gregs-MacBook-Pro.local\",\"reqId\":\"req-6\",\"res\":{\"statusCode\":200},\"responseTime\":0.9677095413208008,\"msg\":\"request completed\"}\n{\"level\":30,\"time\":1783679085253,\"pid\":65851,\"hostname\":\"Gregs-MacBook-Pro.local\",\"reqId\":\"req-3\",\"res\":{\"statusCode\":200},\"responseTime\":5.20404052734375,\"msg\":\"request completed\"}\n{\"level\":30,\"time\":1783679085296,\"pid\":65851,\"hostname\":\"Gregs-MacBook-Pro.local\",\"reqId\":\"req-7\",\"req\":{\"method\":\"GET\",\"url\":\"/ws\",\"host\":\"127.0.0.1:49474\",\"remoteAddress\":\"127.0.0.1\",\"remotePort\":49483},\"msg\":\"incoming request\"}\n{\"level\":30,\"time\":1783679085322,\"pid\":65851,\"hostname\":\"Gregs-MacBook-Pro.local\",\"reqId\":\"req-8\",\"req\":{\"method\":\"GET\",\"url\":\"/fonts/FSPixelSansUnicode-Regular.ttf\",\"host\":\"127.0.0.1:49474\",\"remoteAddress\":\"127.0.0.1\",\"remotePort\":49480},\"msg\":\"incoming request\"}\n{\"level\":30,\"time\":1783679085325,\"pid\":65851,\"hostname\":\"Gregs-MacBook-Pro.local\",\"reqId\":\"req-8\",\"res\":{\"statusCode\":200},\"responseTime\":2.9084997177124023,\"msg\":\"request completed\"}\n{\"level\":30,\"time\":1783679085340,\"pid\":65851,\"hostname\":\"Gregs-MacBook-Pro.local\",\"reqId\":\"req-9\",\"req\":{\"method\":\"GET\",\"url\":\"/sw.js\",\"host\":\"127.0.0.1:49474\",\"remoteAddress\":\"127.0.0.1\",\"remotePort\":49480},\"msg\":\"incoming request\"}\n[Pixel Agents] WS client message: webviewReady\n{\"level\":30,\"time\":1783679085346,\"pid\":65851,\"hostname\":\"Gregs-MacBook-Pro.local\",\"reqId\":\"req-a\",\"req\":{\"method\":\"GET\",\"url\":\"/api/dispatch/recent\",\"host\":\"127.0.0.1:49474\",\"remoteAddress\":\"127.0.0.1\",\"remotePort\":49481},\"msg\":\"incoming request\"}\n{\"level\":30,\"time\":1783679085346,\"pid\":65851,\"hostname\":\"Gregs-MacBook-Pro.local\",\"reqId\":\"req-a\",\"res\":{\"statusCode\":200},\"responseTime\":0.2590827941894531,\"msg\":\"request completed\"}\n{\"level\":30,\"time\":1783679085347,\"pid\":65851,\"hostname\":\"Gregs-MacBook-Pro.local\",\"reqId\":\"req-9\",\"res\":{\"statusCode\":200},\"responseTime\":6.534458160400391,\"msg\":\"request completed\"}\n{\"level\":30,\"time\":1783679085373,\"pid\":65851,\"hostname\":\"Gregs-MacBook-Pro.local\",\"reqId\":\"req-b\",\"req\":{\"method\":\"GET\",\"url\":\"/workbox-abeb32eb.js\",\"host\":\"127.0.0.1:49474\",\"remoteAddress\":\"127.0.0.1\",\"remotePort\":49480},\"msg\":\"incoming request\"}\n{\"level\":30,\"time\":1783679085374,\"pid\":65851,\"hostname\":\"Gregs-MacBook-Pro.local\",\"reqId\":\"req-b\",\"res\":{\"statusCode\":200},\"responseTime\":0.8352088928222656,\"msg\":\"request completed\"}\n{\"level\":30,\"time\":1783679085426,\"pid\":65851,\"hostname\":\"Gregs-MacBook-Pro.local\",\"reqId\":\"req-c\",\"req\":{\"method\":\"GET\",\"url\":\"/assets/browserAll-FJIwy-Gz.js\",\"host\":\"127.0.0.1:49474\",\"remoteAddress\":\"127.0.0.1\",\"remotePort\":49480},\"msg\":\"incoming request\"}\n{\"level\":30,\"time\":1783679085427,\"pid\":65851,\"hostname\":\"Gregs-MacBook-Pro.local\",\"reqId\":\"req-d\",\"req\":{\"method\":\"GET\",\"url\":\"/assets/init-C8UojItN.js\",\"host\":\"127.0.0.1:49474\",\"remoteAddress\":\"127.0.0.1\",\"remotePort\":49481},\"msg\":\"incoming request\"}\n{\"level\":30,\"time\":1783679085428,\"pid\":65851,\"hostname\":\"Gregs-MacBook-Pro.local\",\"reqId\":\"req-c\",\"res\":{\"statusCode\":200},\"responseTime\":1.3584585189819336,\"msg\":\"request completed\"}\n{\"level\":30,\"time\":1783679085428,\"pid\":65851,\"hostname\":\"Gregs-MacBook-Pro.local\",\"reqId\":\"req-d\",\"res\":{\"statusCode\":200},\"responseTime\":1.4312076568603516,\"msg\":\"request completed\"}\n{\"level\":30,\"time\":1783679085461,\"pid\":65851,\"hostname\":\"Gregs-MacBook-Pro.local\",\"reqId\":\"req-e\",\"req\":{\"method\":\"GET\",\"url\":\"/registerSW.js\",\"host\":\"127.0.0.1:49474\",\"remoteAddress\":\"127.0.0.1\",\"remotePort\":49480},\"msg\":\"incoming request\"}\n{\"level\":30,\"time\":1783679085461,\"pid\":65851,\"hostname\":\"Gregs-MacBook-Pro.local\",\"reqId\":\"req-e\",\"res\":{\"statusCode\":200},\"responseTime\":0.5419998168945312,\"msg\":\"request completed\"}\n{\"level\":30,\"time\":1783679085465,\"pid\":65851,\"hostname\":\"Gregs-MacBook-Pro.local\",\"reqId\":\"req-f\",\"req\":{\"method\":\"GET\",\"url\":\"/index.html\",\"host\":\"127.0.0.1:49474\",\"remoteAddress\":\"127.0.0.1\",\"remotePort\":49480},\"msg\":\"incoming request\"}\n{\"level\":30,\"time\":1783679085465,\"pid\":65851,\"hostname\":\"Gregs-MacBook-Pro.local\",\"reqId\":\"req-f\",\"res\":{\"statusCode\":200},\"responseTime\":0.48691654205322266,\"msg\":\"request completed\"}\n{\"level\":30,\"time\":1783679085505,\"pid\":65851,\"hostname\":\"Gregs-MacBook-Pro.local\",\"reqId\":\"req-g\",\"req\":{\"method\":\"GET\",\"url\":\"/assets/webworkerAll-CYPlWsLs.js\",\"host\":\"127.0.0.1:49474\",\"remoteAddress\":\"127.0.0.1\",\"remotePort\":49480},\"msg\":\"incoming request\"}\n{\"level\":30,\"time\":1783679085506,\"pid\":65851,\"hostname\":\"Gregs-MacBook-Pro.local\",\"reqId\":\"req-g\",\"res\":{\"statusCode\":200},\"responseTime\":0.6710424423217773,\"msg\":\"request completed\"}\n{\"level\":30,\"time\":1783679085508,\"pid\":65851,\"hostname\":\"Gregs-MacBook-Pro.local\",\"reqId\":\"req-h\",\"req\":{\"method\":\"GET\",\"url\":\"/assets/init-C8UojItN.js\",\"host\":\"127.0.0.1:49474\",\"remoteAddress\":\"127.0.0.1\",\"remotePort\":49480},\"msg\":\"incoming request\"}\n{\"level\":30,\"time\":1783679085509,\"pid\":65851,\"hostname\":\"Gregs-MacBook-Pro.local\",\"reqId\":\"req-h\",\"res\":{\"statusCode\":200},\"responseTime\":0.5419178009033203,\"msg\":\"request completed\"}\n{\"level\":30,\"time\":1783679085510,\"pid\":65851,\"hostname\":\"Gregs-MacBook-Pro.local\",\"reqId\":\"req-i\",\"req\":{\"method\":\"GET\",\"url\":\"/assets/index-Dgu9l1vv.js\",\"host\":\"127.0.0.1:49474\",\"remoteAddress\":\"127.0.0.1\",\"remotePort\":49480},\"msg\":\"incoming request\"}\n{\"level\":30,\"time\":1783679085512,\"pid\":65851,\"hostname\":\"Gregs-MacBook-Pro.local\",\"reqId\":\"req-i\",\"res\":{\"statusCode\":200},\"responseTime\":1.458083152770996,\"msg\":\"request completed\"}\n{\"level\":30,\"time\":1783679085515,\"pid\":65851,\"hostname\":\"Gregs-MacBook-Pro.local\",\"reqId\":\"req-j\",\"req\":{\"method\":\"GET\",\"url\":\"/assets/index-BreSEkrU.css\",\"host\":\"127.0.0.1:49474\",\"remoteAddress\":\"127.0.0.1\",\"remotePort\":49480},\"msg\":\"incoming request\"}\n{\"level\":30,\"time\":1783679085516,\"pid\":65851,\"hostname\":\"Gregs-MacBook-Pro.local\",\"reqId\":\"req-j\",\"res\":{\"statusCode\":200},\"responseTime\":0.5086669921875,\"msg\":\"request completed\"}\n{\"level\":30,\"time\":1783679085518,\"pid\":65851,\"hostname\":\"Gregs-MacBook-Pro.local\",\"reqId\":\"req-k\",\"req\":{\"method\":\"GET\",\"url\":\"/assets/browserAll-FJIwy-Gz.js\",\"host\":\"127.0.0.1:49474\",\"remoteAddress\":\"127.0.0.1\",\"remotePort\":49480},\"msg\":\"incoming request\"}\n{\"level\":30,\"time\":1783679085518,\"pid\":65851,\"hostname\":\"Gregs-MacBook-Pro.local\",\"reqId\":\"req-k\",\"res\":{\"statusCode\":200},\"responseTime\":0.3690824508666992,\"msg\":\"request completed\"}\n{\"level\":30,\"time\":1783679085520,\"pid\":65851,\"hostname\":\"Gregs-MacBook-Pro.local\",\"reqId\":\"req-l\",\"req\":{\"method\":\"GET\",\"url\":\"/icons/apple-touch-icon-TEMP.png\",\"host\":\"127.0.0.1:49474\",\"remoteAddress\":\"127.0.0.1\",\"remotePort\":49480},\"msg\":\"incoming request\"}\n{\"level\":30,\"time\":1783679085521,\"pid\":65851,\"hostname\":\"Gregs-MacBook-Pro.local\",\"reqId\":\"req-l\",\"res\":{\"statusCode\":200},\"responseTime\":0.4993743896484375,\"msg\":\"request completed\"}\n{\"level\":30,\"time\":1783679085522,\"pid\":65851,\"hostname\":\"Gregs-MacBook-Pro.local\",\"reqId\":\"req-m\",\"req\":{\"method\":\"GET\",\"url\":\"/icons/icon-192-TEMP.png\",\"host\":\"127.0.0.1:49474\",\"remoteAddress\":\"127.0.0.1\",\"remotePort\":49480},\"msg\":\"incoming request\"}\n{\"level\":30,\"time\":1783679085523,\"pid\":65851,\"hostname\":\"Gregs-MacBook-Pro.local\",\"reqId\":\"req-m\",\"res\":{\"statusCode\":200},\"responseTime\":0.5118751525878906,\"msg\":\"request completed\"}\n{\"level\":30,\"time\":1783679085524,\"pid\":65851,\"hostname\":\"Gregs-MacBook-Pro.local\",\"reqId\":\"req-n\",\"req\":{\"method\":\"GET\",\"url\":\"/icons/icon-512-TEMP.png\",\"host\":\"127.0.0.1:49474\",\"remoteAddress\":\"127.0.0.1\",\"remotePort\":49480},\"msg\":\"incoming request\"}\n{\"level\":30,\"time\":1783679085525,\"pid\":65851,\"hostname\":\"Gregs-MacBook-Pro.local\",\"reqId\":\"req-n\",\"res\":{\"statusCode\":200},\"responseTime\":0.5362920761108398,\"msg\":\"request completed\"}\n{\"level\":30,\"time\":1783679085526,\"pid\":65851,\"hostname\":\"Gregs-MacBook-Pro.local\",\"reqId\":\"req-o\",\"req\":{\"method\":\"GET\",\"url\":\"/manifest.webmanifest\",\"host\":\"127.0.0.1:49474\",\"remoteAddress\":\"127.0.0.1\",\"remotePort\":49480},\"msg\":\"incoming request\"}\n{\"level\":30,\"time\":1783679085527,\"pid\":65851,\"hostname\":\"Gregs-MacBook-Pro.local\",\"reqId\":\"req-o\",\"res\":{\"statusCode\":200},\"responseTime\":0.32587528228759766,\"msg\":\"request completed\"}",
+  "screenshotPath": "/Users/greg/code/war-room/.planning/v2/forensics/screenshots/webkit-iphone14.png"
+}
