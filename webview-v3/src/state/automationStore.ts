@@ -29,6 +29,7 @@ export function reduceDispatchEntries(
       pid: message.pid,
       exitCode: message.exitCode,
       resultTail: message.resultTail,
+      requestId: message.requestId,
     },
     now,
   );

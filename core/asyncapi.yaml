@@ -675,6 +675,13 @@ components:
             Capped (~8KB) tail of the run's log — dispatch action, exited
             status only. The only place a run's actual output reaches the
             dashboard; same trust level as promptPreview (never the full log).
+        requestId:
+          type: string
+          maxLength: 64
+          description: >-
+            Verbatim echo of DispatchRequest.requestId, present only when
+            the originating client supplied one — the requesting client's
+            send-failure detector matches on this exactly.
 
     DispatchActionValue:
       description: Dispatch queue entry kind.
@@ -2055,6 +2062,16 @@ components:
             threads it to argv only for providers with a real --model flag.
         effort:
           $ref: '#/components/schemas/DispatchEffortValue'
+        requestId:
+          type: string
+          maxLength: 64
+          description: >-
+            Client-generated correlation id, echoed verbatim on every
+            dispatchUpdate for the queue entry this request created. The
+            wire has no send ack, so exact per-request correlation is the
+            only way a client can tell WHICH of its sends a broadcast
+            answers (two rapid sends to the same machine+action are
+            otherwise indistinguishable to the send-failure detector).
 
     DispatchEffortValue:
       description: >-

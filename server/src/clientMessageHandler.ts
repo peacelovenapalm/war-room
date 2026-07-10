@@ -146,6 +146,10 @@ export function handleClientMessage(
         // string-matched. Employee correlation (G3, §7.3) mirrors it.
         contractId: typeof msg.contractId === 'string' ? msg.contractId : undefined,
         employeeId: typeof msg.employeeId === 'string' ? msg.employeeId : undefined,
+        // Send correlation (asyncapi DispatchRequest.requestId): echoed on
+        // every dispatchUpdate so the sending client can match its own
+        // sends exactly (no fuzzy machine+action matching).
+        requestId: typeof msg.requestId === 'string' ? msg.requestId : undefined,
       });
       break;
     }

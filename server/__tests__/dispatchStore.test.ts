@@ -58,6 +58,41 @@ describe('DispatchStore.enqueue', () => {
     expect(typeof result.record.id).toBe('string');
   });
 
+  it('echoes the client requestId on every broadcast for that record (send correlation)', () => {
+    // Panel finding (dispatchFacts.ts:283): the client's silent-drop
+    // detector needs EXACT correlation — this echo is the server half.
+    const s = new DispatchStore(statePath, auditPath);
+    const broadcasts: Array<{ id: string; requestId?: string }> = [];
+    s.onUpdate((b) => broadcasts.push({ id: b.id, requestId: b.requestId }));
+    const result = s.enqueue({
+      action: 'dispatch',
+      machine: 'MACBOOK',
+      provider: 'claude',
+      cwd: '/Users/dev/proj',
+      prompt: 'list files',
+      requestId: 'req-abc-123',
+    });
+    expect(result.ok).toBe(true);
+    if (!result.ok) throw new Error('unreachable');
+    expect(result.record.requestId).toBe('req-abc-123');
+    expect(broadcasts).toHaveLength(1);
+    expect(broadcasts[0].requestId).toBe('req-abc-123');
+
+    // Overlong ids are DROPPED (never truncated — a truncated echo would
+    // mis-correlate); the record still enqueues.
+    const overlong = s.enqueue({
+      action: 'dispatch',
+      machine: 'MACBOOK',
+      provider: 'claude',
+      cwd: '/Users/dev/proj',
+      prompt: 'list files',
+      requestId: 'x'.repeat(65),
+    });
+    expect(overlong.ok).toBe(true);
+    if (!overlong.ok) throw new Error('unreachable');
+    expect(overlong.record.requestId).toBeUndefined();
+  });
+
   it('enqueues a valid focus request identified by sessionId', () => {
     const s = new DispatchStore(statePath, auditPath);
     const result = s.enqueue({ action: 'focus', machine: 'MACBOOK', sessionId: 'sess-1' });

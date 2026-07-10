@@ -127,15 +127,39 @@ describe('machineSupportsFocus', () => {
   });
 });
 
-describe('detectSendFailures', () => {
-  it('resolves silently once a matching entry arrives', () => {
+describe('detectSendFailures (per-request correlation)', () => {
+  it('resolves silently once the entry echoing THIS requestId arrives', () => {
+    const pending: PendingSend[] = [
+      { id: 'p1', machine: 'MACBOOK', action: 'dispatch', sentAt: 0 },
+    ];
+    const entries = [entry({ machine: 'MACBOOK', receivedAt: 100, requestId: 'p1' })];
+    const result = detectSendFailures(pending, entries, 200);
+    expect(result.stillPending).toHaveLength(0);
+    expect(result.failed).toHaveLength(0);
+  });
+
+  it('CORRELATION: one real ack never masks a DIFFERENT dropped dispatch', () => {
+    // Regression (panel finding, dispatchFacts.ts:283): two rapid dispatches
+    // to the same machine+action; only one reached the server. The fuzzy
+    // (machine, action, receivedAt>=sentAt) match marked BOTH as delivered,
+    // so the dropped one never showed "⚠ NOT QUEUED".
+    const pending: PendingSend[] = [
+      { id: 'p1', machine: 'MACBOOK', action: 'dispatch', sentAt: 0 },
+      { id: 'p2', machine: 'MACBOOK', action: 'dispatch', sentAt: 10 },
+    ];
+    const entries = [entry({ machine: 'MACBOOK', receivedAt: 100, requestId: 'p1' })];
+    const result = detectSendFailures(pending, entries, 1_600);
+    expect(result.failed.map((f) => f.id)).toEqual(['p2']);
+    expect(result.stillPending).toHaveLength(0);
+  });
+
+  it('CORRELATION: an entry with no requestId (chain/standing-order dispatch) matches nothing', () => {
     const pending: PendingSend[] = [
       { id: 'p1', machine: 'MACBOOK', action: 'dispatch', sentAt: 0 },
     ];
     const entries = [entry({ machine: 'MACBOOK', receivedAt: 100 })];
-    const result = detectSendFailures(pending, entries, 200);
-    expect(result.stillPending).toHaveLength(0);
-    expect(result.failed).toHaveLength(0);
+    const result = detectSendFailures(pending, entries, 1_600);
+    expect(result.failed.map((f) => f.id)).toEqual(['p1']);
   });
 
   it('reports a timed-out send with no matching entry as failed', () => {

@@ -788,12 +788,17 @@ export default function App() {
     setOpenPanel(kind);
   }, []);
 
-  const handleDispatchSend = useCallback((machine: string, action: 'dispatch') => {
-    pendingSendsRef.current = [
-      ...pendingSendsRef.current,
-      { id: crypto.randomUUID(), machine, action, sentAt: Date.now() },
-    ];
-  }, []);
+  const handleDispatchSend = useCallback(
+    (machine: string, action: 'dispatch', requestId: string) => {
+      // The pending id IS the wire requestId (CallModal generated it) — the
+      // tick's detectSendFailures matches the echoed dispatchUpdate on it.
+      pendingSendsRef.current = [
+        ...pendingSendsRef.current,
+        { id: requestId, machine, action, sentAt: Date.now() },
+      ];
+    },
+    [],
+  );
 
   const handleDispatchTodo = useCallback((prompt: string) => {
     setCallPrefill({ prompt });

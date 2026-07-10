@@ -138,6 +138,10 @@ export interface DispatchEntry {
   pid?: number;
   exitCode?: number;
   resultTail?: string;
+  /** Echo of the requestId THIS client (or another) sent with its
+   *  dispatchRequest — the send-failure detector's exact correlation key.
+   *  Absent for server-originated dispatches (chains, standing orders). */
+  requestId?: string;
   receivedAt: number;
 }
 
@@ -254,9 +258,16 @@ export function machineSupportsFocus(
 // ── Send-failure detection ──────────────────────────────────────────
 //
 // dispatchRequest has NO ack on the wire: an invalid send is silently
-// dropped. The only honest signal available client-side is absence.
+// dropped. The only honest signal available client-side is absence — and
+// absence is only decidable with EXACT correlation: the request carries a
+// client-generated requestId the server echoes on every dispatchUpdate
+// for that queue entry. (The old fuzzy machine+action+time match let one
+// real ack mask a DIFFERENT dropped dispatch — panel finding,
+// dispatchFacts.ts:283.)
 
 export interface PendingSend {
+  /** The requestId sent on the wire — matched against the echoed
+   *  DispatchEntry.requestId, nothing fuzzier. */
   id: string;
   machine: string;
   action: DispatchActionValue;
@@ -280,9 +291,7 @@ export function detectSendFailures(
   const stillPending: PendingSend[] = [];
   const failed: PendingSend[] = [];
   for (const p of pending) {
-    const matched = entries.some(
-      (e) => e.machine === p.machine && e.action === p.action && e.receivedAt >= p.sentAt,
-    );
+    const matched = entries.some((e) => e.requestId !== undefined && e.requestId === p.id);
     if (matched) continue;
     if (now - p.sentAt >= DISPATCH_SEND_TIMEOUT_MS) {
       failed.push(p);

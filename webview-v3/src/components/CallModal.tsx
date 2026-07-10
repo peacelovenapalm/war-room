@@ -36,7 +36,9 @@ export interface CallModalProps {
   onClose: () => void;
   prefill?: CallModalPrefill | null;
   send: (message: ClientMessage) => void;
-  onSend: (machine: string, action: 'dispatch') => void;
+  /** `requestId` is the correlation id sent on the wire — the caller's
+   *  send-failure detector matches the echoed dispatchUpdate on it. */
+  onSend: (machine: string, action: 'dispatch', requestId: string) => void;
   budget: BudgetSnapshotClient | null;
 }
 
@@ -134,6 +136,10 @@ export function CallModal({ isOpen, onClose, prefill, send, onSend, budget }: Ca
     // checks it) — TS's aliased-condition narrowing carries that fact
     // forward from here, so `provider` below is DispatchProvider, not ''.
     if (!canSubmit || !joined.ok || !joined.cwd) return;
+    // Correlation id (asyncapi DispatchRequest.requestId): echoed on every
+    // dispatchUpdate for this queue entry, so the silent-drop detector can
+    // tell exactly which send a broadcast answers.
+    const requestId = crypto.randomUUID();
     send({
       type: 'dispatchRequest',
       action: 'dispatch',
@@ -141,10 +147,11 @@ export function CallModal({ isOpen, onClose, prefill, send, onSend, budget }: Ca
       provider,
       cwd: joined.cwd,
       prompt,
+      requestId,
       ...(model.trim() !== '' ? { model: model.trim() } : {}),
       ...(showEffort && effort !== '' ? { effort } : {}),
     });
-    onSend(machine, 'dispatch');
+    onSend(machine, 'dispatch', requestId);
     onClose();
   };
 

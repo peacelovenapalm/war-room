@@ -267,6 +267,7 @@ export interface DispatchUpdate {
   pid?: number;
   exitCode?: number;
   resultTail?: string;
+  requestId?: string;
 }
 
 export type DispatchActionValue = 'dispatch' | 'focus';
@@ -794,6 +795,7 @@ export interface DispatchRequest {
   pid?: number;
   model?: string;
   effort?: DispatchEffortValue;
+  requestId?: string;
 }
 
 export type DispatchEffortValue = 'low' | 'medium' | 'high' | 'xhigh' | 'max';

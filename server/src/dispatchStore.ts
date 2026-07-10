@@ -63,6 +63,9 @@ export type DispatchEffort = (typeof DISPATCH_EFFORT_VALUES)[number];
  *  intentionally permissive (covers every provider's own naming scheme)
  *  while still rejecting anything that couldn't be a single argv token. */
 const DISPATCH_MODEL_PATTERN = /^[a-zA-Z0-9._/-]{1,64}$/;
+/** requestId cap (mirrors asyncapi maxLength 64) — overlong ids are DROPPED,
+ *  never truncated: a truncated echo would mis-correlate on the client. */
+const REQUEST_ID_MAX_CHARS = 64;
 
 export type DispatchAction = 'dispatch' | 'focus';
 export type DispatchStatus = 'ringing' | 'answered' | 'denied' | 'expired' | 'exited' | 'killed';
@@ -145,6 +148,9 @@ interface DispatchRecord {
    *  flagged in its own risk list). On a terminal exit 0, httpServer.ts's
    *  status route calls contractStore.completeByDispatch(contractId). */
   contractId?: string;
+  /** Send correlation (asyncapi DispatchRequest.requestId) — client-
+   *  generated, echoed on every broadcast for this record. */
+  requestId?: string;
   createdAt: number;
   updatedAt: number;
 }
@@ -169,6 +175,12 @@ export interface DispatchEnqueueInput {
   /** Contract correlation (G4, §6.2) — set explicitly by the webview's
    *  BRIEFING→DISPATCH prefill action. */
   contractId?: string;
+  /** Send correlation (asyncapi DispatchRequest.requestId) — a client-
+   *  generated id echoed verbatim on every broadcast for this record, so
+   *  the sending client's silent-drop detector matches exactly. Capped at
+   *  REQUEST_ID_MAX_CHARS; anything longer is dropped (never truncated —
+   *  a truncated id would mis-correlate). */
+  requestId?: string;
 }
 
 export type DispatchEnqueueResult =
@@ -195,6 +207,9 @@ export interface DispatchBroadcast {
    *  webview client is free to ignore them. */
   chainRunId?: string;
   chainStep?: number;
+  /** Send correlation echo (asyncapi DispatchUpdate.requestId) — present
+   *  only when the originating client supplied one. */
+  requestId?: string;
 }
 
 /** What a runner receives on `POST /api/dispatch/poll` — the ONLY place the
@@ -328,6 +343,12 @@ export class DispatchStore {
       chainStep: input.chainStep,
       employeeId: input.employeeId,
       contractId: input.contractId,
+      requestId:
+        typeof input.requestId === 'string' &&
+        input.requestId.length > 0 &&
+        input.requestId.length <= REQUEST_ID_MAX_CHARS
+          ? input.requestId
+          : undefined,
       createdAt: now,
       updatedAt: now,
     };
@@ -684,6 +705,7 @@ export class DispatchStore {
       resultTail: record.resultTail,
       chainRunId: record.chainRunId,
       chainStep: record.chainStep,
+      requestId: record.requestId,
     };
   }
 
