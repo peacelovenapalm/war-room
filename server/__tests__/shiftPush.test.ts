@@ -31,6 +31,7 @@ function makeReport(overrides: Partial<ShiftReport> = {}): ShiftReport {
     gatesAdvanced: 1,
     outputTokensPerTurn: 167,
     efficiency: 'LEAN',
+    reworkDismissed: 0,
     generatedAt: '2026-07-07T23:59:59.000Z',
     ...overrides,
   };
