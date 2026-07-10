@@ -118,7 +118,44 @@ Tune palette hexes in `props.py` (`PALETTE`) and the light rig in
 on schema violations, empty frames, frame overlap, or a sheet over
 ~1MB — never ship on a red gate.
 
-## Stage 3+ (not yet built)
+## Stage 3 — codex `$imagegen` lane
 
-codex `$imagegen` lane (portraits/signage, rectangular only), HTML
-sheet-viewer QA harness.
+Rectangular-only art (no alpha on this lane — anything needing
+transparency is Blender's job): `imagegen/`.
+
+```sh
+cd tools/asset-pipeline/imagegen
+./gen.sh portrait_01                  # one asset
+./gen.sh --category portraits         # every asset in a category
+./gen.sh --missing                    # every asset with no raw PNG yet
+python3 pack_imagegen.py              # stage + manifest + budget gate
+```
+
+| File | Role |
+| --- | --- |
+| `imagegen/spec.json` | locked style block + one prompt per asset (name, category, genSize, finalSize, purpose, prompt) |
+| `imagegen/gen.sh` | one `codex exec --skip-git-repo-check -s workspace-write` call per asset; `$imagegen` reaches codex literally via a python-built, single-quote-safe prompt (never re-expanded by the shell) — verified invocation pattern, Diablito 2026-07-06. Raw PNGs land in `out/imagegen-raw/` |
+| `imagegen/pack_imagegen.py` | stages raw PNGs into `webview-v3-assets/imagegen/<category>/`, downscales portraits to `finalSize`, writes `manifest.json` (schema: `{name, path, size, purpose}` — no anchor/rotation/frames, these aren't sprites) |
+
+Budget gate + fallback chain (same ~1.1MB philosophy as `pack.py`,
+hard-fails rather than shipping an oversized PNG): RGB save → if over
+budget, 256-color quantize → if still over (vintage-poster paper-grain
+noise resists deflate even at 256 colors), median-filter denoise +
+256-color requantize → denoise + 128-color requantize. All three
+posters that tripped the gate (`poster_stop_all`, `poster_ship_it`,
+`poster_help_chart`) cleared it at the denoise step with **zero**
+visible loss to text legibility (verified by re-reading the staged
+PNGs, not just checking file size).
+
+22 assets shipped, 22/22 on the first codex generation (0 regenerations
+needed): 12 dossier portraits (`portrait_01` doubles as the style
+anchor — its look is locked into `spec.json`'s `styleBlock` and reused
+verbatim in every other prompt for consistency), 6 wall posters/signage
+(gpt-image typography — STOP ALL, SHIP IT, WING A/B placards, HELP
+vocabulary chart, WAR ROOM logo board), 4 seamless-ish textures (wood
+floor, carpet, brick, corkboard).
+
+## Not yet built
+
+HTML sheet-viewer QA harness (screenshot + anchor/alignment check +
+manifest schema validation) — out of Stage 3 scope, still open.
