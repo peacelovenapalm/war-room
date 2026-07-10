@@ -62,7 +62,7 @@ describe('computeLevel', () => {
 describe('ProgressionStore', () => {
   it('awards XP for a completed turn and starts the streak at 1', () => {
     const p = new ProgressionStore(statePath);
-    p.recordTurnEnd(DAY1);
+    p.recordTurnEnd('test:turn', DAY1);
     const s = p.getSnapshot();
     expect(s.xp).toBe(XP_TURN_COMPLETED);
     expect(s.streakCurrent).toBe(1);
@@ -71,7 +71,7 @@ describe('ProgressionStore', () => {
 
   it('awards XP for an observed crisis resolution', () => {
     const p = new ProgressionStore(statePath);
-    p.recordCrisisResolved(DAY1);
+    p.recordCrisisResolved('test:crisis', DAY1);
     expect(p.getSnapshot().xp).toBe(XP_CRISIS_RESOLVED);
   });
 
@@ -82,9 +82,9 @@ describe('ProgressionStore', () => {
 
   it('does not double-count the streak for multiple turns on the same day', () => {
     const p = new ProgressionStore(statePath);
-    p.recordTurnEnd(DAY1);
-    p.recordTurnEnd(DAY1 + 60_000);
-    p.recordTurnEnd(DAY1 + 120_000);
+    p.recordTurnEnd('test:turn', DAY1);
+    p.recordTurnEnd('test:turn', DAY1 + 60_000);
+    p.recordTurnEnd('test:turn', DAY1 + 120_000);
     const s = p.getSnapshot();
     expect(s.streakCurrent).toBe(1);
     expect(s.xp).toBe(XP_TURN_COMPLETED * 3);
@@ -92,14 +92,14 @@ describe('ProgressionStore', () => {
 
   it('increments the streak on a consecutive day and resets on a gap', () => {
     const p = new ProgressionStore(statePath);
-    p.recordTurnEnd(DAY1);
-    p.recordTurnEnd(DAY2);
+    p.recordTurnEnd('test:turn', DAY1);
+    p.recordTurnEnd('test:turn', DAY2);
     expect(p.getSnapshot().streakCurrent).toBe(2);
-    p.recordTurnEnd(DAY3);
+    p.recordTurnEnd('test:turn', DAY3);
     expect(p.getSnapshot().streakCurrent).toBe(3);
     expect(p.getSnapshot().streakLongest).toBe(3);
     // DAY5 is a 2-day gap from DAY3 — streak resets to 1, longest is retained.
-    p.recordTurnEnd(DAY5);
+    p.recordTurnEnd('test:turn', DAY5);
     const s = p.getSnapshot();
     expect(s.streakCurrent).toBe(1);
     expect(s.streakLongest).toBe(3);
@@ -123,14 +123,14 @@ describe('ProgressionStore', () => {
   it('unlocks streakBronze/Silver/Gold at 3/7/30 days and never reverts them', () => {
     const p = new ProgressionStore(statePath);
     for (let i = 0; i < 7; i++) {
-      p.recordTurnEnd(DAY1 + i * 86_400_000);
+      p.recordTurnEnd('test:turn', DAY1 + i * 86_400_000);
     }
     let s = p.getSnapshot();
     expect(s.unlocks.streakBronze).toBe(true);
     expect(s.unlocks.streakSilver).toBe(true);
     expect(s.unlocks.streakGold).toBe(false);
     // Break the streak with a big gap — unlocks already earned must stay true.
-    p.recordTurnEnd(DAY1 + 30 * 86_400_000);
+    p.recordTurnEnd('test:turn', DAY1 + 30 * 86_400_000);
     s = p.getSnapshot();
     expect(s.streakCurrent).toBe(1);
     expect(s.unlocks.streakBronze).toBe(true);
@@ -151,7 +151,7 @@ describe('ProgressionStore', () => {
   it('unlocks level milestones as XP crosses the level-5/10 thresholds', () => {
     const p = new ProgressionStore(statePath);
     for (let i = 0; i < 500; i++) {
-      p.recordTurnEnd(DAY1 + i);
+      p.recordTurnEnd('test:turn', DAY1 + i);
     }
     const s = p.getSnapshot();
     expect(s.level).toBeGreaterThanOrEqual(5);
@@ -162,17 +162,17 @@ describe('ProgressionStore', () => {
     const p = new ProgressionStore(statePath);
     const seen: number[] = [];
     const unsubscribe = p.onChange((snap) => seen.push(snap.xp));
-    p.recordTurnEnd(DAY1);
-    p.recordCrisisResolved(DAY1);
+    p.recordTurnEnd('test:turn', DAY1);
+    p.recordCrisisResolved('test:crisis', DAY1);
     expect(seen).toEqual([XP_TURN_COMPLETED, XP_TURN_COMPLETED + XP_CRISIS_RESOLVED]);
     unsubscribe();
-    p.recordTurnEnd(DAY2);
+    p.recordTurnEnd('test:turn', DAY2);
     expect(seen).toHaveLength(2); // no further notifications after unsubscribe
   });
 
   it('persists and reloads state (survives restarts)', () => {
     const p1 = new ProgressionStore(statePath);
-    p1.recordTurnEnd(DAY1);
+    p1.recordTurnEnd('test:turn', DAY1);
     const p2 = new ProgressionStore(statePath);
     const s = p2.getSnapshot();
     expect(s.xp).toBeGreaterThanOrEqual(XP_TURN_COMPLETED);

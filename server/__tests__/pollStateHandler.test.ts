@@ -293,7 +293,7 @@ describe('applyPollStates', () => {
       { recordCrisisResolved },
     );
     expect(recordCrisisResolved).toHaveBeenCalledTimes(1);
-    expect(recordCrisisResolved).toHaveBeenCalledWith(2000);
+    expect(recordCrisisResolved).toHaveBeenCalledWith('crisis:agent:20@1000', 2000);
     // Re-block, then let the poller silently stop reporting it (ambiguous —
     // never a positive observation) — must NOT award XP.
     applyPollStates(
@@ -397,7 +397,11 @@ describe('applyPollStates — building buffs on crisis resolution (G2, GAME-DESI
       undefined,
       { recordCrisisResolved: economyRecordCrisisResolved },
     );
-    expect(economyRecordCrisisResolved).toHaveBeenCalledWith(2000, 0);
+    expect(economyRecordCrisisResolved).toHaveBeenCalledWith(
+      expect.stringMatching(/^crisis:agent:\d+@1000$/),
+      2000,
+      0,
+    );
 
     // Server Room with a qualifying PC_* furniture piece placed inside.
     economyRecordCrisisResolved.mockClear();
@@ -419,7 +423,11 @@ describe('applyPollStates — building buffs on crisis resolution (G2, GAME-DESI
       undefined,
       { recordCrisisResolved: economyRecordCrisisResolved },
     );
-    expect(economyRecordCrisisResolved).toHaveBeenCalledWith(4000, SERVER_ROOM_CASH_BONUS_PCT);
+    expect(economyRecordCrisisResolved).toHaveBeenCalledWith(
+      expect.stringMatching(/^crisis:agent:\d+@3000$/),
+      4000,
+      SERVER_ROOM_CASH_BONUS_PCT,
+    );
   });
 
   it('a missing layout degrades to neutral (0% / no bonus), never throws', () => {
@@ -448,7 +456,11 @@ describe('applyPollStates — building buffs on crisis resolution (G2, GAME-DESI
       ),
     ).not.toThrow();
     expect(employeeRecordCrisisResolved).toHaveBeenCalledWith('MACBOOK', '/test', 2000, 0);
-    expect(economyRecordCrisisResolved).toHaveBeenCalledWith(2000, 0);
+    expect(economyRecordCrisisResolved).toHaveBeenCalledWith(
+      expect.stringMatching(/^crisis:agent:\d+@1000$/),
+      2000,
+      0,
+    );
   });
 });
 

@@ -588,13 +588,22 @@ export class DispatchStore {
   /** Server-side-only lookup (never sent over the wire) — the record's
    *  provider/employeeId correlation, consumed by httpServer.ts's status
    *  route to fire economy/employee/budget dispatch-exit side effects
-   *  after reportStatus() commits the terminal transition. */
+   *  after reportStatus() commits the terminal transition. machine/cwd
+   *  (v3 stage 2) resolve the owning staff lineage for the dossier and
+   *  rivalry derivation planes — still server-side only. */
   getRecord(
     id: string,
   ):
     | Pick<
         DispatchRecord,
-        'provider' | 'employeeId' | 'chainRunId' | 'chainStep' | 'contractId' | 'status'
+        | 'provider'
+        | 'employeeId'
+        | 'chainRunId'
+        | 'chainStep'
+        | 'contractId'
+        | 'status'
+        | 'machine'
+        | 'cwd'
       >
     | undefined {
     const record = this.ensureLoaded().get(id);
@@ -609,6 +618,32 @@ export class DispatchStore {
       // straggler output POST after terminal status must not resurrect an
       // evicted ring entry that no lifecycle site would ever evict again.
       status: record.status,
+      machine: record.machine,
+      cwd: record.cwd,
+    };
+  }
+
+  /** Rework re-dispatch prefill (v3 Scrap & Rework Bin — KICKOFF-v3.1 §1
+   *  "failure loop"): the ORIGINAL request parameters of a dispatch,
+   *  shaped as a fresh enqueue input. Server-side only — the full prompt
+   *  never rides the broadcast plane; the rework route feeds this straight
+   *  back into enqueue(), so the re-dispatch passes every NORMAL gate
+   *  (ringing cap, runner allowlist decision, TTL) — never a bypass.
+   *  Deliberately drops chainRunId/chainStep/employeeId/contractId: a
+   *  rework is a fresh conscious human act, not a replay of the old
+   *  correlation. Only 'dispatch' actions qualify (focus has nothing to
+   *  rework). */
+  getRedispatchInput(id: string): DispatchEnqueueInput | undefined {
+    const record = this.ensureLoaded().get(id);
+    if (!record || record.action !== 'dispatch') return undefined;
+    return {
+      action: 'dispatch',
+      machine: record.machine,
+      provider: record.provider,
+      cwd: record.cwd,
+      prompt: record.prompt,
+      model: record.model,
+      effort: record.effort,
     };
   }
 

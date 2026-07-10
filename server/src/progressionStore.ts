@@ -36,6 +36,7 @@ import {
   computeLevel as computeLevelCurve,
   xpForLevel as xpForLevelCurve,
 } from '../../core/src/leveling.js';
+import type { EconomyCause, EconomyLedgerEntry } from '../../core/src/messages.js';
 import { LAYOUT_FILE_DIR } from './constants.js';
 import type { ShiftReport } from './shiftStats.js';
 
@@ -80,6 +81,10 @@ interface StreakState {
   lastActiveDate: string | null;
 }
 
+/** XP receipt ring-buffer cap — same size discipline as economyStore's
+ *  LEDGER_CAP (the two receipt surfaces stay symmetrical). */
+const XP_LEDGER_CAP = 200;
+
 /** Persisted progression state. */
 interface ProgressionData {
   xp: number;
@@ -88,6 +93,11 @@ interface ProgressionData {
   leanDayCount: number;
   /** Permanent achievement flags — data only; mechanic #5 renders decor from these. */
   unlocks: Record<string, boolean>;
+  /** XP receipt lines (v3 REP receipts — currency always 'xp'): every XP
+   *  movement carries a mandatory cause naming the observed source event.
+   *  The XP TOTAL predates receipts; the ledger only covers movements made
+   *  since receipts existed (no backfill — never guessed). */
+  ledger: EconomyLedgerEntry[];
 }
 
 /** Broadcast-friendly snapshot (what goes out over the WS plane / GET /api/progression). */
@@ -99,6 +109,7 @@ export interface ProgressionSnapshot {
   streakCurrent: number;
   streakLongest: number;
   unlocks: Record<string, boolean>;
+  ledger: EconomyLedgerEntry[];
 }
 
 /** Day-close summary ShiftStats hands to the progression store's onDayClose hook. */
@@ -130,6 +141,7 @@ function emptyData(): ProgressionData {
     streak: { current: 0, longest: 0, lastActiveDate: null },
     leanDayCount: 0,
     unlocks,
+    ledger: [],
   };
 }
 
@@ -186,33 +198,59 @@ export class ProgressionStore {
 
   /** A completed real turn (Claude sessions only — callers filter out
    *  coworker heartbeats, same rule as shiftStats.recordTurnEnd). Awards XP
-   *  and touches today's streak. */
-  recordTurnEnd(now: number = Date.now()): void {
+   *  and touches today's streak. `sourceRef` names the observed Stop event
+   *  (mandatory receipt ref — v3 REP receipts; the type system refuses a
+   *  ref-less mutation, same rule as economyStore). */
+  recordTurnEnd(sourceRef: string, now: number = Date.now()): void {
     const data = this.ensureLoaded();
     data.xp += XP_TURN_COMPLETED;
+    this.appendLedger(now, XP_TURN_COMPLETED, {
+      label: 'turn-completed',
+      sourceEventRefs: [sourceRef],
+    });
     this.touchStreak(data, now);
     this.finish(now);
   }
 
   /** An OBSERVED crisis resolution (real state transition, never a stale
    *  sweep clear — callers must not call this for TTL/poller-silence
-   *  clears). Awards XP only. */
-  recordCrisisResolved(now: number = Date.now()): void {
+   *  clears). Awards XP only. `sourceRef` names the resolved crisis
+   *  episode (mandatory receipt ref). */
+  recordCrisisResolved(sourceRef: string, now: number = Date.now()): void {
     const data = this.ensureLoaded();
     data.xp += XP_CRISIS_RESOLVED;
+    this.appendLedger(now, XP_CRISIS_RESOLVED, {
+      label: 'crisis-resolved',
+      sourceEventRefs: [sourceRef],
+    });
     this.finish(now);
   }
 
   /** A shift-report day closed with a grade (wired via ShiftStats'
    *  onDayClose callback). Awards a one-time bonus scaled by efficiency —
    *  LOWER spend always grades better and earns MORE, never less. Skips
-   *  days with zero completed turns (nothing to grade). */
+   *  days with zero completed turns (nothing to grade). Receipt ref: the
+   *  closed real day itself (`shift-day:<date>`). */
   recordShiftDayClosed(closed: DayCloseSummary, now: number = Date.now()): void {
     if (closed.turnsCompleted <= 0 || closed.efficiency === null) return;
     const data = this.ensureLoaded();
     data.xp += XP_SHIFT_GRADE_BONUS[closed.efficiency];
+    this.appendLedger(now, XP_SHIFT_GRADE_BONUS[closed.efficiency], {
+      label: `shift-grade-${closed.efficiency}`,
+      sourceEventRefs: [`shift-day:${closed.date}`],
+    });
     if (closed.efficiency === 'LEAN') data.leanDayCount += 1;
     this.finish(now);
+  }
+
+  /** Append an XP receipt line (currency always 'xp'; `reason` mirrors
+   *  cause.label, same wire discipline as economyStore.appendLedger). */
+  private appendLedger(ts: number, delta: number, cause: EconomyCause): void {
+    const data = this.ensureLoaded();
+    data.ledger.push({ ts, delta, currency: 'xp', reason: cause.label, cause });
+    if (data.ledger.length > XP_LEDGER_CAP) {
+      data.ledger.splice(0, data.ledger.length - XP_LEDGER_CAP);
+    }
   }
 
   private touchStreak(data: ProgressionData, now: number): void {
@@ -255,6 +293,7 @@ export class ProgressionStore {
       streakCurrent: data.streak.current,
       streakLongest: data.streak.longest,
       unlocks: { ...data.unlocks },
+      ledger: [...data.ledger],
     };
   }
 
@@ -276,6 +315,10 @@ export class ProgressionStore {
           },
           leanDayCount: raw.leanDayCount ?? 0,
           unlocks: { ...base.unlocks, ...(raw.unlocks ?? {}) },
+          // Sidecars written before XP receipts existed lack the ledger —
+          // start empty (no backfill: the pre-receipt XP total stays a
+          // total; receipts only cover movements observed from now on).
+          ledger: Array.isArray(raw.ledger) ? raw.ledger : [],
         };
       }
     } catch {

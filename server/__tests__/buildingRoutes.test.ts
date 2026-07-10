@@ -141,7 +141,7 @@ describe('POST /api/building/expand', () => {
     const started = await startFullServer();
     server = started.server;
     runtime = started.runtime;
-    economyStore.addCash(10_000, 'test-seed');
+    economyStore.addCash(10_000, { label: 'test-seed', sourceEventRefs: ['test:test-seed'] });
 
     const res1 = await fetch(`http://127.0.0.1:${started.config.port}/api/building/expand`, {
       method: 'POST',
@@ -254,7 +254,7 @@ describe('POST /api/building/room — Dev Pit XP bonus (G2 acceptance criterion)
     expect(assignBody.ok).toBe(true);
 
     // Tag a Dev Pit over the desk (needs Cash).
-    economyStore.addCash(1000, 'test-seed');
+    economyStore.addCash(1000, { label: 'test-seed', sourceEventRefs: ['test:test-seed'] });
     const roomRes = await fetch(`http://127.0.0.1:${port}/api/building/room`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },

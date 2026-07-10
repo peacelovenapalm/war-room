@@ -148,7 +148,13 @@ export function addRoom(rect: RoomRect, type: RoomType, now: number = Date.now()
     }
   }
 
-  if (!economyStore.spend(cost, `room-shell:${type}`, now)) {
+  if (
+    !economyStore.spend(
+      cost,
+      { label: `room-shell:${type}`, sourceEventRefs: [`player-action:build-room:${type}`] },
+      now,
+    )
+  ) {
     return { ok: false, reason: 'insufficient-cash' };
   }
 
@@ -189,7 +195,13 @@ export function buyFurniture(
     return { ok: false, reason: 'tile-occupied' };
   }
 
-  if (!economyStore.spend(cost, `furniture:${type}`, now)) {
+  if (
+    !economyStore.spend(
+      cost,
+      { label: `furniture:${type}`, sourceEventRefs: [`player-action:buy-furniture:${type}`] },
+      now,
+    )
+  ) {
     return { ok: false, reason: 'insufficient-cash' };
   }
 
@@ -210,7 +222,11 @@ export function sell(uid: string, now: number = Date.now()): BuildResult {
   const room = (layout.rooms ?? []).find((r) => r.uid === uid);
   if (room) {
     const refund = Math.round((ROOM_COST[room.type] ?? 0) * (SELL_REFUND_PCT / 100));
-    economyStore.spend(-refund, `sell-room:${room.type}`, now);
+    economyStore.spend(
+      -refund,
+      { label: `sell-room:${room.type}`, sourceEventRefs: [`player-action:sell:${uid}`] },
+      now,
+    );
     const newLayout: OfficeLayout = {
       ...layout,
       rooms: (layout.rooms ?? []).filter((r) => r.uid !== uid),
@@ -224,7 +240,11 @@ export function sell(uid: string, now: number = Date.now()): BuildResult {
     const cost = FURNITURE_COST[furniture.type];
     if (cost === undefined) return { ok: false, reason: 'not-sellable' };
     const refund = Math.round(cost * (SELL_REFUND_PCT / 100));
-    economyStore.spend(-refund, `sell-furniture:${furniture.type}`, now);
+    economyStore.spend(
+      -refund,
+      { label: `sell-furniture:${furniture.type}`, sourceEventRefs: [`player-action:sell:${uid}`] },
+      now,
+    );
     const newLayout: OfficeLayout = {
       ...layout,
       furniture: layout.furniture.filter((f) => f.uid !== uid),

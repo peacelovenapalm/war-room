@@ -30,6 +30,14 @@ export const CASH_STREAK_DAY_TOUCH = 10;
  *  Nonzero exits pay 0, never negative. */
 export const CASH_PER_DISPATCH_EXIT_0 = 5;
 export const DISPATCH_CASH_DAILY_CAP = 50;
+/** v3 Living Studio wall contract (KICKOFF-v3.1 §1 "Aging contracts"):
+ *  paid ONLY when the contract's real vault todo disappears from the
+ *  compiled daily list (the observed done signal — studioContractIngest.ts).
+ *  Bonus-only: no penalty exists anywhere on the contract path (quiet
+ *  expiry pays and costs nothing). Sized between a crisis resolution (10)
+ *  and a LEAN shift grade (100) — a closed real todo outranks a single
+ *  unblock but never dwarfs a graded day. */
+export const STUDIO_CONTRACT_REWARD_CASH = 25;
 
 // ── Reputation sources ────────────────────────────────────────────────
 export const REP_SHIFT_GRADE: Record<NonNullable<ShiftReport['efficiency']>, number> = {
@@ -40,6 +48,22 @@ export const REP_SHIFT_GRADE: Record<NonNullable<ShiftReport['efficiency']>, num
 export const REP_STREAK_MILESTONE = { d3: 10, d7: 30, d30: 120 };
 export const REP_FIRED_PENALTY = -10;
 export const REP_RETIRED_BONUS = 10;
+
+// ── Perfect-ops day (v3 stage 3 — KICKOFF-v3.1 WS-C item 2) ───────────
+/** One-time Reputation bonus for a perfect-ops local day: real work
+ *  happened (turnsCompleted > 0 — absence of work never mints, same
+ *  doctrine as the Steady Hands trait) AND zero crises went unanswered
+ *  past the N-minute window AND zero dispatches exited nonzero. Sized
+ *  between a STEADY (1) and LEAN (3) shift grade: flawless ops
+ *  complements the efficiency grade, never dwarfs it. Bonus-only — a
+ *  non-perfect day pays 0 and costs nothing (no penalty path exists). */
+export const PERFECT_OPS_REP_BONUS = 2;
+/** Default N (minutes a crisis may sit unanswered before the day stops
+ *  being perfect). 30 minutes ≈ the fire→alarm crisis-aging horizon —
+ *  generous against Greg's observed response pattern (a target above
+ *  natural pace would be a dark pattern). Ops override:
+ *  WAR_ROOM_PERFECT_OPS_MAX_MINUTES=<minutes> (read per evaluation). */
+export const PERFECT_OPS_DEFAULT_MAX_UNANSWERED_MINUTES = 30;
 
 // ── Reputation decay (soft-fail, §3.2) ────────────────────────────────
 export const REP_DECAY_DARK_DAY = 1;

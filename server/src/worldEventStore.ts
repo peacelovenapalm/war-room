@@ -26,6 +26,7 @@ import * as fs from 'fs';
 import * as os from 'os';
 import * as path from 'path';
 
+import type { EconomyCause } from '../../core/src/messages.js';
 import { WORLD_EVENT_GLYPHS } from '../../core/src/worldEventGlyphs.js';
 import { LAYOUT_FILE_DIR } from './constants.js';
 
@@ -217,8 +218,11 @@ export interface WorldEventTickDeps {
   online: boolean;
   isVacationActive: () => boolean;
   getGrime: () => number;
-  awardCash: (amount: number, reason: string) => void;
-  awardReputation: (amount: number, reason: string) => void;
+  /** Awards carry a full EconomyCause receipt (v3 REP receipts): refs name
+   *  the fired world event (`world-event:<id>@<ts>` — the event-log entry
+   *  is the observed source). Injected — never imports economyStore. */
+  awardCash: (amount: number, cause: EconomyCause) => void;
+  awardReputation: (amount: number, cause: EconomyCause) => void;
   pickLowMoodEmployeeId: () => string | undefined;
   pickRandomEmployeeId: () => string | undefined;
   nudgeEmployeeMoodBoost: (id: string, delta: number) => void;
@@ -292,10 +296,16 @@ export class WorldEventStore {
       case 'inspection': {
         const grime = deps.getGrime();
         if (grime <= INSPECTION_GRIME_THRESHOLD) {
-          deps.awardReputation(INSPECTION_REP_CLEAN, 'world-event-inspection');
+          deps.awardReputation(INSPECTION_REP_CLEAN, {
+            label: 'world-event-inspection',
+            sourceEventRefs: [`world-event:${def.id}@${now}`],
+          });
           return 'Surprise inspection — the office passed with flying colors.';
         }
-        deps.awardReputation(INSPECTION_REP_DIRTY, 'world-event-inspection');
+        deps.awardReputation(INSPECTION_REP_DIRTY, {
+          label: 'world-event-inspection',
+          sourceEventRefs: [`world-event:${def.id}@${now}`],
+        });
         return 'Surprise inspection — the office needs a clean-up.';
       }
       case 'rival_poach': {
@@ -325,7 +335,10 @@ export class WorldEventStore {
         const award = Math.min(roll, remaining);
         if (award > 0) {
           data.flavorCashToday += award;
-          deps.awardCash(award, 'world-event-flavor-bonus');
+          deps.awardCash(award, {
+            label: 'world-event-flavor-bonus',
+            sourceEventRefs: [`world-event:${def.id}@${now}`],
+          });
           return `Found a coffee gift card (+$${award}).`;
         }
         return 'Found a coffee gift card, but the daily luck ran out.';

@@ -41,6 +41,11 @@ export type ServerMessage =
   | BudgetUpdate
   | AutomationStopped
   | WorldEventFired
+  | ContractsUpdated
+  | DossierUpdated
+  | MatchDayEvent
+  | ReworkBinUpdated
+  | RivalryUpdated
   | LayoutLoaded
   | FurnitureAssetsLoaded
   | CharacterSpritesLoaded
@@ -232,6 +237,22 @@ export interface ProgressionUpdate {
   streakCurrent: number;
   streakLongest: number;
   unlocks: Record<string, boolean>;
+  ledger: EconomyLedgerEntry[];
+}
+
+export interface EconomyLedgerEntry {
+  ts: number;
+  delta: number;
+  currency: EconomyCurrencyValue;
+  reason: string;
+  cause: EconomyCause;
+}
+
+export type EconomyCurrencyValue = 'cash' | 'reputation' | 'xp';
+
+export interface EconomyCause {
+  label: string;
+  sourceEventRefs: string[];
 }
 
 export interface DispatchUpdate {
@@ -346,15 +367,6 @@ export interface EconomyUpdate {
   bayCount: number;
   ledger: EconomyLedgerEntry[];
 }
-
-export interface EconomyLedgerEntry {
-  ts: number;
-  delta: number;
-  currency: EconomyCurrencyValue;
-  reason: string;
-}
-
-export type EconomyCurrencyValue = 'cash' | 'reputation';
 
 export interface OfficeExpanded {
   type: 'officeExpanded';
@@ -474,6 +486,135 @@ export interface WorldEventFired {
   ts: number;
   summary: string;
 }
+
+export interface ContractsUpdated {
+  type: 'contractsUpdated';
+  contract: StudioContract;
+}
+
+export interface StudioContract {
+  id: string;
+  sourceTodo: StudioContractSourceTodo;
+  status: StudioContractStatusValue;
+  progress: StudioContractProgressEvent[];
+  reward: number;
+  acceptedAt?: number;
+  quietExpiryAt: number;
+  completedAt?: number;
+  expiredAt?: number;
+}
+
+export interface StudioContractSourceTodo {
+  file: string;
+  line: number;
+  text: string;
+}
+
+export type StudioContractStatusValue =
+  | 'offered'
+  | 'accepted'
+  | 'progressing'
+  | 'completed'
+  | 'expired';
+
+export interface StudioContractProgressEvent {
+  ts: number;
+  sourceRef: string;
+  summary: string;
+}
+
+export interface DossierUpdated {
+  type: 'dossierUpdated';
+  dossier: StaffDossier;
+}
+
+export interface StaffDossier {
+  staffId: string;
+  displayName: string;
+  traits: DossierTrait[];
+  history: string;
+  portraitRef?: string;
+}
+
+export interface DossierTrait {
+  name: string;
+  earnedFrom: string[];
+  earnedAt: number;
+}
+
+export interface MatchDayEvent {
+  type: 'matchDayEvent';
+  fixtureId: string;
+  chainRunId: string;
+  phase: MatchDayPhaseValue;
+  events: MatchDayFeedEvent[];
+  result?: MatchDayResult;
+}
+
+export type MatchDayPhaseValue = 'pre' | 'live' | 'result';
+
+export interface MatchDayFeedEvent {
+  ts: number;
+  kind: string;
+  sourceRef: string;
+  commentary: string;
+}
+
+export interface MatchDayResult {
+  verdict: MatchVerdictValue;
+  tests: MatchDayAxis;
+  build: MatchDayAxis;
+  scope: MatchDayAxis;
+  burn: MatchDayAxis;
+}
+
+export type MatchVerdictValue = 'W' | 'D' | 'L';
+
+export interface MatchDayAxis {
+  status: MatchDayAxisStatusValue;
+  value?: number;
+  sourceRef?: string;
+}
+
+export type MatchDayAxisStatusValue = 'REAL' | 'NO_DATA';
+
+export interface ReworkBinUpdated {
+  type: 'reworkBinUpdated';
+  item: ReworkBinItem;
+}
+
+export interface ReworkBinItem {
+  id: string;
+  source: ReworkBinSourceValue;
+  failureRef: ReworkFailureRef;
+  status: ReworkBinStatusValue;
+  dismissedReason?: string;
+  createdAt: number;
+  resolvedAt?: number;
+}
+
+export type ReworkBinSourceValue = 'dispatch' | 'crisis';
+
+export interface ReworkFailureRef {
+  id: string;
+  excerpt: string;
+}
+
+export type ReworkBinStatusValue = 'piled' | 'reworked' | 'dismissed';
+
+export interface RivalryUpdated {
+  type: 'rivalryUpdated';
+  pair: RelationshipPair;
+}
+
+export interface RelationshipPair {
+  staffIds: string[];
+  kind: RelationshipKindValue;
+  evidence: string[];
+  activeWarning: boolean;
+}
+
+export type RelationshipKindValue = 'rivalry' | 'bond';
 
 export interface LayoutLoaded {
   type: 'layoutLoaded';

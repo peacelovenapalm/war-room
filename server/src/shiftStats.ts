@@ -23,6 +23,7 @@ import type { Briefing } from './briefingProvider.js';
 import { getBriefing } from './briefingProvider.js';
 import { contractStore } from './contractStore.js';
 import { economyStore } from './economyStore.js';
+import { perfectOpsDay } from './perfectOpsDay.js';
 import { progression } from './progressionStore.js';
 import { pushShiftReport } from './shiftPush.js';
 
@@ -51,6 +52,10 @@ interface ShiftDay {
   /** Sum of resolved blocked episode durations (mean = total / resolved). */
   blockedMsTotal: number;
   longestBlockedMs: number;
+  /** Rework-bin crates dismissed today (v3 failure loop — dismiss is a
+   *  first-class verb and is COUNTED, never shamed: a plain number on the
+   *  scorecard with zero grade impact). */
+  reworkDismissed: number;
   baseline?: BriefingBaseline;
 }
 
@@ -71,6 +76,8 @@ export interface ShiftReport {
   outputTokensPerTurn: number | null;
   /** WORD grade for the efficiency score (colorblind rule: word, not color). */
   efficiency: 'LEAN' | 'STEADY' | 'HEAVY' | null;
+  /** Rework-bin crates dismissed today (v3 — informational count only). */
+  reworkDismissed: number;
   generatedAt: string;
 }
 
@@ -93,6 +100,7 @@ function emptyDay(date: string): ShiftDay {
     crisesResolved: 0,
     blockedMsTotal: 0,
     longestBlockedMs: 0,
+    reworkDismissed: 0,
   };
 }
 
@@ -146,6 +154,11 @@ export class ShiftStats {
           contractStore.mintDaily();
           if (new Date().getDay() === 1) contractStore.mintWeekly();
         }
+        // Perfect-ops day (v3 stage 3): same day-close call site — the
+        // closed report's real turnsCompleted is the activity floor;
+        // the tracker holds the day's crisis/dispatch verdicts. Single
+        // bonus event with receipts, bonus-only, idempotent per date.
+        perfectOpsDay.recordDayClose(report);
       });
   }
 
@@ -223,6 +236,7 @@ export class ShiftStats {
             : perTurn <= EFFICIENCY_STEADY_MAX
               ? 'STEADY'
               : 'HEAVY',
+      reworkDismissed: day.reworkDismissed,
       generatedAt: new Date(now).toISOString(),
     };
   }
@@ -257,6 +271,13 @@ export class ShiftStats {
     if (this.openBlocked.has(key)) return; // already burning
     this.openBlocked.set(key, since);
     day.crisesIgnited++;
+    this.persist(now);
+  }
+
+  /** A rework-bin crate was dismissed (v3 failure loop — the REQUIRED
+   *  dismiss verb, counted on the scorecard; no grade or award effect). */
+  recordReworkDismissed(now: number = Date.now()): void {
+    this.rollDay(now).reworkDismissed++;
     this.persist(now);
   }
 
@@ -315,6 +336,9 @@ export class ShiftStats {
         }
         delete raw.openBlocked;
         delete raw.yesterdayReport;
+        // Sidecars written before the v3 rework counter existed lack the
+        // field — normalize rather than reset the whole day.
+        if (typeof raw.reworkDismissed !== 'number') raw.reworkDismissed = 0;
         return raw;
       }
     } catch {

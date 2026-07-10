@@ -58,6 +58,42 @@ export type EmployeeCrisisXpSink = Pick<EmployeeStore, 'recordCrisisResolved' | 
  *  TTL sweep. */
 export type EconomyCrisisSink = Pick<EconomyStore, 'recordCrisisResolved'>;
 
+/** v3 Living Studio derivation sinks (WS-C stage 2). Every callback is an
+ *  OBSERVED fact, never an inference:
+ *   - onCrisisStarted: the poller explicitly reported a new blocked state
+ *     (consumed for bounce detection — dossierDerivation.ts).
+ *   - onCrisisResolved: the poller explicitly reported a non-blocked state
+ *     for a previously blocked session, with the MEASURED duration — the
+ *     same real-transition contract CrisisXpSink holds (never a stale
+ *     sweep, never the vanished clear).
+ *   - onCrisisAbandoned: fired ONLY for the vanished-while-blocked
+ *     per-tick clear (the session left the poller's report while its last
+ *     observed state was blocked — it ended without ever being unblocked).
+ *     The TTL sweep deliberately never fires this: poller silence says
+ *     nothing about the session (ambiguous ≠ observed). */
+export interface V3CrisisSinks {
+  onCrisisStarted?: (
+    machine: string | undefined,
+    projectDir: string,
+    agentId: number,
+    now: number,
+  ) => void;
+  onCrisisResolved?: (
+    machine: string | undefined,
+    projectDir: string,
+    agentId: number,
+    durationMs: number,
+    now: number,
+  ) => void;
+  onCrisisAbandoned?: (
+    machine: string | undefined,
+    projectDir: string,
+    agentId: number,
+    waitingFor: string | undefined,
+    now: number,
+  ) => void;
+}
+
 /** Poll states older than this are swept (poller assumed dead). */
 export const POLL_STATE_TTL_MS = 60_000;
 /** Sweep cadence. */
@@ -159,6 +195,7 @@ export function applyPollStates(
   progressionSink?: CrisisXpSink,
   employeeSink?: EmployeeCrisisXpSink,
   economySink?: EconomyCrisisSink,
+  v3Sinks?: V3CrisisSinks,
 ): { matched: number; cleared: number } {
   const machineAgents: Array<[number, AgentState]> = [];
   for (const [id, agent] of store) {
@@ -181,12 +218,16 @@ export function applyPollStates(
     // Shift report: blocked episodes start/end on state transitions.
     if (entry.state === 'blocked' && prev?.state !== 'blocked') {
       stats?.startBlocked(`agent:${agentId}`, now, now);
+      v3Sinks?.onCrisisStarted?.(agent.machine, agent.projectDir, agentId, now);
     } else if (prev?.state === 'blocked' && entry.state !== 'blocked') {
       stats?.endBlocked(`agent:${agentId}`, now);
       // An OBSERVED resolution (the poller explicitly reported a new,
       // non-blocked state) — never fires for the silent "no longer
       // reported" clear below or the TTL sweep (see CrisisXpSink doc).
-      progressionSink?.recordCrisisResolved(now);
+      // Receipt ref (v3 REP receipts): the resolved crisis episode,
+      // identified by the agent and the observed blocked-transition time.
+      const crisisSourceRef = `crisis:agent:${agentId}@${prev.since}`;
+      progressionSink?.recordCrisisResolved(crisisSourceRef, now);
       // Building buffs (G2, GAME-DESIGN §5.4/§5.5) — point-in-time layout
       // read at the moment of the real, observed resolution (never cached,
       // never client-computed), same pattern as hookEventHandler.ts's Dev
@@ -206,7 +247,10 @@ export function applyPollStates(
         }
       }
       employeeSink?.recordCrisisResolved(agent.machine, agent.projectDir, now, crisisXpBonusPct);
-      economySink?.recordCrisisResolved(now, cashBonusPct);
+      economySink?.recordCrisisResolved(crisisSourceRef, now, cashBonusPct);
+      // v3 (stage 2): the measured unblock duration, anchored to the real
+      // blocked-transition time (`since`) — same observed-only contract.
+      v3Sinks?.onCrisisResolved?.(agent.machine, agent.projectDir, agentId, now - prev.since, now);
     }
     // `since` survives refresh ticks while the STATE VALUE is unchanged — it is
     // the transition time that anchors crisis aging (smoke → fire → alarm).
@@ -236,7 +280,20 @@ export function applyPollStates(
   let cleared = 0;
   for (const [agentId, agent] of machineAgents) {
     if (agent.pollState && !seenAgentIds.has(agentId)) {
-      if (agent.pollState.state === 'blocked') stats?.endBlocked(`agent:${agentId}`, now);
+      if (agent.pollState.state === 'blocked') {
+        stats?.endBlocked(`agent:${agentId}`, now);
+        // v3 (stage 2): the session left the poller's report while its
+        // last observed state was blocked — it ended without ever being
+        // unblocked. The one crisis path that feeds the rework bin; the
+        // TTL sweep (ambiguous poller silence) never does.
+        v3Sinks?.onCrisisAbandoned?.(
+          agent.machine,
+          agent.projectDir,
+          agentId,
+          agent.pollState.waitingFor,
+          now,
+        );
+      }
       agent.pollState = undefined;
       cleared++;
       store.broadcast({ type: 'agentPollState', id: agentId });
