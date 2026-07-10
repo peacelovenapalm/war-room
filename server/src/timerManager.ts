@@ -31,6 +31,7 @@ export function clearAgentActivity(
   }
 
   agent.isWaiting = false;
+  agent.awaitingInput = false;
   agent.permissionSent = false;
   cancelPermissionTimer(agentId, permissionTimers);
   agents.broadcast({ type: 'agentToolsClear', id: agentId });
@@ -72,6 +73,7 @@ export function startWaitingTimer(
     const agent = agents.get(agentId);
     if (agent) {
       agent.isWaiting = true;
+      agent.awaitingInput = false;
     }
     agents.broadcast({
       type: 'agentStatus',

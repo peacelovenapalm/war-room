@@ -22,6 +22,12 @@ export interface AgentState {
   activeSubagentToolNames: Map<string, Map<string, string>>; // parentToolId → (subToolId → toolName)
   backgroundAgentToolIds: Set<string>; // tool IDs for run_in_background Agent calls (stay alive until queue-operation)
   isWaiting: boolean;
+  /** Idle-prompt discrimination of the LAST `agentStatus` broadcast: true =
+   *  "Waiting for input" (idle_prompt), false/undefined = merely done/active.
+   *  Mirrored beside every agentStatus broadcast so webviewReady can REPLAY
+   *  the hook-plane NEEDS INPUT state to a reconnecting client — the same
+   *  M4 pattern agentPollState uses (clientMessageHandler.ts step 8). */
+  awaitingInput?: boolean;
   permissionSent: boolean;
   hadToolsInTurn: boolean;
   /** Workspace folder name (only set for multi-root workspaces) */

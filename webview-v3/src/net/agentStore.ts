@@ -80,11 +80,25 @@ export function agentIdentity(record: Pick<AgentRecord, 'id' | 'machine' | 'name
 export function reduceAgents(agents: AgentMap, message: ServerMessage, now = Date.now()): AgentMap {
   switch (message.type) {
     case 'existingAgents': {
+      // RECONNECT MERGE: identity fields come fresh from the message (server
+      // truth), but live channels (status/awaitingInput/toolPermission/poll/
+      // tokens) are PRESERVED for ids we already track. A reconnect resends
+      // existingAgents, and the server cannot re-fire agentToolPermission or
+      // agentStatus for a gate that is STILL pending — resetting to
+      // baseRecord would silently un-flag a genuinely blocked agent (and the
+      // poll wipe made FAILED agents dip to WAITING for one tick, corrupting
+      // debris ages via a phantom "recovery"). Ids absent from the message
+      // are dropped; genuinely new ids get the conservative defaults. The
+      // server additionally replays deviating hook-plane state on
+      // webviewReady (clientMessageHandler.ts) for the fresh-page case,
+      // where there is no prior record to merge from.
       const next = new Map<number, AgentRecord>();
       for (const id of message.agents) {
         const key = String(id);
+        const prior = agents.get(id);
         next.set(id, {
-          ...baseRecord(id, message.folderNames[key] ?? fallbackName(id)),
+          ...(prior ?? baseRecord(id, fallbackName(id))),
+          name: message.folderNames[key] ?? fallbackName(id),
           machine: message.machines?.[key],
           provider: message.providers?.[key],
           sessionId: message.sessionIds?.[key],

@@ -94,6 +94,39 @@ describe('reduceCrisisState', () => {
     expect(afterRecovery.debris.has(debrisKey(2, 'stopped'))).toBe(false);
   });
 
+  it('RECONNECT: debris age survives the existingAgents → agentPollState replay order', () => {
+    // Regression (panel finding, crisisStore.ts:93): on reconnect the client
+    // reduces `existingAgents` FIRST (which used to wipe poll → WAITING →
+    // phantom "recovery" deletes the debris), then the server's M4
+    // `agentPollState` replay lands (fresh transition edge → brand-new
+    // debris with since=now). The crate's true failure age must survive.
+    const T0 = NOW;
+    const failed = roster({ type: 'agentPollState', id: 1, state: 'failed', ageMs: 0 });
+    const seeded = reduceCrisisState(EMPTY_CRISIS_STATE, roster(), T0 - 1_000);
+    const withDebris = reduceCrisisState(seeded, failed, T0);
+    expect(withDebris.debris.get(debrisKey(1, 'failed'))?.since).toBe(T0);
+
+    // T0+30s (inside the poll TTL — the dip under test is the wipe+replay
+    // race, not poll staleness): WS reconnects. Step 1 — existingAgents.
+    const T1 = T0 + 30_000;
+    const reconnected = reduceAgents(failed, EXISTING, T1);
+    const afterExisting = reduceCrisisState(withDebris, reconnected, T1);
+    expect(afterExisting.debris.has(debrisKey(1, 'failed'))).toBe(true); // no phantom recovery
+
+    // Step 2 — the server's agentPollState replay (ageMs re-anchors).
+    const replayed = reduceAgents(
+      reconnected,
+      { type: 'agentPollState', id: 1, state: 'failed', ageMs: T1 - RECEIPT_AT },
+      T1,
+    );
+    const afterReplay = reduceCrisisState(afterExisting, replayed, T1);
+    const record = afterReplay.debris.get(debrisKey(1, 'failed'));
+    expect(record).toBeDefined();
+    // The ORIGINAL spawn anchor, not a reset-to-now: the crate that sat for
+    // 5 minutes must not read as brand new after a reconnect.
+    expect(record?.since).toBe(T0);
+  });
+
   it('acknowledgeDebris removes exactly one record; openCrisisCount sums fires+debris', () => {
     const seeded = reduceCrisisState(EMPTY_CRISIS_STATE, roster(), NOW - 2_000);
     const both = roster(

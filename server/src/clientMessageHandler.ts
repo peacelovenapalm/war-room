@@ -336,4 +336,25 @@ function handleWebviewReady(send: WsSend, ctx: ClientMessageContext): void {
       });
     }
   }
+
+  // 8. Replay hook-plane crisis state (M4 extended to the OTHER two
+  // NEEDS_INPUT inputs — tool permission + awaitingInput). A fresh client
+  // builds every record with the conservative defaults (waiting, no
+  // permission), and for a gate that is STILL pending no NEW
+  // agentToolPermission/agentStatus event will ever fire again — without
+  // this replay a real NEEDS INPUT silently vanishes across any refresh or
+  // reconnect. Only deviations from the client's defaults are sent.
+  for (const [id, agent] of store) {
+    if (!agent.isWaiting || agent.awaitingInput) {
+      send({
+        type: 'agentStatus',
+        id,
+        status: agent.isWaiting ? 'waiting' : 'active',
+        awaitingInput: agent.awaitingInput ?? false,
+      });
+    }
+    if (agent.permissionSent) {
+      send({ type: 'agentToolPermission', id });
+    }
+  }
 }
