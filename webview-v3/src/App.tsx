@@ -720,9 +720,17 @@ export default function App() {
     [pins],
   );
 
-  const handleTogglePause = useCallback((key: string) => {
-    setTails((previous) => setPaused(previous, key, !(previous.get(key)?.paused ?? false)));
-  }, []);
+  /** ⏸ PAUSE / ▶ RESUME — reduces off tailsRef (panel finding, App.tsx:685):
+   *  updating only the React state left tailsRef stale, and the very next
+   *  incoming chunk (whose handler reduces off the ref) silently reverted
+   *  the pause and showed the chunk anyway. applyTails keeps both in step. */
+  const handleTogglePause = useCallback(
+    (key: string) => {
+      const current = tailsRef.current;
+      applyTails(setPaused(current, key, !(current.get(key)?.paused ?? false)));
+    },
+    [applyTails],
+  );
 
   // ── Stage-3 panel handlers ───────────────────────────────────────
 
