@@ -330,9 +330,17 @@ export class DossierDerivation {
   }
 
   /** Persist telemetry, refresh the dossier record (ensure + history),
-   *  and run every threshold rule. Runs after each recorded event. */
+   *  and run every threshold rule. Runs after each recorded event.
+   *
+   *  THROTTLED persist (not force): this runs on the hook Stop hot path —
+   *  the exact call site where economyStore/shiftStats/progressionStore
+   *  all use the 5s-throttled write, and telemetry is monotonic counters
+   *  that re-derive on the next event, so a ≤5s crash-loss window is the
+   *  established acceptable cost. Rare permanence-critical dossier
+   *  mutations (create, trait earn, portrait) still force inside
+   *  dossierStore itself. */
   private finish(t: StaffTelemetry, now: number): void {
-    this.persistence.persist(this.ensureLoaded(), now, true);
+    this.persistence.persist(this.ensureLoaded(), now);
     this.dossiers.ensure(t.staffId, t.displayName, now);
     this.evaluateTraits(t, now);
     const history = this.historySummary(t);

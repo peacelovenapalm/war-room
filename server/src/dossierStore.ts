@@ -78,7 +78,7 @@ export class DossierStore {
     if (existing) return { ok: true, dossier: existing };
     const dossier: StaffDossier = { staffId, displayName, traits: [], history: '' };
     data.dossiers[staffId] = dossier;
-    this.finish(dossier, now);
+    this.finish(dossier, now, true);
     return { ok: true, dossier };
   }
 
@@ -95,17 +95,20 @@ export class DossierStore {
       return { ok: false, reason: 'already-earned' };
     }
     dossier.traits.push(trait);
-    this.finish(dossier, trait.earnedAt);
+    this.finish(dossier, trait.earnedAt, true);
     return { ok: true, dossier };
   }
 
   /** Replace the computed history summary (stage 2 recomputes from real
-   *  telemetry; the store just holds the latest read). */
+   *  telemetry; the store just holds the latest read). THROTTLED persist:
+   *  the history line changes on every recorded turn (hook Stop hot path)
+   *  and re-derives from telemetry — same 5s-throttle discipline as
+   *  economyStore/shiftStats on that call site. */
   setHistory(staffId: string, history: string, now: number = Date.now()): DossierResult {
     const dossier = this.ensureLoaded().dossiers[staffId];
     if (!dossier) return { ok: false, reason: 'not-found' };
     dossier.history = history;
-    this.finish(dossier, now);
+    this.finish(dossier, now, false);
     return { ok: true, dossier };
   }
 
@@ -114,14 +117,18 @@ export class DossierStore {
     const dossier = this.ensureLoaded().dossiers[staffId];
     if (!dossier) return { ok: false, reason: 'not-found' };
     dossier.portraitRef = portraitRef;
-    this.finish(dossier, now);
+    this.finish(dossier, now, true);
     return { ok: true, dossier };
   }
 
   // ── Internal ──────────────────────────────────────────────────────
 
-  private finish(dossier: StaffDossier, now: number): void {
-    this.persistence.persist(this.ensureLoaded(), now, true);
+  /** `force` = write through the 5s persist throttle. TRUE for the rare,
+   *  permanence-critical mutations (create, trait earn, portrait — a
+   *  trait is permanent and must survive an immediate crash); FALSE for
+   *  the per-turn history refresh (re-derived from telemetry anyway). */
+  private finish(dossier: StaffDossier, now: number, force: boolean): void {
+    this.persistence.persist(this.ensureLoaded(), now, force);
     for (const listener of this.listeners) listener(dossier);
   }
 
