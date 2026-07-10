@@ -676,7 +676,16 @@ F3 (smaller, single-function fixes).
 
 ## [KICKOFF v1.1 items 10-13] StandingOrdersPanel has the same unwired-perk
 
-## pattern F3 just fixed for ChainBuilderPanel — REVIEW-ON-RETURN
+## pattern F3 just fixed for ChainBuilderPanel — RESOLVED 2026-07-10
+
+**RESOLVED by the v2.0 run (KICKOFF-v2.0 0.6, commit c1a773a):**
+`standingOrderCapClient()` in `webview-ui/src/standingOrders.ts` mirrors the
+server's `standingOrderCap()` value table exactly (base 1, Second Shift +1,
+Night Shift Foreman +2 — both perks, not just Second Shift, so the same bug
+class can't recur for the Foreman), threaded `economy` through
+`StandingOrdersPanel` the same way c369684 did for `ChainBuilderPanel`,
+fail-closed to base cap with no snapshot. 4 new unit tests including a
+regression test demonstrating the pre-fix false block. Original entry below.
 
 Found incidentally while independently verifying F3's webview follow-up
 fix (2026-07-09) — not itself part of items 10-13's scope, not acted on
