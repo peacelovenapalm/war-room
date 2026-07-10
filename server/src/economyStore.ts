@@ -29,6 +29,11 @@
  * No `setInterval` tick loop — state is computed on-demand (real-event
  * award here; the WS-connect catch-up below covers Reputation decay over
  * elapsed offline time, capped at OFFLINE_CATCHUP_CAP_DAYS per call).
+ *
+ * REVENUE-READY (v3 stage 3): the synthetic CASH earning rules live in
+ * revenueProvider.ts behind the RevenueProvider seam; ingestRevenue()
+ * below is the single point where CASH enters from a revenue source —
+ * the future real-money ingest point (see server/src/REVENUE.md).
  */
 
 import * as fs from 'fs';
@@ -38,12 +43,6 @@ import * as path from 'path';
 import type { EconomyCause, EconomyLedgerEntry } from '../../core/src/messages.js';
 import { LAYOUT_FILE_DIR } from './constants.js';
 import {
-  CASH_PER_CRISIS_RESOLVED,
-  CASH_PER_DISPATCH_EXIT_0,
-  CASH_PER_TURN,
-  CASH_SHIFT_GRADE,
-  CASH_STREAK_DAY_TOUCH,
-  DISPATCH_CASH_DAILY_CAP,
   OFFLINE_CATCHUP_CAP_DAYS,
   PERK_COST,
   type PerkId,
@@ -52,6 +51,8 @@ import {
   REP_SHIFT_GRADE,
 } from './economyConstants.js';
 import type { DayCloseSummary } from './progressionStore.js';
+import type { RevenueProvider } from './revenueProvider.js';
+import { SyntheticRevenueProvider } from './revenueProvider.js';
 
 const PERSIST_THROTTLE_MS = 5_000;
 const ECONOMY_FILE_NAME = 'economy.json';
@@ -162,6 +163,25 @@ export class EconomyStore {
   private resolvedPath: string | undefined;
   private usingDefaultPath = false;
   private listeners: Array<(snapshot: EconomySnapshot) => void> = [];
+  /** The synthetic CASH earning rules, relocated behind the revenue seam
+   *  (v3 stage 3 — see revenueProvider.ts + REVENUE.md). Dedup/cap state
+   *  stays in THIS store's persisted sidecar via the accessor below —
+   *  restart behavior is unchanged by the relocation. */
+  private readonly revenue: SyntheticRevenueProvider = new SyntheticRevenueProvider({
+    getStreakDayTouchedDate: () => this.ensureLoaded().streakDayTouchedDate,
+    setStreakDayTouchedDate: (date) => {
+      this.ensureLoaded().streakDayTouchedDate = date;
+    },
+    getDispatchCashWindow: () => {
+      const data = this.ensureLoaded();
+      return { date: data.dispatchCashDate, paidToday: data.dispatchCashToday };
+    },
+    setDispatchCashWindow: (date, paidToday) => {
+      const data = this.ensureLoaded();
+      data.dispatchCashDate = date;
+      data.dispatchCashToday = paidToday;
+    },
+  });
 
   constructor(persistPath?: string) {
     this.explicitPath = persistPath;
@@ -198,20 +218,8 @@ export class EconomyStore {
   recordTurnCompleted(sourceRef: string, now: number = Date.now(), cashBonusPct = 0): void {
     const data = this.ensureLoaded();
     this.touchActivity(data, now);
-    this.addCash(
-      this.withCashBonus(CASH_PER_TURN, cashBonusPct),
-      { label: 'turn-completed', sourceEventRefs: [sourceRef] },
-      now,
-    );
-    const today = localDate(now);
-    if (data.streakDayTouchedDate !== today) {
-      data.streakDayTouchedDate = today;
-      this.addCash(
-        CASH_STREAK_DAY_TOUCH,
-        { label: 'streak-day-touch', sourceEventRefs: [sourceRef] },
-        now,
-      );
-    }
+    this.revenue.noteTurnCompleted(sourceRef, now, cashBonusPct);
+    this.ingestRevenue(this.revenue, now);
   }
 
   /** An OBSERVED crisis resolution (real state transition, never a stale
@@ -222,11 +230,8 @@ export class EconomyStore {
   recordCrisisResolved(sourceRef: string, now: number = Date.now(), cashBonusPct = 0): void {
     const data = this.ensureLoaded();
     this.touchActivity(data, now);
-    this.addCash(
-      this.withCashBonus(CASH_PER_CRISIS_RESOLVED, cashBonusPct),
-      { label: 'crisis-resolved', sourceEventRefs: [sourceRef] },
-      now,
-    );
+    this.revenue.noteCrisisResolved(sourceRef, now, cashBonusPct);
+    this.ingestRevenue(this.revenue, now);
   }
 
   /** A shift-report day closed with a grade (wired via ShiftStats'
@@ -236,12 +241,18 @@ export class EconomyStore {
    *  day itself (`shift-day:<date>`). */
   recordShiftDayClosed(closed: DayCloseSummary, now: number = Date.now()): void {
     if (closed.turnsCompleted <= 0 || closed.efficiency === null) return;
-    const cause: EconomyCause = {
-      label: `shift-grade-${closed.efficiency}`,
-      sourceEventRefs: [`shift-day:${closed.date}`],
-    };
-    this.addCash(CASH_SHIFT_GRADE[closed.efficiency], cause, now);
-    this.addReputation(REP_SHIFT_GRADE[closed.efficiency], cause, now);
+    // Cash side rides the revenue seam (synthetic rules relocated there);
+    // Reputation is NOT revenue and stays a direct receipted award.
+    this.revenue.noteShiftDayClosed(closed, now);
+    this.ingestRevenue(this.revenue, now);
+    this.addReputation(
+      REP_SHIFT_GRADE[closed.efficiency],
+      {
+        label: `shift-grade-${closed.efficiency}`,
+        sourceEventRefs: [`shift-day:${closed.date}`],
+      },
+      now,
+    );
   }
 
   /** A dispatch run exited (v1 mechanic #6b). Any exit counts as activity
@@ -261,30 +272,30 @@ export class EconomyStore {
   ): void {
     const data = this.ensureLoaded();
     this.touchActivity(data, now);
-    if (exitCode !== 0) {
-      this.persist(now);
-      return;
-    }
-    const today = localDate(now);
-    if (data.dispatchCashDate !== today) {
-      data.dispatchCashDate = today;
-      data.dispatchCashToday = 0;
-    }
-    const remaining = Math.max(0, DISPATCH_CASH_DAILY_CAP - data.dispatchCashToday);
-    const award = Math.min(this.withCashBonus(CASH_PER_DISPATCH_EXIT_0, cashBonusPct), remaining);
-    if (award > 0) {
-      data.dispatchCashToday += award;
-      this.addCash(award, { label: 'dispatch-exit-0', sourceEventRefs: [sourceRef] }, now);
-    } else {
-      this.persist(now);
-    }
+    this.revenue.noteDispatchExit(exitCode, sourceRef, now, cashBonusPct);
+    this.ingestRevenue(this.revenue, now);
   }
 
-  /** Rounds the same way hookEventHandler.ts's xpOverride does
-   *  (Math.round(base * (1 + pct/100))) — kept as a single helper so all
-   *  three Cash-award call sites round identically. */
-  private withCashBonus(amount: number, cashBonusPct: number): number {
-    return Math.round(amount * (1 + cashBonusPct / 100));
+  // ── Revenue ingest (THE seam — see revenueProvider.ts + REVENUE.md) ───
+
+  /** Apply a provider's drained revenue events to CASH, receipt attached.
+   *  This is the single point where CASH enters from a revenue source —
+   *  today only the synthetic provider feeds it; a future real provider
+   *  (Stripe etc.) plugs in HERE with `stripe:*` source refs and nothing
+   *  else changes. Guardrails: negative amounts are refused (revenue only
+   *  credits — a debit can never masquerade as revenue); zero amounts are
+   *  legal (the HEAVY shift grade has always written a "graded, paid 0"
+   *  ledger line). When nothing was drained, state is still persisted —
+   *  callers may have touched activity/dedup bookkeeping beforehand. */
+  ingestRevenue(provider: RevenueProvider, now: number = Date.now()): void {
+    const events = provider.getRevenueEvents();
+    let applied = 0;
+    for (const event of events) {
+      if (event.amount < 0) continue;
+      this.addCash(event.amount, event.cause, event.ts);
+      applied++;
+    }
+    if (applied === 0) this.persist(now);
   }
 
   private touchActivity(data: EconomyData, now: number): void {
