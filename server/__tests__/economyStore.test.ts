@@ -124,6 +124,41 @@ describe('EconomyStore real-event awards', () => {
   });
 });
 
+describe('EconomyStore.ingestRevenue durability (REVENUE.md seam — force-persist on drain)', () => {
+  it('a credited amount is durably on disk immediately after ingestRevenue, even inside the persist-throttle window', () => {
+    const store = new EconomyStore(statePath);
+    const provider: {
+      getRevenueEvents: () => { ts: number; amount: number; cause: ReturnType<typeof cause> }[];
+      queue: { ts: number; amount: number; cause: ReturnType<typeof cause> }[];
+    } = {
+      queue: [],
+      getRevenueEvents() {
+        const out = this.queue;
+        this.queue = [];
+        return out;
+      },
+    };
+
+    // First credit — the very first persist() call ever is never throttled
+    // (lastPersistAt starts at 0), so this alone wouldn't prove anything.
+    provider.queue.push({ ts: DAY1, amount: 10, cause: cause('first') });
+    store.ingestRevenue(provider, DAY1);
+    expect(store.getSnapshot().cash).toBe(10);
+
+    // Second credit, 1s later — well inside the 5s persist-throttle
+    // window. Without a forced persist here, the on-disk sidecar would
+    // still show the stale amount=10 state; a crash in that window loses
+    // the second credit with no redrain path (the provider already
+    // forgot it — drain semantics).
+    provider.queue.push({ ts: DAY1 + 1000, amount: 5, cause: cause('second') });
+    store.ingestRevenue(provider, DAY1 + 1000);
+    expect(store.getSnapshot().cash).toBe(15);
+
+    const onDisk = JSON.parse(fs.readFileSync(statePath, 'utf8')) as { cash: number };
+    expect(onDisk.cash).toBe(15);
+  });
+});
+
 describe('EconomyStore Server Room cashBonusPct (G2, GAME-DESIGN §5.4) — F2', () => {
   it('recordTurnCompleted applies cashBonusPct to CASH_PER_TURN only, never the once/day streak touch', () => {
     const store = new EconomyStore(statePath);

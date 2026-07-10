@@ -295,7 +295,13 @@ export class EconomyStore {
       this.addCash(event.amount, event.cause, event.ts);
       applied++;
     }
-    if (applied === 0) this.persist(now);
+    // getRevenueEvents() already drained the provider's queue (synchronous,
+    // in-memory, forgets what it returned) — a crash before the credit is
+    // durable would lose it permanently with no redrain path. Force the
+    // write here rather than leaving it to addCash's 5s-throttled persist
+    // (the seam a future real-money provider plugs into — REVENUE.md).
+    if (applied > 0) this.persist(now, true);
+    else this.persist(now);
   }
 
   private touchActivity(data: EconomyData, now: number): void {
