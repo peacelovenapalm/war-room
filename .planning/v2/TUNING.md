@@ -38,6 +38,34 @@ project (it is not a panel — it is a new containment surface).
 
 ---
 
+## [KICKOFF v3.1] Phase-4.1 review verdicts + standing rules (2026-07-10)
+
+Containment lens (re-run after a schema-cap failure): NEW server surface
+CLEAN — auth parity with the established player-action plane (tailnet +
+loopback publish), rework redispatch cannot bypass dispatchStore.enqueue
+or the runner allowlist, no todo-dir path traversal (anchored filename
+regex), X-Machine boundaries unchanged. One minor hardened same-day
+(1681fac): player-suppliable :ids no longer resolve through
+Object.prototype (ownRecord guard + dunder regression tests; the three
+non-HTTP v3 stores still use bare Records — fold into any future route
+exposure). STANDING RULE for panel wiring: verbatim todo/tail text
+renders via JSX text interpolation ONLY — never dangerouslySetInnerHTML.
+
+Fix round (35-finding panel incl. codex gpt-5.6-sol lane, 15 verified
+cross-model findings): all 3 criticals + 10 majors fixed with
+regression tests proven red pre-fix (dd12df3…ef9d30a); two changes
+touched hard-rule-adjacent planes UNDER the hard rules' own direction —
+(a) contract priority-expiry REP penalty REMOVED (dark-pattern rule),
+(b) debris ACK-undo re-keyed by failure instance (a stale ack could
+sweep a NEW crisis). Flagging per the loop-gate contract; both moved
+TOWARD the rules, neither loosened anything. Known accepted edge
+(documented in state/stopAll.ts): a STOP ALL that halted only chain
+runs leaves no durable server flag, so a fresh page hydrates
+not-stopped; re-pressing is an idempotent re-halt — a durable server
+latch is future scope.
+
+---
+
 ## [KICKOFF v3.1] Economy items awaiting Greg review (hard-rule-adjacent) — REVIEW-ON-RETURN
 
 Two shipped-but-gated designs need Greg's eyes before they count as
