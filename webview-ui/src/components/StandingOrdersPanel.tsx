@@ -1,9 +1,10 @@
 import { useEffect, useState } from 'react';
 
+import type { EconomySnapshotClient } from '../hooks/useExtensionMessages.js';
 import {
   canCreateStandingOrder,
   scheduleLabel,
-  STANDING_ORDER_BASE_CAP,
+  standingOrderCapClient,
   type StandingOrderClient,
   standingOrderStatusLabel,
 } from '../standingOrders.js';
@@ -13,6 +14,10 @@ import { Modal } from './ui/Modal.js';
 interface StandingOrdersPanelProps {
   isOpen: boolean;
   onClose: () => void;
+  /** Live perk state (same plumbing as ChainBuilderPanel, c369684) — arrives
+   *  with the first economyUpdate. Null degrades to the base cap of 1;
+   *  never fail-open. */
+  economy: EconomySnapshotClient | null;
 }
 
 /** Standing orders panel (v2 mechanic G3 — GAME-DESIGN.md §7.2): create a
@@ -20,7 +25,7 @@ interface StandingOrdersPanelProps {
  *  — every new order shows "⚠ NEEDS FIRST-RUN CONFIRM" until a human
  *  explicitly clicks CONFIRM, which fires it once immediately and only
  *  THEN unlocks unattended future ticks. No perk or setting bypasses this. */
-export function StandingOrdersPanel({ isOpen, onClose }: StandingOrdersPanelProps) {
+export function StandingOrdersPanel({ isOpen, onClose, economy }: StandingOrdersPanelProps) {
   const [orders, setOrders] = useState<StandingOrderClient[]>([]);
   const [name, setName] = useState('');
   const [machine, setMachine] = useState('');
@@ -43,11 +48,11 @@ export function StandingOrdersPanel({ isOpen, onClose }: StandingOrdersPanelProp
   }, [isOpen]);
 
   const enabledCount = orders.filter((o) => o.enabled).length;
-  // Perk-derived cap isn't known client-side without an extra economy round
-  // trip — show the conservative base cap as a hint; the server enforces
-  // the real (possibly perk-raised) cap authoritatively either way.
-  const canCreate =
-    canCreateStandingOrder(enabledCount, STANDING_ORDER_BASE_CAP) || orders.length === 0;
+  // Perk-aware effective cap (Second Shift 1→2, Night Shift Foreman +2),
+  // live from the economy snapshot; the server still enforces the real cap
+  // authoritatively — this only drives the advisory CREATE hint.
+  const effectiveCap = standingOrderCapClient(economy);
+  const canCreate = canCreateStandingOrder(enabledCount, effectiveCap) || orders.length === 0;
   const canSave =
     name.trim() !== '' && prompt.trim() !== '' && machine.trim() !== '' && cwd.trim() !== '';
 

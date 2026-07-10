@@ -36,6 +36,20 @@ export interface StandingOrderClient {
 /** Mirrors server/src/standingOrderStore.ts's STANDING_ORDER_BASE_CAP. */
 export const STANDING_ORDER_BASE_CAP = 1;
 
+/** Mirrors server/src/standingOrderStore.ts's standingOrderCap() exactly:
+ *  base 1, Second Shift +1, Night Shift Foreman +2 (additive). Fail-closed:
+ *  a null economy (no economyUpdate received yet) yields the base cap — the
+ *  server enforces the real cap authoritatively either way, this only
+ *  drives the advisory CREATE hint. Same perk plumbing as ChainBuilderPanel's
+ *  Chain Gang fix (c369684); closes the TUNING.md "[KICKOFF v1.1 items
+ *  10-13] StandingOrdersPanel unwired-perk" entry. */
+export function standingOrderCapClient(economy: { purchasedPerks: string[] } | null): number {
+  let cap = STANDING_ORDER_BASE_CAP;
+  if (economy?.purchasedPerks.includes('secondShift')) cap += 1;
+  if (economy?.purchasedPerks.includes('nightShiftForeman')) cap += 2;
+  return cap;
+}
+
 /** One line of a schedule, e.g. "DAILY @ 09:00", "EVERY 1h". */
 export function scheduleLabel(schedule: StandingOrderScheduleClient): string {
   if (schedule.kind === 'daily') {

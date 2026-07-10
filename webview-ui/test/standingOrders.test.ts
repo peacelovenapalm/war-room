@@ -10,6 +10,8 @@ import { describe, expect, it } from 'vitest';
 import {
   canCreateStandingOrder,
   scheduleLabel,
+  STANDING_ORDER_BASE_CAP,
+  standingOrderCapClient,
   type StandingOrderClient,
   standingOrderStatusLabel,
 } from '../src/standingOrders.js';
@@ -105,5 +107,34 @@ describe('canCreateStandingOrder', () => {
     expect(canCreateStandingOrder(0, 1)).toBe(true);
     expect(canCreateStandingOrder(1, 1)).toBe(false);
     expect(canCreateStandingOrder(1, 2)).toBe(true);
+  });
+});
+
+describe('standingOrderCapClient (KICKOFF v2.0 0.6 — Second Shift perk cap)', () => {
+  it('mirrors the server value table exactly: base 1, +1 secondShift, +2 nightShiftForeman', () => {
+    // Value table from server/src/standingOrderStore.ts standingOrderCap().
+    expect(standingOrderCapClient({ purchasedPerks: [] })).toBe(STANDING_ORDER_BASE_CAP);
+    expect(standingOrderCapClient({ purchasedPerks: ['secondShift'] })).toBe(2);
+    expect(standingOrderCapClient({ purchasedPerks: ['nightShiftForeman'] })).toBe(3);
+    expect(standingOrderCapClient({ purchasedPerks: ['secondShift', 'nightShiftForeman'] })).toBe(
+      4,
+    );
+  });
+
+  it('fails closed to the base cap with no economy snapshot', () => {
+    expect(standingOrderCapClient(null)).toBe(STANDING_ORDER_BASE_CAP);
+  });
+
+  it('ignores unrelated perks (chainGang raises the CHAIN cap, not this one)', () => {
+    expect(standingOrderCapClient({ purchasedPerks: ['chainGang'] })).toBe(STANDING_ORDER_BASE_CAP);
+  });
+
+  it('regression: the pre-fix hardcoded base cap under-reports for a perk owner', () => {
+    // Pre-fix, StandingOrdersPanel always passed STANDING_ORDER_BASE_CAP to
+    // canCreateStandingOrder — so a Second Shift owner with 1 enabled order
+    // saw CREATE blocked even though the server would allow a second.
+    const perkOwner = { purchasedPerks: ['secondShift'] };
+    expect(canCreateStandingOrder(1, standingOrderCapClient(perkOwner))).toBe(true);
+    expect(canCreateStandingOrder(1, STANDING_ORDER_BASE_CAP)).toBe(false); // the old bug
   });
 });

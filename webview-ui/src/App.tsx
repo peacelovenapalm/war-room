@@ -619,6 +619,7 @@ function App() {
       <StandingOrdersPanel
         isOpen={isStandingOrdersOpen}
         onClose={() => setIsStandingOrdersOpen(false)}
+        economy={economy}
       />
 
       <BriefingPanel
