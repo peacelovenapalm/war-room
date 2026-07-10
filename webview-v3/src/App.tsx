@@ -2,6 +2,7 @@ import type { PointerEvent as ReactPointerEvent } from 'react';
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 
 import type { ClientMessage } from '../../core/src/messages.js';
+import { createBrowserLoaderDeps, createImageStore, createSpriteStore } from './assets/loader';
 import { AgentDrawer } from './components/AgentDrawer';
 import { AutomationPanel } from './components/AutomationPanel';
 import { BriefingPanel } from './components/BriefingPanel';
@@ -37,7 +38,7 @@ import {
 } from './engine/gesture';
 import type { HotspotKind } from './engine/hotspots';
 import { mapWorldBounds } from './engine/iso';
-import { renderWorld } from './engine/renderer';
+import { type PosterPlacement, renderWorld } from './engine/renderer';
 import { getCanvasResolution } from './engine/resolution';
 import { computeWalkers, type WalkerAgentInput } from './engine/walkers';
 import {
@@ -46,6 +47,8 @@ import {
   DEFAULT_MAX_ELEVATION,
   DEFAULT_ROWS,
   occupiedDeskAnchors,
+  outfitForAgent,
+  STATIC_PROP_SPRITE_NAMES,
   type WorldProp,
 } from './engine/world';
 import { type AgentMap, EMPTY_AGENTS, reduceAgents, toOccupants } from './net/agentStore';
@@ -100,6 +103,17 @@ const TICK_MS = 500;
 /** How long the DOCK FULL rejection stays on screen. */
 const DOCK_NOTICE_MS = 3_000;
 
+/** Wall posters (KICKOFF-v3.1 WS-A "flavor, cheap, high-payoff") — 3 of the
+ *  imagegen lane's 6 posters/placards, world-anchored on the back wall row
+ *  (WorldProp WALL_SEGMENTS, engine/world.ts), clear of the automation (7,0)
+ *  and briefing (10,0) hotspot tiles. Portraits are NOT wired this pass
+ *  (dossier panel later, per the handoff). */
+const POSTER_PLACEMENTS: readonly PosterPlacement[] = [
+  { name: 'poster_stop_all', tileX: 2, tileY: 0, worldWidth: 26 },
+  { name: 'board_logo', tileX: 6, tileY: 0, worldWidth: 34 },
+  { name: 'poster_ship_it', tileX: 12, tileY: 0, worldWidth: 26 },
+];
+
 /** window.location.search, defensively (never throws outside a browser). */
 function readLocationSearch(): string {
   return typeof window === 'undefined' ? '' : window.location.search;
@@ -138,6 +152,36 @@ export default function App() {
   const connectionRef = useRef<ServerConnection | null>(null);
   const connectionStatusRef = useRef<ConnectionStatus>('connecting');
   const prevPinsRef = useRef<readonly number[]>([]);
+  // Real-sprite asset stores (KICKOFF-v3.1 WS-A "wire real sprites in").
+  // useState's lazy initializer runs exactly once per mount (StrictMode's
+  // double-invoke discards the extra instance) and — unlike a ref seeded
+  // with null — types as always-present, no null-check noise at every call
+  // site below. createSpriteStore's documented contract is "nothing
+  // fetched at construction", so building one is a pure allocation; the
+  // setters are never called, these are just a stable-identity escape
+  // hatch from useMemo's "may be recomputed" caveat. Manifest URLs are the
+  // sync-assets.mjs mirror (webview-v3-assets/ -> public/assets/, served
+  // at /assets/... in dev, e2e, and the build).
+  const [propStore] = useState(() =>
+    createSpriteStore<HTMLImageElement>('/assets/props.manifest.json', createBrowserLoaderDeps()),
+  );
+  const [characterStore] = useState(() =>
+    createSpriteStore<HTMLImageElement>(
+      '/assets/characters.manifest.json',
+      createBrowserLoaderDeps(),
+    ),
+  );
+  const [imageStore] = useState(() =>
+    createImageStore<HTMLImageElement>('/assets/imagegen/manifest.json', {
+      ...createBrowserLoaderDeps(),
+      // imagegen/manifest.json's `path` values are ASSET-ROOT-relative
+      // (already carry the `imagegen/` prefix — assets/manifest.ts's
+      // ImageAsset doc comment), not relative to the manifest's own
+      // directory like the default resolver assumes; without this the
+      // default would double it into .../imagegen/imagegen/....
+      resolveUrl: (relativePath) => `/assets/${relativePath}`,
+    }),
+  );
   // Ambient walkers + calm-channel lighting (KICKOFF-v3.1 WS-A item 4(c)) —
   // real-telemetry-derived, recomputed on the same tick/occupancy effect
   // that already redraws (draw() itself stays a stable ref-reading
@@ -236,7 +280,16 @@ export default function App() {
       walkerInputsRef.current,
       connectionStatusRef.current === 'live',
       Date.now(),
-    ).map((pose) => ({ kind: 'walker', tileX: pose.tileX, tileY: pose.tileY }));
+    ).map((pose) => ({
+      kind: 'walker',
+      tileX: pose.tileX,
+      tileY: pose.tileY,
+      rotation: pose.rotation,
+      walkerPoseKind: pose.kind,
+      // Janitor has no agentId (not tied to a specific agent) — fixed
+      // outfit; drift/pace wear the same outfit as their desk sprite.
+      walkerOutfit: pose.agentId !== undefined ? outfitForAgent(pose.agentId) : 'rust',
+    }));
     renderWorld(ctx, {
       cssSize,
       resolution,
@@ -245,6 +298,8 @@ export default function App() {
       rows: DEFAULT_ROWS,
       props: [...buildProps(occupantsRef.current), ...walkerProps],
       warmth: displayedWarmth(calmRef.current, Date.now()),
+      assets: { now: Date.now(), propStore, characterStore, imageStore },
+      posters: POSTER_PLACEMENTS,
     });
     renderCountRef.current += 1;
     lastResolutionRef.current = resolution;
@@ -259,7 +314,7 @@ export default function App() {
         ? previous
         : { camera, cssSize },
     );
-  }, []);
+  }, [propStore, characterStore, imageStore]);
 
   /** Kick the RAF loop that advances an in-flight camera walk. */
   const ensureWalkLoop = useCallback(() => {
@@ -351,6 +406,28 @@ export default function App() {
   const handlePointerUp = useCallback((e: ReactPointerEvent<HTMLCanvasElement>) => {
     gestureRef.current = gesturePointerUp(gestureRef.current, e.pointerId);
   }, []);
+
+  // Real-sprite loading (KICKOFF-v3.1 WS-A "wire real sprites in"): the
+  // office geometry (floor/walls/desk/coffee/plant) is on screen from
+  // frame 1 regardless of live connection, so request those names once on
+  // mount — everything else (per-outfit character sprites, posters)
+  // requests lazily from inside draw() only once it's actually needed.
+  // Each store's onChange fires draw() again the moment its sheet lands,
+  // so real art pops in as soon as it decodes instead of waiting for the
+  // next unrelated redraw (the 500ms age tick would eventually catch it,
+  // but this is snappier and costs nothing extra — request()/get() are
+  // idempotent no-ops once a sheet is loaded).
+  useEffect(() => {
+    propStore.request(STATIC_PROP_SPRITE_NAMES);
+    const unsubscribers = [
+      propStore.onChange(draw),
+      characterStore.onChange(draw),
+      imageStore.onChange(draw),
+    ];
+    return () => {
+      for (const unsubscribe of unsubscribers) unsubscribe();
+    };
+  }, [draw, propStore, characterStore, imageStore]);
 
   // Redraw on container resize (covers first mount too).
   useEffect(() => {
@@ -568,8 +645,13 @@ export default function App() {
       getAgentCount: () => occupantsRef.current.length,
       getResolution: () => lastResolutionRef.current,
       getCameraState: () => lastCameraRef.current,
+      getAssetStats: () => ({
+        props: propStore.stats(),
+        characters: characterStore.stats(),
+        images: imageStore.stats(),
+      }),
     });
-  }, []);
+  }, [propStore, characterStore, imageStore]);
 
   const handleDesk = useCallback(
     (agentId: number) => {

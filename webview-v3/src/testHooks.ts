@@ -4,6 +4,7 @@
  * know when the world has painted instead of sleeping.
  */
 
+import type { AssetStoreStats } from './assets/loader';
 import type { CameraState } from './engine/camera';
 import { isE2E } from './runtime';
 
@@ -12,6 +13,14 @@ export interface WarRoomV3TestHooks {
   getAgentCount: () => number;
   getResolution: () => number;
   getCameraState: () => CameraState | null;
+  /** Real-sprite asset store stats (KICKOFF-v3.1 "wire real sprites in") —
+   *  chunksLoaded > 0 on a store means at least one real sheet decoded and
+   *  is available to draw with, not just placeholder fallback art. */
+  getAssetStats: () => {
+    props: AssetStoreStats;
+    characters: AssetStoreStats;
+    images: AssetStoreStats;
+  };
 }
 
 declare global {
