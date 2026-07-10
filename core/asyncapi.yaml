@@ -122,6 +122,12 @@ components:
         - $ref: '#/components/schemas/AutomationStopped'
         # Living world (v2 mechanic G5 — GAME-DESIGN.md §6.3)
         - $ref: '#/components/schemas/WorldEventFired'
+        # Living Studio substrate (v3 WS-C — KICKOFF-v3.1 §3)
+        - $ref: '#/components/schemas/ContractsUpdated'
+        - $ref: '#/components/schemas/DossierUpdated'
+        - $ref: '#/components/schemas/MatchDayEvent'
+        - $ref: '#/components/schemas/ReworkBinUpdated'
+        - $ref: '#/components/schemas/RivalryUpdated'
         # Layout
         - $ref: '#/components/schemas/LayoutLoaded'
         # Assets
@@ -1254,6 +1260,416 @@ components:
         summary:
           type: string
           description: Short flavor text — the same string digest.ts's narrative reuses.
+
+    # ── Living Studio substrate (v3 WS-C — KICKOFF-v3.1 §3) ────────
+    #
+    # Shared invariants for every schema in this section:
+    #  - REAL-SIGNAL ONLY (hard rule 2): every record derives from observed
+    #    events (vault todo lines, chain runs, dispatch exits, agent cwds) —
+    #    never a timer, never token volume, never invented.
+    #  - ONE-TAP-REAL (hard rule 5): every derived number/state carries a
+    #    reference to its source events (`sourceTodo`, `earnedFrom`,
+    #    `sourceRef`, `failureRef`, `evidence`) so the UI can decompose it
+    #    into verbatim telemetry on tap.
+    #  - NO DARK PATTERNS (hard rule 3): contract targets sit BELOW natural
+    #    pace, expiry is QUIET (no penalty, no notification, no streak
+    #    shame), and the rework bin has a first-class dismiss verb.
+
+    StudioContractSourceTodo:
+      description: >-
+        The real vault todo line a studio contract was minted from — kept
+        VERBATIM (one-tap-real): `text` is the untouched source line, and
+        file+line let the UI deep-link the ground truth.
+      type: object
+      additionalProperties: false
+      required: [file, line, text]
+      properties:
+        file:
+          type: string
+          description: Absolute path of the todo file the line was read from.
+        line:
+          type: integer
+          description: 1-based line number within `file` at ingest time.
+        text:
+          type: string
+          description: The source line, verbatim — never paraphrased or truncated.
+
+    StudioContractProgressEvent:
+      description: >-
+        One REAL observed event that moved a contract forward. `sourceRef`
+        is the one-tap-real pointer (e.g. "dispatch:<uuid>",
+        "chainRun:<id>", "todo:<file>#L<line>") — progress is never a bare
+        number without a traceable source.
+      type: object
+      additionalProperties: false
+      required: [ts, sourceRef, summary]
+      properties:
+        ts:
+          type: integer
+        sourceRef:
+          type: string
+          description: Reference to the observed source event (never empty).
+        summary:
+          type: string
+          description: Short human-readable line for the contract's progress feed.
+
+    StudioContractStatusValue:
+      description: >-
+        Aging-contract lifecycle (KICKOFF-v3.1 return hook). `offered` =
+        minted from a real todo, not yet accepted. `expired` is QUIET expiry
+        only — no penalty, no notification, no loss-aversion framing; the
+        contract simply leaves the wall.
+      type: string
+      enum: [offered, accepted, progressing, completed, expired]
+
+    StudioContract:
+      description: >-
+        One aging contract (v3 return hook — KICKOFF-v3.1 §1 "Aging
+        contracts"): a real vault todo dressed as a studio contract.
+        Progress bars fill ONLY from real outcomes (`progress` events),
+        rewards are BONUS-ONLY (missing a contract never costs anything),
+        and targets sit below natural pace by design. Distinct from the v2
+        G4 Contract (contractStore.ts) — that plane stays untouched.
+      type: object
+      additionalProperties: false
+      required: [id, sourceTodo, status, progress, reward, quietExpiryAt]
+      properties:
+        id:
+          type: string
+        sourceTodo:
+          $ref: '#/components/schemas/StudioContractSourceTodo'
+        status:
+          $ref: '#/components/schemas/StudioContractStatusValue'
+        progress:
+          type: array
+          description: Real observed progress events, oldest first. Empty until real outcomes land.
+          items:
+            $ref: '#/components/schemas/StudioContractProgressEvent'
+        reward:
+          type: integer
+          description: >-
+            Bonus-only Cash reward on completion. Never negative; expiry
+            never claws anything back (no-dark-pattern rule).
+        acceptedAt:
+          type: integer
+          description: Epoch ms the player accepted — absent while still offered.
+        quietExpiryAt:
+          type: integer
+          description: >-
+            Epoch ms the contract quietly leaves the board if not completed.
+            Quiet = no penalty, no push, no red banner — it just goes away.
+        completedAt:
+          type: integer
+        expiredAt:
+          type: integer
+
+    ContractsUpdated:
+      description: >-
+        A studio contract was minted or changed state (v3 WS-C) — broadcast
+        per mutation, with non-terminal contracts replayed to every client
+        on WebSocket connect. Only emitted when the source data plane
+        (WAR_ROOM_TODO_DIR) actually exists — the store is feature-flagged
+        OFF when there is nothing real to derive from.
+      type: object
+      additionalProperties: false
+      required: [type, contract]
+      properties:
+        type:
+          const: contractsUpdated
+        contract:
+          $ref: '#/components/schemas/StudioContract'
+
+    DossierTrait:
+      description: >-
+        One earned dossier trait. `earnedFrom` is REQUIRED and non-empty —
+        a trait with no real event references cannot exist (one-tap-real:
+        tapping the trait shows exactly which observed events earned it).
+      type: object
+      additionalProperties: false
+      required: [name, earnedFrom, earnedAt]
+      properties:
+        name:
+          type: string
+        earnedFrom:
+          type: array
+          minItems: 1
+          description: References to the real observed events that earned this trait.
+          items:
+            type: string
+        earnedAt:
+          type: integer
+
+    StaffDossier:
+      description: >-
+        Persistent staff identity file (v3 WS-C "dossier"). `staffId` is the
+        stable (machine, projectDir)-lineage key — the same
+        `MACHINE:project-slug[#n]` algorithm employeeId.ts/employeeStore.ts
+        already use, so dossier and roster never drift on identity. Traits
+        and history are computed from real telemetry only.
+      type: object
+      additionalProperties: false
+      required: [staffId, displayName, traits, history]
+      properties:
+        staffId:
+          type: string
+          description: Stable id keyed by machine+projectDir lineage (employeeId.ts algorithm).
+        displayName:
+          type: string
+        traits:
+          type: array
+          items:
+            $ref: '#/components/schemas/DossierTrait'
+        history:
+          type: string
+          description: Short summary of the staff member's real work history.
+        portraitRef:
+          type: string
+          description: >-
+            Asset-manifest reference for the generated portrait (WS-B codex
+            $imagegen lane) — absent until a portrait asset exists; the UI
+            falls back to the sprite, never a broken image.
+
+    DossierUpdated:
+      description: >-
+        A staff dossier was created or mutated (trait earned, history
+        recomputed, portrait attached) — broadcast per mutation, full set
+        replayed on WebSocket connect while the source data exists.
+      type: object
+      additionalProperties: false
+      required: [type, dossier]
+      properties:
+        type:
+          const: dossierUpdated
+        dossier:
+          $ref: '#/components/schemas/StaffDossier'
+
+    MatchDayPhaseValue:
+      description: Fixture lifecycle — pre (team sheet), live (commentary), result (card).
+      type: string
+      enum: [pre, live, result]
+
+    MatchVerdictValue:
+      description: >-
+        Honest W/D/L mapping from REAL git/test outcomes (KICKOFF-v3.1
+        tentpole rule: "W/D/L mapping must stay honest") — never rolled,
+        never nudged.
+      type: string
+      enum: [W, D, L]
+
+    MatchDayAxisStatusValue:
+      description: >-
+        REAL = the axis value was observed this run. NO_DATA = the signal
+        was absent and is rendered as literally "NO DATA" — NEVER guessed,
+        NEVER defaulted to a plausible number (hard rule from the Review
+        Panel set-piece).
+      type: string
+      enum: [REAL, NO_DATA]
+
+    MatchDayAxis:
+      description: >-
+        One result-card axis (tests/build/scope/burn). When `status` is
+        REAL, `value` and `sourceRef` are both present (one-tap-real); when
+        NO_DATA, neither is — a NO_DATA axis carrying a value is a protocol
+        violation.
+      type: object
+      additionalProperties: false
+      required: [status]
+      properties:
+        status:
+          $ref: '#/components/schemas/MatchDayAxisStatusValue'
+        value:
+          type: number
+          description: The real observed value — present iff status is REAL.
+        sourceRef:
+          type: string
+          description: Reference to the observed source event(s) — present iff status is REAL.
+
+    MatchDayResult:
+      description: Result card — every axis is a real read or an explicit NO_DATA.
+      type: object
+      additionalProperties: false
+      required: [verdict, tests, build, scope, burn]
+      properties:
+        verdict:
+          $ref: '#/components/schemas/MatchVerdictValue'
+        tests:
+          $ref: '#/components/schemas/MatchDayAxis'
+        build:
+          $ref: '#/components/schemas/MatchDayAxis'
+        scope:
+          $ref: '#/components/schemas/MatchDayAxis'
+        burn:
+          $ref: '#/components/schemas/MatchDayAxis'
+
+    MatchDayFeedEvent:
+      description: >-
+        One live-commentary line synthesized from a REAL tail/git/test line.
+        `sourceRef` points at the observed source (e.g.
+        "outputChunk:dispatch:<id>#<seq>", "chainStep:<runId>/<stepId>") so
+        the verbatim telemetry is one tap away; `commentary` is the diegetic
+        costume over it, never a replacement for it.
+      type: object
+      additionalProperties: false
+      required: [ts, kind, sourceRef, commentary]
+      properties:
+        ts:
+          type: integer
+        kind:
+          type: string
+          description: Event class (e.g. "kickoff", "step-exited", "test-fail") — TEXT, shape+label first.
+        sourceRef:
+          type: string
+        commentary:
+          type: string
+
+    MatchDayEvent:
+      description: >-
+        Match Day fixture update (v3 tentpole — chains as fixtures): one
+        broadcast per phase transition or appended feed event. `result` is
+        present iff phase is "result". Fixtures derive 1:1 from real chain
+        runs (`chainRunId`) — no fixture ever exists without a run behind
+        it.
+      type: object
+      additionalProperties: false
+      required: [type, fixtureId, chainRunId, phase, events]
+      properties:
+        type:
+          const: matchDayEvent
+        fixtureId:
+          type: string
+        chainRunId:
+          type: string
+          description: The real ChainRun id this fixture wraps (one-tap-real anchor).
+        phase:
+          $ref: '#/components/schemas/MatchDayPhaseValue'
+        events:
+          type: array
+          description: Full feed so far, oldest first (idempotent snapshot, not a delta).
+          items:
+            $ref: '#/components/schemas/MatchDayFeedEvent'
+        result:
+          $ref: '#/components/schemas/MatchDayResult'
+
+    ReworkBinSourceValue:
+      description: Which real failure plane the crate came from.
+      type: string
+      enum: [dispatch, crisis]
+
+    ReworkFailureRef:
+      description: >-
+        One-tap-real pointer at the failure: `id` is the source record's id
+        (dispatch queue UUID, or the crisis key), `excerpt` is a VERBATIM
+        tail excerpt of the failure output (capped server-side; same trust
+        level as DispatchUpdate.resultTail — never the full log).
+      type: object
+      additionalProperties: false
+      required: [id, excerpt]
+      properties:
+        id:
+          type: string
+        excerpt:
+          type: string
+
+    ReworkBinStatusValue:
+      description: >-
+        Crate lifecycle. `piled` = visible in the bin. `reworked` =
+        re-dispatched through the NORMAL confirm flow (never a silent
+        auto-retry). `dismissed` = the REQUIRED dismiss verb — without it
+        the bin is nagware (KICKOFF-v3.1 failure-loop rule).
+      type: string
+      enum: [piled, reworked, dismissed]
+
+    ReworkBinItem:
+      description: >-
+        One failure crate (v3 failure loop — Scrap & Rework Bin). Every
+        crate is backed by a real failed/killed dispatch or terminal
+        crisis; the bin never invents work.
+      type: object
+      additionalProperties: false
+      required: [id, source, failureRef, status, createdAt]
+      properties:
+        id:
+          type: string
+        source:
+          $ref: '#/components/schemas/ReworkBinSourceValue'
+        failureRef:
+          $ref: '#/components/schemas/ReworkFailureRef'
+        status:
+          $ref: '#/components/schemas/ReworkBinStatusValue'
+        dismissedReason:
+          type: string
+          description: Optional free-text reason recorded with a dismiss — data, never a guilt prompt.
+        createdAt:
+          type: integer
+        resolvedAt:
+          type: integer
+          description: Epoch ms the crate left `piled` (reworked or dismissed).
+
+    ReworkBinUpdated:
+      description: >-
+        A rework-bin crate was piled, reworked, or dismissed — broadcast per
+        mutation, piled crates replayed on WebSocket connect.
+      type: object
+      additionalProperties: false
+      required: [type, item]
+      properties:
+        type:
+          const: reworkBinUpdated
+        item:
+          $ref: '#/components/schemas/ReworkBinItem'
+
+    RelationshipKindValue:
+      description: Relationship string kind — rivalry or bond.
+      type: string
+      enum: [rivalry, bond]
+
+    RelationshipPair:
+      description: >-
+        One staff relationship derived from REAL worktree/repo overlap
+        facts (v3 emergence anchor). `evidence` is required and non-empty —
+        each entry is a verbatim overlap fact (e.g. two live agent cwds
+        under the same repo/worktree). `activeWarning` doubles as the
+        GENUINE worktree-collision early warning (⚠ RIVALRY, shape+label
+        first) — it is real ops signal wearing a costume, never flavor.
+      type: object
+      additionalProperties: false
+      required: [staffIds, kind, evidence, activeWarning]
+      properties:
+        staffIds:
+          type: array
+          minItems: 2
+          maxItems: 2
+          description: The two staff ids (employeeId.ts lineage keys), sorted — the pair's stable identity.
+          items:
+            type: string
+        kind:
+          $ref: '#/components/schemas/RelationshipKindValue'
+        evidence:
+          type: array
+          minItems: 1
+          description: Verbatim worktree/repo overlap facts backing this relationship.
+          items:
+            type: string
+        activeWarning:
+          type: boolean
+          description: >-
+            True while both agents are LIVE in overlapping checkouts — the
+            real collision early-warning (incident 74d74e8's lesson made a
+            mechanic). Never true from historical overlap alone.
+
+    RivalryUpdated:
+      description: >-
+        A rivalry/bond pair was derived, re-evidenced, or its collision
+        warning toggled — broadcast per mutation, full active set replayed
+        on WebSocket connect.
+      type: object
+      additionalProperties: false
+      required: [type, pair]
+      properties:
+        type:
+          const: rivalryUpdated
+        pair:
+          $ref: '#/components/schemas/RelationshipPair'
 
     LayoutLoaded:
       description: |
