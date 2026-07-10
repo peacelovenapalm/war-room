@@ -38,6 +38,7 @@ import { addRoom, buyFurniture, expandOffice, getOfficeLayout, sell } from './of
 import type { RoomType } from './officeLayoutTypes.js';
 import { RoomType as RoomTypeValues } from './officeLayoutTypes.js';
 import { outputRingStore, outputStreamKey } from './outputRingStore.js';
+import { perfectOpsDay } from './perfectOpsDay.js';
 import { applyPollStates, parsePollBody, startPollStateSweep } from './pollStateHandler.js';
 import { progression } from './progressionStore.js';
 import { reworkBinIngest } from './reworkBinIngest.js';
@@ -457,14 +458,21 @@ function registerPollRoute(app: FastifyInstance, options: HttpServerOptions): vo
         // v3 Living Studio sinks (WS-C stage 2) — observed transitions
         // only; see V3CrisisSinks' contract in pollStateHandler.ts.
         {
-          onCrisisStarted: (m, projectDir, agentId, now) =>
-            dossierDerivation.recordCrisisStarted(m, projectDir, agentId, now),
+          onCrisisStarted: (m, projectDir, agentId, now) => {
+            dossierDerivation.recordCrisisStarted(m, projectDir, agentId, now);
+            // Perfect-ops (v3 stage 3): same observed transition, keyed
+            // like shiftStats' blocked episodes.
+            perfectOpsDay.recordCrisisStarted(`agent:${agentId}`, now);
+          },
           onCrisisResolved: (m, projectDir, agentId, durationMs, now) => {
             dossierDerivation.recordCrisisResolved(m, projectDir, agentId, durationMs, now);
             studioContractIngest.recordCrisisResolved(m, projectDir, agentId, now);
+            perfectOpsDay.recordCrisisResolved(`agent:${agentId}`, durationMs, now);
           },
-          onCrisisAbandoned: (m, projectDir, agentId, waitingFor, now) =>
-            reworkBinIngest.recordAbandonedCrisis(agentId, m, projectDir, waitingFor, now),
+          onCrisisAbandoned: (m, projectDir, agentId, waitingFor, now) => {
+            reworkBinIngest.recordAbandonedCrisis(agentId, m, projectDir, waitingFor, now);
+            perfectOpsDay.recordCrisisAbandoned(`agent:${agentId}`, now);
+          },
         },
       );
       if (!options.embedded && (result.matched > 0 || result.cleared > 0)) {
@@ -657,6 +665,10 @@ function registerDispatchRoutes(app: FastifyInstance, options: HttpServerOptions
           undefined,
           dispatchCashBonusPct,
         );
+        // Perfect-ops (v3 stage 3): real 'exited' events only — the
+        // 'killed' branch never reaches here (a deliberate player halt
+        // is not a failure, v1.1 item-3 doctrine).
+        perfectOpsDay.recordDispatchExit(request.params.id, exitCode);
         if (record?.employeeId) {
           employeeStore.recordDispatchExit(record.employeeId, exitCode);
         }

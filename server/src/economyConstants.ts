@@ -49,6 +49,22 @@ export const REP_STREAK_MILESTONE = { d3: 10, d7: 30, d30: 120 };
 export const REP_FIRED_PENALTY = -10;
 export const REP_RETIRED_BONUS = 10;
 
+// ── Perfect-ops day (v3 stage 3 — KICKOFF-v3.1 WS-C item 2) ───────────
+/** One-time Reputation bonus for a perfect-ops local day: real work
+ *  happened (turnsCompleted > 0 — absence of work never mints, same
+ *  doctrine as the Steady Hands trait) AND zero crises went unanswered
+ *  past the N-minute window AND zero dispatches exited nonzero. Sized
+ *  between a STEADY (1) and LEAN (3) shift grade: flawless ops
+ *  complements the efficiency grade, never dwarfs it. Bonus-only — a
+ *  non-perfect day pays 0 and costs nothing (no penalty path exists). */
+export const PERFECT_OPS_REP_BONUS = 2;
+/** Default N (minutes a crisis may sit unanswered before the day stops
+ *  being perfect). 30 minutes ≈ the fire→alarm crisis-aging horizon —
+ *  generous against Greg's observed response pattern (a target above
+ *  natural pace would be a dark pattern). Ops override:
+ *  WAR_ROOM_PERFECT_OPS_MAX_MINUTES=<minutes> (read per evaluation). */
+export const PERFECT_OPS_DEFAULT_MAX_UNANSWERED_MINUTES = 30;
+
 // ── Reputation decay (soft-fail, §3.2) ────────────────────────────────
 export const REP_DECAY_DARK_DAY = 1;
 /** First consecutive zero-activity day is always free; decay starts on the

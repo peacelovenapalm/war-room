@@ -23,6 +23,7 @@ import type { Briefing } from './briefingProvider.js';
 import { getBriefing } from './briefingProvider.js';
 import { contractStore } from './contractStore.js';
 import { economyStore } from './economyStore.js';
+import { perfectOpsDay } from './perfectOpsDay.js';
 import { progression } from './progressionStore.js';
 import { pushShiftReport } from './shiftPush.js';
 
@@ -153,6 +154,11 @@ export class ShiftStats {
           contractStore.mintDaily();
           if (new Date().getDay() === 1) contractStore.mintWeekly();
         }
+        // Perfect-ops day (v3 stage 3): same day-close call site — the
+        // closed report's real turnsCompleted is the activity floor;
+        // the tracker holds the day's crisis/dispatch verdicts. Single
+        // bonus event with receipts, bonus-only, idempotent per date.
+        perfectOpsDay.recordDayClose(report);
       });
   }
 
