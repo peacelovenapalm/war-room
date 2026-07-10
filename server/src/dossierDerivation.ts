@@ -109,7 +109,16 @@ interface StaffTelemetry {
   nightRefs: string[];
   /** Cumulative output-token burn (per-turn deltas summed). */
   outputTokens: number;
+  /** Legacy staff-level baseline — used ONLY for sessionless recordTurn
+   *  calls. Session-carrying calls use sessionBaselines below. */
   lastOutputTokensSeen: number;
+  /** Per-SESSION cumulative baselines (panel finding, dossierDerivation
+   *  .ts:210): a staff lineage can run two sessions concurrently in one
+   *  checkout, and their cumulative counters are independent — one shared
+   *  baseline made B's real tokens vanish and A's next delta overcount.
+   *  Insertion order tracks last touch (delete+set) for the size cap.
+   *  Optional: absent on records persisted before this field existed. */
+  sessionBaselines?: Record<string, number>;
   burnRefs: string[];
   crisesResolved: number;
   unblockMsTotal: number;
@@ -196,22 +205,43 @@ export class DossierDerivation {
   }
 
   /** A completed real turn (hook Stop — the same call site employeeStore
-   *  .recordTurn uses). `outputTokensCumulative` is the session's running
-   *  total; the per-turn delta is derived against our own last-seen value
-   *  (the established "track your own baseline" pattern). */
+   *  .recordTurn uses). `outputTokensCumulative` is the SESSION's running
+   *  total, so the per-turn delta is derived against a baseline keyed by
+   *  `sessionId` — never per staff, because two concurrent sessions in one
+   *  checkout carry independent cumulative counters (the repo's own
+   *  operating doctrine calls parallel sessions in one worktree routine).
+   *  Sessionless callers fall back to the legacy staff-level baseline. */
   recordTurn(
     machine: string | undefined,
     projectDir: string,
     projectLabel: string,
     outputTokensCumulative: number,
     now: number = Date.now(),
+    sessionId?: string,
   ): void {
     const t = this.touch(machine, projectDir, projectLabel, now);
-    const delta =
-      outputTokensCumulative >= t.lastOutputTokensSeen
-        ? outputTokensCumulative - t.lastOutputTokensSeen
-        : 0;
-    t.lastOutputTokensSeen = outputTokensCumulative;
+    let delta: number;
+    if (sessionId !== undefined && sessionId !== '') {
+      t.sessionBaselines ??= {};
+      const baselines = t.sessionBaselines;
+      const last = baselines[sessionId] ?? 0;
+      delta = outputTokensCumulative >= last ? outputTokensCumulative - last : 0;
+      // delete+set keeps key order = last-touch order for the cap below.
+      delete baselines[sessionId];
+      baselines[sessionId] = outputTokensCumulative;
+      const keys = Object.keys(baselines);
+      if (keys.length > SESSION_ID_CAP) {
+        for (const stale of keys.slice(0, keys.length - SESSION_ID_CAP)) {
+          delete baselines[stale];
+        }
+      }
+    } else {
+      delta =
+        outputTokensCumulative >= t.lastOutputTokensSeen
+          ? outputTokensCumulative - t.lastOutputTokensSeen
+          : 0;
+      t.lastOutputTokensSeen = outputTokensCumulative;
+    }
     t.outputTokens += delta;
     t.turns++;
     const ref = `turn:${t.staffId}@${now}`;

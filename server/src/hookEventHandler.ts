@@ -765,12 +765,15 @@ export class HookEventHandler {
       // staff-lineage telemetry (turn count, night-hour fraction, output-
       // token burn) — added alongside, not instead of; dossierDerivation
       // derives its own per-turn token delta from the cumulative total,
-      // the same pattern employeeStore uses above.
+      // keyed by THIS session (concurrent sessions in one checkout carry
+      // independent cumulative counters — dossierDerivation.recordTurn).
       dossierDerivation.recordTurn(
         agent.machine,
         agent.projectDir,
         agent.folderName ?? path.basename(agent.projectDir),
         agent.outputTokens,
+        Date.now(),
+        agent.sessionId,
       );
     }
     this.markAgentWaiting(agent, agentId, awaitingInput);

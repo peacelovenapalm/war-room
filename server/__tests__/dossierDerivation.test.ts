@@ -107,6 +107,31 @@ describe('DossierDerivation — identity + history', () => {
     expect(history).toContain('3.5k output tokens');
   });
 
+  it('SESSION BASELINES: two concurrent sessions in one checkout never corrupt burn deltas', () => {
+    // Regression (panel finding, dossierDerivation.ts:210): the cumulative
+    // baseline was keyed per staff identity, so concurrent sessions in the
+    // same (machine, projectDir) overwrote each other's baseline — B's real
+    // tokens were dropped and A's next report massively overcounted.
+    const { derivation } = makeDerivation();
+    // Session A reports cumulative 100k.
+    derivation.recordTurn(MACHINE, PROJECT, 'war-room', 100_000, atHour(10), 'sess-A');
+    // Concurrent session B's first cumulative report: 5k REAL tokens.
+    derivation.recordTurn(MACHINE, PROJECT, 'war-room', 5_000, atHour(10, 1), 'sess-B');
+    // Session A continues to 110k — a 10k delta, NOT 100k+.
+    derivation.recordTurn(MACHINE, PROJECT, 'war-room', 110_000, atHour(10, 2), 'sess-A');
+
+    const t = derivation.getTelemetry(STAFF_ID)!;
+    expect(t.outputTokens).toBe(115_000); // 100k (A) + 5k (B) + 10k (A)
+    expect(t.turns).toBe(3);
+  });
+
+  it('SESSION BASELINES: sessionless calls keep the legacy staff-level baseline', () => {
+    const { derivation } = makeDerivation();
+    derivation.recordTurn(MACHINE, PROJECT, 'war-room', 1_000, atHour(10));
+    derivation.recordTurn(MACHINE, PROJECT, 'war-room', 3_500, atHour(11));
+    expect(derivation.getTelemetry(STAFF_ID)!.outputTokens).toBe(3_500);
+  });
+
   it('detects a bounce: re-block within the window of a resolution', () => {
     const { derivation } = makeDerivation();
     const t0 = atHour(10);
