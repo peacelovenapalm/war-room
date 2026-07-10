@@ -14,6 +14,7 @@
  */
 
 import { agentIdentity, type AgentMap } from '../net/agentStore';
+import type { AckState } from './ackUndo';
 import { AgentVisualState, deriveVisualState, freshPoll } from './visualState';
 
 export interface FireRecord {
@@ -102,6 +103,40 @@ export function reduceCrisisState(prev: CrisisState, agents: AgentMap, now: numb
   }
 
   return { fires, debris, lastState };
+}
+
+export interface AckSweepResult {
+  crisis: CrisisState;
+  acks: AckState;
+}
+
+/**
+ * One tick of the ACK-undo sweep, instance-aware (panel finding,
+ * crisisStore.ts:47): a pending ack commits at window lapse ONLY against
+ * the SAME debris instance it was aimed at (matched on `since`). An ack
+ * whose debris was deleted (recovery) or replaced (a NEW failure reusing
+ * the `agentId:kind` key) is dropped without touching the board — a
+ * brand-new, never-acted-on crisis is never swept by a stale ack.
+ * Same-reference returns on both maps when nothing changed.
+ */
+export function sweepAcks(crisis: CrisisState, acks: AckState, now: number): AckSweepResult {
+  let nextCrisis = crisis;
+  let acksChanged = false;
+  const nextAcks = new Map(acks);
+  for (const [key, pending] of acks) {
+    const debris = crisis.debris.get(key);
+    if (debris === undefined || debris.since !== pending.since) {
+      nextAcks.delete(key);
+      acksChanged = true;
+      continue;
+    }
+    if (now >= pending.undoUntil) {
+      nextCrisis = acknowledgeDebris(nextCrisis, key);
+      nextAcks.delete(key);
+      acksChanged = true;
+    }
+  }
+  return { crisis: nextCrisis, acks: acksChanged ? nextAcks : acks };
 }
 
 /** ACK commit — remove one debris record (the ackUndo window's terminal). */

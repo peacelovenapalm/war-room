@@ -2,12 +2,14 @@ import { describe, expect, it } from 'vitest';
 
 import type { ServerMessage } from '../../core/src/messages.js';
 import { type AgentMap, EMPTY_AGENTS, reduceAgents } from '../src/net/agentStore';
+import { EMPTY_ACKS, requestAck } from '../src/state/ackUndo';
 import {
   acknowledgeDebris,
   debrisKey,
   EMPTY_CRISIS_STATE,
   openCrisisCount,
   reduceCrisisState,
+  sweepAcks,
 } from '../src/state/crisisStore';
 
 const NOW = 20_000_000;
@@ -125,6 +127,69 @@ describe('reduceCrisisState', () => {
     // The ORIGINAL spawn anchor, not a reset-to-now: the crate that sat for
     // 5 minutes must not read as brand new after a reconnect.
     expect(record?.since).toBe(T0);
+  });
+
+  it('ACK-UNDO KEYING: a pending ack never sweeps a NEW failure instance reusing the key', () => {
+    // Regression (panel finding, crisisStore.ts:47) — exact scenario:
+    // t=0    agent 9's session fails → debris `9:failed` (since=0)
+    // t=1000 user taps ✓ ACK (undo window until t=6000)
+    // t=2000 agent recovers → debris deleted; the pending ack MUST die too
+    // t=3000 agent fails AGAIN → NEW debris `9:failed` (since=3000)
+    // t=6000 the original ack's window lapses → must NOT sweep the new crate
+    const key = debrisKey(1, 'failed');
+    const failedAt = (at: number, state: 'failed' | 'working') =>
+      reduceAgents(
+        reduceAgents(EMPTY_AGENTS, EXISTING, at),
+        { type: 'agentPollState', id: 1, state, ageMs: 0 },
+        at,
+      );
+
+    // t=0 — first failure.
+    const seeded = reduceCrisisState(
+      EMPTY_CRISIS_STATE,
+      reduceAgents(EMPTY_AGENTS, EXISTING, 0),
+      0,
+    );
+    let crisis = reduceCrisisState(seeded, failedAt(0, 'failed'), 0);
+    expect(crisis.debris.get(key)?.since).toBe(0);
+
+    // t=1000 — ACK (window closes at 6000), keyed to THIS instance.
+    let acks = requestAck(EMPTY_ACKS, key, crisis.debris.get(key)!.since, 1_000);
+
+    // t=2000 — recovery deletes the debris; the sweep drops the orphan ack.
+    crisis = reduceCrisisState(crisis, failedAt(2_000, 'working'), 2_000);
+    expect(crisis.debris.has(key)).toBe(false);
+    const sweptAtRecovery = sweepAcks(crisis, acks, 2_000);
+    crisis = sweptAtRecovery.crisis;
+    acks = sweptAtRecovery.acks;
+    expect(acks.has(key)).toBe(false);
+
+    // t=3000 — a brand-new failure reuses the same debris key.
+    crisis = reduceCrisisState(crisis, failedAt(3_000, 'failed'), 3_000);
+    expect(crisis.debris.get(key)?.since).toBe(3_000);
+
+    // t=6000 — the ORIGINAL window's lapse must not touch the new crate.
+    const sweptAtExpiry = sweepAcks(crisis, acks, 6_000);
+    expect(sweptAtExpiry.crisis.debris.get(key)?.since).toBe(3_000);
+  });
+
+  it('ACK-UNDO KEYING: a matching-instance ack still commits at window lapse', () => {
+    const key = debrisKey(1, 'failed');
+    const failed = roster({ type: 'agentPollState', id: 1, state: 'failed', ageMs: 0 });
+    const seeded = reduceCrisisState(EMPTY_CRISIS_STATE, roster(), NOW - 1_000);
+    const crisis = reduceCrisisState(seeded, failed, NOW);
+    const acks = requestAck(EMPTY_ACKS, key, crisis.debris.get(key)!.since, NOW);
+
+    // Before the window lapses: nothing committed, ack still pending.
+    const early = sweepAcks(crisis, acks, NOW + 1_000);
+    expect(early.crisis.debris.has(key)).toBe(true);
+    expect(early.acks.has(key)).toBe(true);
+    expect(early.acks).toBe(acks); // same-reference when nothing changed
+
+    // At lapse: the debris is acknowledged for real and the ack clears.
+    const done = sweepAcks(crisis, acks, NOW + 5_000);
+    expect(done.crisis.debris.has(key)).toBe(false);
+    expect(done.acks.has(key)).toBe(false);
   });
 
   it('acknowledgeDebris removes exactly one record; openCrisisCount sums fires+debris', () => {

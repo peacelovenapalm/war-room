@@ -2,38 +2,36 @@ import { describe, expect, it } from 'vitest';
 
 import {
   ACK_UNDO_WINDOW_MS,
-  clearAcks,
   EMPTY_ACKS,
-  expiredAcks,
   requestAck,
   undoAck,
   undoSecondsLeft,
 } from '../src/state/ackUndo';
 
 const NOW = 1_000_000;
+/** The debris instance anchor the ack is aimed at (instance keying). */
+const SINCE = 900_000;
 
 describe('ack undo window', () => {
-  it('requestAck opens a window ACK_UNDO_WINDOW_MS long', () => {
-    const acks = requestAck(EMPTY_ACKS, '1:failed', NOW);
-    expect(acks.get('1:failed')).toBe(NOW + ACK_UNDO_WINDOW_MS);
+  it('requestAck opens a window ACK_UNDO_WINDOW_MS long, keyed to the debris instance', () => {
+    const acks = requestAck(EMPTY_ACKS, '1:failed', SINCE, NOW);
+    expect(acks.get('1:failed')).toEqual({ undoUntil: NOW + ACK_UNDO_WINDOW_MS, since: SINCE });
+  });
+
+  it('re-acking the SAME key for a NEWER instance replaces the pending entry', () => {
+    let acks = requestAck(EMPTY_ACKS, '1:failed', SINCE, NOW);
+    acks = requestAck(acks, '1:failed', SINCE + 5_000, NOW + 1_000);
+    expect(acks.get('1:failed')).toEqual({
+      undoUntil: NOW + 1_000 + ACK_UNDO_WINDOW_MS,
+      since: SINCE + 5_000,
+    });
   });
 
   it('undoAck genuinely reverses a pending ack', () => {
-    const acks = requestAck(EMPTY_ACKS, '1:failed', NOW);
+    const acks = requestAck(EMPTY_ACKS, '1:failed', SINCE, NOW);
     const undone = undoAck(acks, '1:failed');
     expect(undone.has('1:failed')).toBe(false);
     expect(undoAck(undone, '1:failed')).toBe(undone);
-  });
-
-  it('expiredAcks returns only lapsed windows; clearAcks removes them', () => {
-    let acks = requestAck(EMPTY_ACKS, 'a', NOW);
-    acks = requestAck(acks, 'b', NOW + 3_000);
-    expect(expiredAcks(acks, NOW + ACK_UNDO_WINDOW_MS - 1)).toEqual([]);
-    expect(expiredAcks(acks, NOW + ACK_UNDO_WINDOW_MS)).toEqual(['a']);
-    const cleared = clearAcks(acks, ['a']);
-    expect(cleared.has('a')).toBe(false);
-    expect(cleared.has('b')).toBe(true);
-    expect(clearAcks(cleared, [])).toBe(cleared);
   });
 
   it('undoSecondsLeft counts down in whole seconds, floored at 0', () => {

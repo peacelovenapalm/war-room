@@ -60,14 +60,7 @@ import {
   type SendFailure,
 } from './net/dispatchFacts';
 import { TailManager } from './net/tailManager';
-import {
-  type AckState,
-  clearAcks,
-  EMPTY_ACKS,
-  expiredAcks,
-  requestAck,
-  undoAck,
-} from './state/ackUndo';
+import { type AckState, EMPTY_ACKS, requestAck, undoAck } from './state/ackUndo';
 import { classifyWalkerAgents } from './state/ambient';
 import {
   reduceBudget,
@@ -78,11 +71,11 @@ import {
 import type { BudgetSnapshotClient } from './state/budget';
 import type { ChainRunClient } from './state/chain';
 import {
-  acknowledgeDebris,
   type CrisisState,
   EMPTY_CRISIS_STATE,
   openCrisisCount,
   reduceCrisisState,
+  sweepAcks,
 } from './state/crisisStore';
 import { type EconomySnapshot, reduceEconomy } from './state/economy';
 import {
@@ -191,6 +184,7 @@ export default function App() {
   // Source-of-truth refs for values reduced OUTSIDE render (WS callbacks +
   // the age tick); the matching useState mirrors them for rendering.
   const agentsRef = useRef<AgentMap>(EMPTY_AGENTS);
+  const crisisRef = useRef<CrisisState>(EMPTY_CRISIS_STATE);
   const acksRef = useRef<AckState>(EMPTY_ACKS);
   const dispatchEntriesRef = useRef<DispatchEntry[]>([]);
   const pendingSendsRef = useRef<PendingSend[]>([]);
@@ -462,6 +456,16 @@ export default function App() {
     setAcks(next);
   }, []);
 
+  /** Crisis-state writes go through here — like agentsRef, the ref is the
+   *  source of truth (reduced in WS callbacks + the age tick, outside
+   *  render) and the useState mirrors it for rendering. sweepAcks needs to
+   *  read the CURRENT crisis synchronously to match ack instances. */
+  const applyCrisis = useCallback((next: CrisisState) => {
+    if (next === crisisRef.current) return;
+    crisisRef.current = next;
+    setCrisis(next);
+  }, []);
+
   // Live server plane (core/ generated message types) + tail manager. The
   // crisis state machine reduces HERE (and on the age tick below) — agents
   // are reduced outside render, so the ref is the source of truth.
@@ -473,7 +477,7 @@ export default function App() {
         if (nextAgents !== agentsRef.current) {
           agentsRef.current = nextAgents;
           setAgents(nextAgents);
-          setCrisis((previous) => reduceCrisisState(previous, nextAgents, at));
+          applyCrisis(reduceCrisisState(crisisRef.current, nextAgents, at));
         }
         setEconomy((previous) => reduceEconomy(previous, message));
         if (message.type === 'outputChunk') {
@@ -523,7 +527,7 @@ export default function App() {
       managerRef.current = null;
       connection.dispose();
     };
-  }, []);
+  }, [applyCrisis]);
 
   /** send() for panels that write to the real server (CALL modal, Settings
    *  toggles) — queued client-side until the WS is live (connection.ts's
@@ -533,17 +537,17 @@ export default function App() {
   }, []);
 
   // Age tick — board ages, poll TTLs (fires go out when a poll expires),
-  // and lapsed ACK undo windows committing for real.
+  // and lapsed ACK undo windows committing for real (instance-matched:
+  // sweepAcks never lets a stale ack sweep a NEW failure reusing its key,
+  // and drops acks whose debris was deleted — crisisStore.ts).
   useEffect(() => {
     const timer = setInterval(() => {
       const at = Date.now();
       setNow(at);
-      setCrisis((previous) => reduceCrisisState(previous, agentsRef.current, at));
-      const expired = expiredAcks(acksRef.current, at);
-      if (expired.length > 0) {
-        applyAcks(clearAcks(acksRef.current, expired));
-        setCrisis((previous) => expired.reduce(acknowledgeDebris, previous));
-      }
+      const reduced = reduceCrisisState(crisisRef.current, agentsRef.current, at);
+      const swept = sweepAcks(reduced, acksRef.current, at);
+      if (swept.acks !== acksRef.current) applyAcks(swept.acks);
+      applyCrisis(swept.crisis);
       // dispatchRequest has no ack on the wire — a send with no matching
       // dispatchUpdate within DISPATCH_SEND_TIMEOUT_MS is honestly reported
       // as "not queued" rather than silently doing nothing.
@@ -570,7 +574,7 @@ export default function App() {
     return () => {
       clearInterval(timer);
     };
-  }, [applyAcks]);
+  }, [applyAcks, applyCrisis]);
 
   // DOCK FULL rejection is transient.
   useEffect(() => {
@@ -832,8 +836,8 @@ export default function App() {
           acks={acks}
           now={now}
           onDesk={handleDesk}
-          onAck={(key) => {
-            applyAcks(requestAck(acksRef.current, key, Date.now()));
+          onAck={(key, since) => {
+            applyAcks(requestAck(acksRef.current, key, since, Date.now()));
           }}
           onUndoAck={(key) => {
             applyAcks(undoAck(acksRef.current, key));

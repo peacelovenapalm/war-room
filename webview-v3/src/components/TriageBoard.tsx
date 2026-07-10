@@ -16,7 +16,8 @@ export interface TriageBoardProps {
   now: number;
   /** ▸ DESK — walks the camera to the desk and opens the drawer. */
   onDesk: (agentId: number) => void;
-  onAck: (debrisKey: string) => void;
+  /** `since` names the debris INSTANCE being acked (ackUndo.ts keying). */
+  onAck: (debrisKey: string, since: number) => void;
   onUndoAck: (debrisKey: string) => void;
 }
 
@@ -120,10 +121,17 @@ function BoardRow({
   noticeShown: boolean;
   onShowNotice: () => void;
   onDesk: (agentId: number) => void;
-  onAck: (debrisKey: string) => void;
+  onAck: (debrisKey: string, since: number) => void;
   onUndoAck: (debrisKey: string) => void;
 }) {
-  const pendingUndoUntil = row.debrisKey !== undefined ? acks.get(row.debrisKey) : undefined;
+  // Instance-matched only (ackUndo.ts keying): a pending ack aimed at an
+  // OLDER debris instance that happened to reuse this row's key must not
+  // render an UNDO chip on the new crate — the sweep will drop it.
+  const pendingEntry = row.debrisKey !== undefined ? acks.get(row.debrisKey) : undefined;
+  const pendingUndoUntil =
+    pendingEntry !== undefined && pendingEntry.since === row.debrisSince
+      ? pendingEntry.undoUntil
+      : undefined;
   const agentPresent = agents.has(row.agentId);
 
   return (
@@ -157,7 +165,7 @@ function BoardRow({
                 className="verb"
                 data-testid="verb-ack"
                 onClick={() => {
-                  onAck(row.debrisKey!);
+                  onAck(row.debrisKey!, row.debrisSince ?? 0);
                 }}
               >
                 ✓ ACK

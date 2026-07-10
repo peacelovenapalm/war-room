@@ -97,6 +97,10 @@ export interface TriageRow {
   gate: ApproveGate;
   /** Set on debris rows so the board can ACK/UNDO them. */
   debrisKey?: string;
+  /** The debris instance anchor (DebrisRecord.since) — ACKs are keyed to
+   *  THIS instance so a stale undo window never sweeps a newer failure
+   *  that reused the same `agentId:kind` key (ackUndo.ts). */
+  debrisSince?: number;
 }
 
 export interface CrisisViewInput {
@@ -167,6 +171,7 @@ export function buildTriageRows(
       score: SEVERITY_WEIGHTS[d.kind] * ageMs,
       gate: 'ack-undo',
       debrisKey: d.key,
+      debrisSince: d.since,
     });
   }
   rows.sort((a, b) => b.score - a.score || a.agentId - b.agentId);
