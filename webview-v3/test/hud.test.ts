@@ -120,5 +120,8 @@ describe('buildRealSheet (one-tap-real, hard rule 5)', () => {
     );
     expect(sheet.lines[0]).toBe('cash=10 reputation=5');
     expect(sheet.lines[1]).toContain('-3 reputation — BOUNCED APPROVAL');
+    // Hard rule 5: the tap must decompose into verbatim source refs too,
+    // not dead-end at the human-readable reason label.
+    expect(sheet.lines[1]).toContain('crisis:test-bounce');
   });
 });

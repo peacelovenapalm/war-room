@@ -108,9 +108,12 @@ function ledgerRealLine(entry: {
   delta: number;
   currency: string;
   reason: string;
+  cause?: { sourceEventRefs: string[] };
 }): string {
   const sign = entry.delta >= 0 ? '+' : '';
-  return `${new Date(entry.ts).toISOString()} ${sign}${String(entry.delta)} ${entry.currency} — ${entry.reason}`;
+  const refs = entry.cause?.sourceEventRefs ?? [];
+  const refsSuffix = refs.length > 0 ? ` [${refs.join(', ')}]` : '';
+  return `${new Date(entry.ts).toISOString()} ${sign}${String(entry.delta)} ${entry.currency} — ${entry.reason}${refsSuffix}`;
 }
 
 /**
