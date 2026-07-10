@@ -10,7 +10,13 @@ do about it.
 
 ---
 
-## [KICKOFF v1.1] Deploy gates blocked by the harness permission classifier — REVIEW-ON-RETURN
+## [KICKOFF v1.1] Deploy gates blocked by the harness permission classifier — RESOLVED 2026-07-10
+
+**RESOLVED by the v2.0 run (KICKOFF-v2.0 0.2/0.3):** Greg was present at the
+v2.0 kickoff and live-authorized the command classes; all three gates'
+accumulated code deployed to NEXUS via the (now state-preserving) runbook.
+Deployed SHA verified via the new `/api/version`. Original entry below kept
+for the record.
 
 All three KICKOFF-v1.1.md batched deploy gates (after items 1-2, 3-5,
 6-9) run `NEXUS_HOST=nexus-ts bash .planning/runbooks/nexus-war-room-deploy.sh -y`.
@@ -88,7 +94,42 @@ v1.0 ships. Not gating G6 or the batch-3 deploy.
 
 ---
 
-## [KICKOFF v1.1 item 9] FOCUS/osascript — macOS Automation/TCC consent, not a code bug — REVIEW-ON-RETURN
+## [KICKOFF v2.0 0.7] Greg-gated riders — REVIEW-ON-RETURN (2026-07-10)
+
+Settled as review-on-return by the v2.0 run per KICKOFF 0.7 ("listed,
+never a stall"). Three items, all need Greg at a keyboard:
+
+1. **Mac Mini onboarding** — now correctly sequenced AFTER 0.2's token
+   rotation, so it installs ONCE with the new token:
+   `bash .planning/runbooks/macbook-hooks-install.sh MINI` +
+   `bash .planning/runbooks/install-poller-launchd.sh MINI` +
+   `bash .planning/runbooks/ship-to-mini.sh` (each prompts for its own
+   confirm; token to paste lives in nexus `~/apps/war-room/war-room.env`).
+2. **FOCUS/osascript TCC consent** — see the "[KICKOFF v1.1 item 9]" entry
+   below for the exact System Settings path + diagnostic (unchanged, still
+   open).
+3. **NEXUS backup-v2 include** — the state volume makes War Room state real
+   and durable; add `~/apps/war-room/state` to the backup-v2 include list on
+   NEXUS so economy/employees/chains survive disk loss, not just recreates.
+
+---
+
+## [2026-07-08 handoff] "Economy state survived across all 3 redeploys" — REFUTED 2026-07-10
+
+The 2026-07-08 session handoff (§ around line 41) claimed economy state
+survived three redeploys. The 2026-07-10 audit's critic pass REFUTED this:
+`git log -p` across all four historical revisions of
+`.planning/runbooks/nexus-war-room-deploy.sh` shows NO state volume ever
+existed, and the 2026-07-09 recreate demonstrably destroyed the prior save.
+The apparent "survival" was gate contracts auto-re-completing against the
+read-only briefing mounts — new state that merely resembled the old.
+Deploy-wipes-state stood unqualified until the v2.0 run's 0.2 added the
+persistent state volume + migration (commit 2a67f27) and PROVED persistence
+with identical economy values across two consecutive recreates.
+
+---
+
+## [KICKOFF v1.1 item 9] FOCUS/osascript — macOS Automation/TCC consent, not a code bug — REVIEW-ON-RETURN (still open, Greg-gated)
 
 Diagnosed live on Greg's MacBook (2026-07-09), per KICKOFF v1.1 item 9's
 mandate to capture real stderr before fixing anything. Two candidate root
@@ -231,6 +272,9 @@ appears in FUNNEL status`** after a successful deploy. Independently
    flagging as a REVIEW-ON-RETURN cleanup, not a blocker; every deploy
    gate needs a human (or the orchestrator) to re-verify this by hand
    until then.
+   **→ RESOLVED 2026-07-10 (v2.0 run 0.2):** the runbook's funnel grep now
+   excludes `(tailnet only)` lines (commit 2a67f27); both v2.0 deploys
+   reported a clean `funnel check clean` with no false FAIL.
 
 **Post-deploy verification (independent, not the runbook's own output):**
 
@@ -344,6 +388,11 @@ by design this means zero Bark pushes fire (feature-off posture,
 verified: `getBarkUrl()` returns undefined, `push()` no-ops before any
 fetch). Setting it is a Greg-owned NEXUS env change, not something this
 session touched.
+**→ RESOLVED 2026-07-10:** `WAR_ROOM_BARK_URL` is present in
+`~/apps/war-room/war-room.env` (key verified live) and a real push through
+the deployed instance's notifyBark path returned the 2xx-only "delivered"
+log line during the v2.0 run's 0.2 smoke — the Bark plane is live
+end-to-end.
 
 **4. Daily/weekly contract flavor titles are a judgment call.**
 GAME-DESIGN §6.2 names "12-entry template table" / "4-entry template

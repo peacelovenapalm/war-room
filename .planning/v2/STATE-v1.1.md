@@ -1,6 +1,6 @@
 # STATE v1.1 — run ledger (machine-updated, newest log entries first)
 
-status: IN PROGRESS <!-- IN PROGRESS | RUN COMPLETE -->
+status: RUN COMPLETE <!-- IN PROGRESS | RUN COMPLETE -->
 
 ## Items
 
@@ -19,16 +19,17 @@ status: IN PROGRESS <!-- IN PROGRESS | RUN COMPLETE -->
 
 ## Deploy gates
 
-| Gate | After                                          | Status                                                                                |
-| ---- | ---------------------------------------------- | ------------------------------------------------------------------------------------- |
-| 1    | items 1-2                                      | review-on-return (harness permission gate — see log)                                  |
-| 2    | items 3-5                                      | review-on-return (same harness permission gate as gate 1 — not re-attempted, see log) |
-| 3    | items 6-9 settled + landed F items + full gate | pending                                                                               |
+| Gate | After                                          | Status                                                                                                                                                                                                          |
+| ---- | ---------------------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| 1    | items 1-2                                      | done (2026-07-10 v2.0 run 0.2: deployed via the state-migrating runbook, Greg live-authorizing; /api/version confirms SHA 0438c03…)                                                                             |
+| 2    | items 3-5                                      | done (same 2026-07-10 deploy; items 3-5 code live on NEXUS)                                                                                                                                                     |
+| 3    | items 6-9 settled + landed F items + full gate | done (same 2026-07-10 deploy; item 7's real-push half now met — Bark push through the deployed notifyBark path, "delivered" 2xx-only log; economy migrated intact cash=653/rep=29/ledger=66 across 2 recreates) |
 
 ## Log
 
 <!-- one line per event: ISO time — what happened / what's next -->
 
+- 2026-07-10T10:05:00Z — Run formally CLOSED by the v2.0 execution session (KICKOFF-v2.0 item 0.3). All three deploy gates flipped to done with live evidence: v1.1 code (HEAD c369684 + docs) deployed to NEXUS 2026-07-10 via the now-state-preserving runbook, Greg present and live-authorizing; deployed SHA confirmed via the new /api/version (0438c03…, which contains every v1.1 commit); pre-deploy economy state migrated intact (cash=653/rep=29/ledger=66, identical across two recreates — the volume fix's proof); item 7's outstanding real-push criterion met (Bark "delivered" through the deployed instance). status flipped to RUN COMPLETE as the last write of this file.
 - 2026-07-09T08:51:22Z — LOOP-LOCK claimed (pid 97056), first iteration, STATE-v1.1.md created from KICKOFF-v1.1.md template. Next: baseline re-derivation + preflight.
 - 2026-07-09T08:56:00Z — baseline re-derivation MATCHES expected exactly: check-types clean, lint clean, server 512/512, webview 264/264, bin/poller 74/74, build clean (PWA output present, 11 precache entries). No mismatch, no stop needed.
 - 2026-07-09T08:58:00Z — preflight PASS: `ssh nexus-ts true` reachable; `npx playwright --version` → 1.59.1 present; `git push --dry-run` has no upstream on war-room/v1 (pre-existing — v0/v1 were never pushed to origin; deploy runbook rsyncs the local checkout over SSH directly, no git push in the deploy path, so this is not a blocker). Proceeding to item 1.
