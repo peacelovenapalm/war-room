@@ -85,6 +85,15 @@ const execAsync = promisify(exec);
 const POST_TIMEOUT_MS = 10_000;
 const FOCUS_TIMEOUT_MS = 5_000;
 const MIN_INTERVAL_MS = 2_000;
+/** Upper bound on how long the terminal (exited/killed) status POST waits
+ *  for the output forwarder's final flush. The server's /output route is
+ *  liveness-gated (non-terminal dispatches only), so a terminal status POST
+ *  that overtakes the final flush would evict the ring entry and silently
+ *  drop the run's last chunks — the flush must be sequenced FIRST. But a
+ *  hung server must never stall exit reporting indefinitely (same posture
+ *  as readResultTail: lost telemetry is acceptable, a missing terminal
+ *  status is not), so the wait is bounded at one POST timeout. */
+const FINAL_FLUSH_MAX_WAIT_MS = POST_TIMEOUT_MS;
 /** Tail of the per-run log posted alongside `exited` — the only place a run's
  *  actual output reaches the dashboard (otherwise it's stranded in a log file
  *  on whichever machine ran it). Capped well under the server's own cap
@@ -396,9 +405,15 @@ function runDispatch(cfg, item, argv, state, deps) {
     const registryEntry = state.children.get(item.id);
     const wasKilled = registryEntry?.killRequested === true;
     state.children.delete(item.id);
-    // Final output flush — stops the coalescing loop; never blocks or
-    // fails the exit reporting below (stop() swallows POST failures).
-    void forwarder.stop();
+    // Final output flush — stops the coalescing loop. The returned promise
+    // (the forwarder's serialized POST chain) GATES the terminal status
+    // POST below: the server's /output route is liveness-gated, so letting
+    // the exited/killed status POST win the race would evict the ring entry
+    // and reject the flush — subscribers would silently lose the run's last
+    // output. Bounded via FINAL_FLUSH_MAX_WAIT_MS in reportExited (a hung
+    // server delays exit reporting by at most one POST timeout, then the
+    // report proceeds without the flush). stop() itself never throws.
+    const finalFlush = forwarder.stop();
     const exitCode = typeof code === 'number' ? code : -1;
     // Read the tail AFTER the log stream settles — reading immediately on
     // 'exit' can race the write stream's buffered data. Guards against
@@ -412,8 +427,18 @@ function runDispatch(cfg, item, argv, state, deps) {
       // A DISTINCT terminal status for an explicit kill — never conflated
       // with a natural exit (KICKOFF v1.1 item 3's explicit requirement).
       const event = wasKilled ? 'killed' : 'exited';
-      void postStatus(cfg, item.id, { event, exitCode, resultTail }, deps.fetch ?? fetch);
-      audit(cfg, event, { id: item.id, pid: child.pid, exitCode, resultTail });
+      // Sequence AFTER the final output flush (bounded — see finalFlush's
+      // comment above) so the terminal status POST can never overtake the
+      // run's last chunks into the server's liveness-gated /output route.
+      const maxWaitMs = deps.finalFlushMaxWaitMs ?? FINAL_FLUSH_MAX_WAIT_MS;
+      const bound = new Promise((resolve) => {
+        const t = setTimeout(resolve, maxWaitMs);
+        t.unref?.();
+      });
+      void Promise.race([finalFlush, bound]).then(() => {
+        void postStatus(cfg, item.id, { event, exitCode, resultTail }, deps.fetch ?? fetch);
+        audit(cfg, event, { id: item.id, pid: child.pid, exitCode, resultTail });
+      });
     };
     if (logStream) {
       logStream.once('finish', reportExited);

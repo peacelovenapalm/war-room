@@ -301,6 +301,96 @@ test('tick: child stdout/stderr are forwarded to /api/dispatch/:id/output (final
   assert.ok(exited, 'exited status POST still happens');
 });
 
+test('tick: the terminal status POST never overtakes the final output flush (server liveness-gate race)', async () => {
+  // The real server evicts the ring entry on a terminal status POST and its
+  // /output route rejects appends for terminal dispatches — so if the
+  // exited status POST reaches the server BEFORE the final flush, the run's
+  // last chunks are silently lost. This test slows only the /output POSTs
+  // (a plausibly-reordered network) and asserts arrival ORDER at the server.
+  const item = {
+    id: 'req-race',
+    action: 'dispatch',
+    provider: 'claude',
+    cwd: tmpDir,
+    prompt: 'last words',
+  };
+  const { server, captured, port } = await startStubServer(stubHandler({ pending: [item] }));
+  const cfg = baseCfg(port);
+  const allowlist = { providers: ['claude'], roots: [tmpDir], focus: false };
+  const slowOutputFetch = async (url, init) => {
+    if (String(url).includes('/output')) {
+      await new Promise((resolve) => setTimeout(resolve, 120));
+    }
+    return fetch(url, init);
+  };
+  await tick(
+    cfg,
+    { handled: new Set(), children: new Map() },
+    {
+      readAllowlist: () => allowlist,
+      fetch: slowOutputFetch,
+      spawn: () => {
+        const child = new EventEmitter();
+        child.pid = 4242;
+        child.stdout = new EventEmitter();
+        child.stderr = new EventEmitter();
+        setImmediate(() => {
+          // Buffered below the byte threshold — still pending at exit, so it
+          // travels in stop()'s final flush.
+          child.stdout.emit('data', Buffer.from('final chunk\n'));
+          setImmediate(() => child.emit('exit', 0));
+        });
+        return child;
+      },
+    },
+  );
+  await new Promise((resolve) => setTimeout(resolve, 500));
+  server.close();
+
+  const outputIdx = captured.findIndex((c) => c.url === '/api/dispatch/req-race/output');
+  const exitedIdx = captured.findIndex(
+    (c) => c.url === '/api/dispatch/req-race/status' && c.body.event === 'exited',
+  );
+  assert.notEqual(outputIdx, -1, 'the final chunk POST reached the server');
+  assert.notEqual(exitedIdx, -1, 'the exited status POST reached the server');
+  assert.ok(
+    outputIdx < exitedIdx,
+    `final output flush (arrival #${outputIdx}) must reach the server BEFORE the terminal status (arrival #${exitedIdx})`,
+  );
+});
+
+test('tick: a never-settling final flush cannot stall the terminal status POST past its bound', async () => {
+  const item = {
+    id: 'req-hung-flush',
+    action: 'dispatch',
+    provider: 'claude',
+    cwd: tmpDir,
+    prompt: 'hi',
+  };
+  const { server, captured, port } = await startStubServer(stubHandler({ pending: [item] }));
+  const cfg = baseCfg(port);
+  const allowlist = { providers: ['claude'], roots: [tmpDir], focus: false };
+  await tick(
+    cfg,
+    { handled: new Set(), children: new Map() },
+    {
+      readAllowlist: () => allowlist,
+      spawn: () => fakeChild(0),
+      // A forwarder whose POST chain never settles — the hung-server
+      // worst case. Exit reporting must proceed after the bounded wait.
+      createOutputForwarder: () => ({ push: () => {}, stop: () => new Promise(() => {}) }),
+      finalFlushMaxWaitMs: 50,
+    },
+  );
+  await new Promise((resolve) => setTimeout(resolve, 300));
+  server.close();
+
+  const exited = captured.find(
+    (c) => c.url === '/api/dispatch/req-hung-flush/status' && c.body.event === 'exited',
+  );
+  assert.ok(exited, 'exited status POST still happens despite a hung final flush');
+});
+
 test('tick: a child with no output produces no output POSTs', async () => {
   const item = {
     id: 'req-silent',
