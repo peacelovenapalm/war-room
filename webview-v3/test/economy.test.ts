@@ -11,12 +11,28 @@ describe('reduceEconomy', () => {
       grime: 0,
       vacationMode: false,
       bayCount: 2,
-      ledger: [{ ts: 1, delta: 5, currency: 'cash', reason: 'dispatch exit 0' }],
+      ledger: [
+        {
+          ts: 1,
+          delta: 5,
+          currency: 'cash',
+          reason: 'dispatch exit 0',
+          cause: { label: 'dispatch exit 0', sourceEventRefs: ['dispatch:test-1'] },
+        },
+      ],
     });
     expect(update).toEqual({
       cash: 1250,
       reputation: 42,
-      ledger: [{ ts: 1, delta: 5, currency: 'cash', reason: 'dispatch exit 0' }],
+      ledger: [
+        {
+          ts: 1,
+          delta: 5,
+          currency: 'cash',
+          reason: 'dispatch exit 0',
+          cause: { label: 'dispatch exit 0', sourceEventRefs: ['dispatch:test-1'] },
+        },
+      ],
     });
     expect(reduceEconomy(update, { type: 'agentClosed', id: 1 })).toBe(update);
   });

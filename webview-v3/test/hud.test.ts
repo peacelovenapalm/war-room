@@ -105,7 +105,15 @@ describe('buildRealSheet (one-tap-real, hard rule 5)', () => {
         economy: {
           cash: 10,
           reputation: 5,
-          ledger: [{ ts: 0, delta: -3, currency: 'reputation', reason: 'BOUNCED APPROVAL' }],
+          ledger: [
+            {
+              ts: 0,
+              delta: -3,
+              currency: 'reputation',
+              reason: 'BOUNCED APPROVAL',
+              cause: { label: 'BOUNCED APPROVAL', sourceEventRefs: ['crisis:test-bounce'] },
+            },
+          ],
         },
       },
       NOW,
