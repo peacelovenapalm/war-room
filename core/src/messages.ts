@@ -29,6 +29,7 @@ export type ServerMessage =
   | AgentPidUpdate
   | ProgressionUpdate
   | DispatchUpdate
+  | OutputChunk
   | EmployeeSnapshot
   | EmployeeHired
   | EmployeeQuit
@@ -65,6 +66,8 @@ export type ClientMessage =
   | SetHooksInfoShown
   | SetWatchAllSessions
   | DispatchRequest
+  | TailSubscribe
+  | TailUnsubscribe
   | ExportLayout
   | ImportLayout
   | OpenSessionsFolder
@@ -254,6 +257,20 @@ export type DispatchStatusValue =
   | 'expired'
   | 'exited'
   | 'killed';
+
+export interface OutputChunk {
+  type: 'outputChunk';
+  source: OutputSourceValue;
+  id: string;
+  seq: number;
+  stream: OutputStreamValue;
+  chunk: string;
+  truncated: boolean;
+}
+
+export type OutputSourceValue = 'agent' | 'dispatch';
+
+export type OutputStreamValue = 'stdout' | 'stderr' | 'transcript';
 
 export interface EmployeeSnapshot {
   type: 'employeeSnapshot';
@@ -639,6 +656,18 @@ export interface DispatchRequest {
 }
 
 export type DispatchEffortValue = 'low' | 'medium' | 'high' | 'xhigh' | 'max';
+
+export interface TailSubscribe {
+  type: 'tailSubscribe';
+  source: OutputSourceValue;
+  id: string;
+}
+
+export interface TailUnsubscribe {
+  type: 'tailUnsubscribe';
+  source: OutputSourceValue;
+  id: string;
+}
 
 export interface ExportLayout {
   type: 'exportLayout';

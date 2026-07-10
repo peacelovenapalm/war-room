@@ -105,6 +105,8 @@ components:
         - $ref: '#/components/schemas/ProgressionUpdate'
         # Dispatch (v1 mechanic #6b — call a coworker)
         - $ref: '#/components/schemas/DispatchUpdate'
+        # Streaming telemetry (KICKOFF-v2.0 Phase 2 — live output tail)
+        - $ref: '#/components/schemas/OutputChunk'
         # Employees (v2 mechanic G1 — colony-sim layer, GAME-DESIGN.md §4)
         - $ref: '#/components/schemas/EmployeeSnapshot'
         - $ref: '#/components/schemas/EmployeeHired'
@@ -151,6 +153,8 @@ components:
         - $ref: '#/components/schemas/SetHooksInfoShown'
         - $ref: '#/components/schemas/SetWatchAllSessions'
         - $ref: '#/components/schemas/DispatchRequest'
+        - $ref: '#/components/schemas/TailSubscribe'
+        - $ref: '#/components/schemas/TailUnsubscribe'
         - $ref: '#/components/schemas/ExportLayout'
         - $ref: '#/components/schemas/ImportLayout'
         - $ref: '#/components/schemas/OpenSessionsFolder'
@@ -666,6 +670,62 @@ components:
         terminal status, never conflated with a natural `exited`.
       type: string
       enum: [ringing, answered, denied, expired, exited, killed]
+
+    # ── Streaming telemetry (KICKOFF-v2.0 Phase 2 — live output tail) ──
+
+    OutputChunk:
+      description: >-
+        One live output chunk from a running agent session or dispatch run
+        (KICKOFF-v2.0 Phase 2; DISPATCH-6B-DESIGN amendment #2). TELEMETRY
+        ONLY — streaming never carries commands and never changes
+        runner-decides containment. Delivered ONLY to sockets that sent a
+        matching tailSubscribe (never broadcast to every client), with the
+        server-side ring buffer replayed on subscribe. Chunks are ephemeral
+        (in-memory ring, evicted on terminal status, never persisted — the
+        PidKillRecord precedent).
+      type: object
+      additionalProperties: false
+      required: [type, source, id, seq, stream, chunk, truncated]
+      properties:
+        type:
+          const: outputChunk
+        source:
+          $ref: '#/components/schemas/OutputSourceValue'
+        id:
+          type: string
+          description: >-
+            Stream owner id within `source`: the dispatch queue UUID
+            (source "dispatch") or the session/transcript id (source
+            "agent").
+        seq:
+          type: integer
+          description: >-
+            Monotonically increasing per (source, id, stream) — lets a
+            client detect replay overlap after a reconnect and order chunks
+            without trusting arrival order.
+        stream:
+          $ref: '#/components/schemas/OutputStreamValue'
+        chunk:
+          type: string
+        truncated:
+          type: boolean
+          description: >-
+            True on the first replayed chunk of a stream whose older history
+            was evicted by the ring buffer's byte budget — a late subscriber
+            knows it is seeing a tail, not the full output.
+
+    OutputSourceValue:
+      description: Which plane the output stream belongs to.
+      type: string
+      enum: [agent, dispatch]
+
+    OutputStreamValue:
+      description: >-
+        Which output stream of the owner the chunk came from. `transcript`
+        is the local-JSONL tail (assistant text/tool lines); stdout/stderr
+        are dispatch-run pipes forwarded by the runner.
+      type: string
+      enum: [stdout, stderr, transcript]
 
     EmployeeScores:
       description: >-
@@ -1534,6 +1594,39 @@ components:
         runner silently omits it for the rest.
       type: string
       enum: [low, medium, high, xhigh, max]
+
+    TailSubscribe:
+      description: >-
+        Subscribe THIS socket to a (source, id) output stream (KICKOFF-v2.0
+        Phase 2). The server immediately replays the ring buffer's retained
+        chunks to this socket only, then forwards new chunks live. Purely a
+        telemetry-routing request — it never starts, stops, or steers the
+        underlying run.
+      type: object
+      additionalProperties: false
+      required: [type, source, id]
+      properties:
+        type:
+          const: tailSubscribe
+        source:
+          $ref: '#/components/schemas/OutputSourceValue'
+        id:
+          type: string
+
+    TailUnsubscribe:
+      description: >-
+        Stop forwarding a (source, id) output stream to this socket. Socket
+        close implicitly unsubscribes everything.
+      type: object
+      additionalProperties: false
+      required: [type, source, id]
+      properties:
+        type:
+          const: tailUnsubscribe
+        source:
+          $ref: '#/components/schemas/OutputSourceValue'
+        id:
+          type: string
 
     SaveAgentSeats:
       description: Persist seat assignments for current agents.
