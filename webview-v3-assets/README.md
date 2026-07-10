@@ -12,7 +12,13 @@ cd tools/asset-pipeline && make all
 | `props.structure.sheet.png` | 3 floor tiles + 3 wall segments × 4 rotations, 2:1 dimetric, alpha, 1x scale (tile = 128×64 px) |
 | `props.furniture.sheet.png` | 10 furniture props × 4 rotations (N/E/S/W), alpha + baked contact shadow |
 | `props.manifest.json` | frame rects, floor-contact anchors, footprints, attach quads, sheet index (schema in `tools/asset-pipeline/README.md`) |
+| `characters.staff_a.sheet.png` | teal + rust outfits × {walk×4, sit, type×2, blocked} × 4 rotations, same rig/lighting as props |
+| `characters.staff_b.sheet.png` | slate + moss outfits × the same animation set |
+| `characters.pets.sheet.png` | cat: curled + 2-frame walk × 4 rotations |
+| `characters.manifest.json` | same schema, animated: `frames.<ROT>` is an ARRAY in animation order + `fps` per sprite |
 
 Consumed by `webview-v3` (WS-A) via its asset-manifest loader.
 `desk_monitor` carries an `attach.screen` quad per rotation — the
-monitor face the DOM tail overlay anchors onto.
+monitor face the DOM tail overlay anchors onto. Seated characters
+(`*.sit`, `*.type`) are authored with pelvis at chair-seat height —
+draw chair first, then person, same tile, rotation facing the desk.
