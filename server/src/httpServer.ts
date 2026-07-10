@@ -240,8 +240,8 @@ export async function createHttpServer(options: HttpServerOptions): Promise<Http
       online: true,
       isVacationActive: () => economyStore.isVacationActive(),
       getGrime: () => economyStore.getSnapshot().grime,
-      awardCash: (amount, reason) => economyStore.addCash(amount, reason),
-      awardReputation: (amount, reason) => economyStore.addReputation(amount, reason),
+      awardCash: (amount, cause) => economyStore.addCash(amount, cause),
+      awardReputation: (amount, cause) => economyStore.addReputation(amount, cause),
       pickLowMoodEmployeeId: () => pickLowMoodEmployeeId(),
       pickRandomEmployeeId: () => pickRandomEmployeeId(),
       nudgeEmployeeMoodBoost: (id, delta) => employeeStore.nudgeMoodBoost(id, delta),
@@ -649,7 +649,14 @@ function registerDispatchRoutes(app: FastifyInstance, options: HttpServerOptions
         // so the bonus is computed here and passed through.
         const dispatchLayout = getOfficeLayout();
         const dispatchCashBonusPct = dispatchLayout ? globalBuffs(dispatchLayout).cashBonusPct : 0;
-        economyStore.recordDispatchExit(exitCode, undefined, dispatchCashBonusPct);
+        // Receipt ref (v3 REP receipts): the observed dispatch exit —
+        // same `dispatch:<id>` convention as the stage-2 v3 planes.
+        economyStore.recordDispatchExit(
+          exitCode,
+          `dispatch:${request.params.id}`,
+          undefined,
+          dispatchCashBonusPct,
+        );
         if (record?.employeeId) {
           employeeStore.recordDispatchExit(record.employeeId, exitCode);
         }

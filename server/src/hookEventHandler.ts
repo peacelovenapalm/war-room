@@ -709,7 +709,11 @@ export class HookEventHandler {
     // efficiency score or farm XP/streak from heartbeat noise.
     if (!awaitingInput && (!agent.providerId || agent.providerId === 'claude')) {
       shiftStats.recordTurnEnd();
-      progression.recordTurnEnd();
+      // Receipt ref (v3 REP receipts): the observed Stop event, named by
+      // the durable staff lineage it belongs to — the one-tap-real
+      // decomposition for the XP/Cash this turn mints.
+      const turnSourceRef = `hook-stop:${employeeId(agent.machine, agent.projectDir)}`;
+      progression.recordTurnEnd(turnSourceRef);
       // Employees (v2 mechanic G1, GAME-DESIGN §4): same real-event source
       // and exclusion as progression/shiftStats above — added alongside,
       // not instead of. outputTokens is the agent's cumulative session
@@ -753,8 +757,9 @@ export class HookEventHandler {
       );
       // Economy (v2 mechanic G2, GAME-DESIGN §3): same real-event source
       // and exclusion as above — Cash + the once/day streak-touch bonus,
-      // plus the Server Room global Cash bonus computed above.
-      economyStore.recordTurnCompleted(undefined, cashBonusPct);
+      // plus the Server Room global Cash bonus computed above. Same
+      // receipt ref as progression (identical source event).
+      economyStore.recordTurnCompleted(turnSourceRef, undefined, cashBonusPct);
       // Dossiers (v3 WS-C stage 2): the same real Stop event feeds the
       // staff-lineage telemetry (turn count, night-hour fraction, output-
       // token burn) — added alongside, not instead of; dossierDerivation

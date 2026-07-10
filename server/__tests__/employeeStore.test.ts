@@ -710,7 +710,11 @@ describe('EmployeeStore.train/.promote — Cash debit (GAME-DESIGN §3.1, §4.6)
 
     expect(result.ok).toBe(true);
     expect(spendCash).toHaveBeenCalledTimes(1);
-    expect(spendCash).toHaveBeenCalledWith(TRAIN_COST_CASH, 'train-speed', DAY1 + 3000);
+    expect(spendCash).toHaveBeenCalledWith(
+      TRAIN_COST_CASH,
+      expect.objectContaining({ label: 'train-speed' }),
+      DAY1 + 3000,
+    );
     const trained = (result as { ok: true; employee: Employee }).employee;
     expect(trained.trainingBonus.speed).toBe(2);
     expect(trained.moodBoost).toBe(3);
@@ -726,7 +730,11 @@ describe('EmployeeStore.train/.promote — Cash debit (GAME-DESIGN §3.1, §4.6)
     const result = store.train(emp.id, 'speed', DAY1 + 3000);
 
     expect(result).toEqual({ ok: false, reason: 'insufficient-cash' });
-    expect(spendCash).toHaveBeenCalledWith(TRAIN_COST_CASH, 'train-speed', DAY1 + 3000);
+    expect(spendCash).toHaveBeenCalledWith(
+      TRAIN_COST_CASH,
+      expect.objectContaining({ label: 'train-speed' }),
+      DAY1 + 3000,
+    );
     const after = store.getById(emp.id, DAY1 + 3000)!;
     expect(after.trainingBonus).toEqual(before.trainingBonus);
     expect(after.moodBoost).toBe(before.moodBoost);
@@ -753,7 +761,7 @@ describe('EmployeeStore.train/.promote — Cash debit (GAME-DESIGN §3.1, §4.6)
     expect(spendCash).toHaveBeenNthCalledWith(
       1,
       PROMOTE_COST_PER_TIER * 1,
-      'promote-Senior',
+      expect.objectContaining({ label: 'promote-Senior' }),
       DAY1 + 3000,
     );
     expect((first as { ok: true; employee: Employee }).employee.rank).toBe('Senior');
@@ -765,7 +773,7 @@ describe('EmployeeStore.train/.promote — Cash debit (GAME-DESIGN §3.1, §4.6)
     expect(spendCash).toHaveBeenNthCalledWith(
       2,
       PROMOTE_COST_PER_TIER * 2,
-      'promote-Lead',
+      expect.objectContaining({ label: 'promote-Lead' }),
       DAY1 + 4000,
     );
     expect((second as { ok: true; employee: Employee }).employee.rank).toBe('Lead');
@@ -782,7 +790,7 @@ describe('EmployeeStore.train/.promote — Cash debit (GAME-DESIGN §3.1, §4.6)
     expect(result).toEqual({ ok: false, reason: 'insufficient-cash' });
     expect(spendCash).toHaveBeenCalledWith(
       PROMOTE_COST_PER_TIER * 1,
-      'promote-Senior',
+      expect.objectContaining({ label: 'promote-Senior' }),
       DAY1 + 3000,
     );
     const after = store.getById(emp.id, DAY1 + 3000)!;

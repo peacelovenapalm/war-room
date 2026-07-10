@@ -41,6 +41,7 @@ import { employeeId } from '../../core/src/employeeId.js';
 import { computeLevel, xpForLevel } from '../../core/src/leveling.js';
 import { buffsForDesk, globalBuffs } from './buildingBuffs.js';
 import { LAYOUT_FILE_DIR } from './constants.js';
+import type { EconomyCause } from './economyStore.js';
 import { economyStore } from './economyStore.js';
 import { EMPLOYEE_NAMES } from './employeeNames.js';
 import { getOfficeLayout } from './officeLayoutStore.js';
@@ -259,7 +260,7 @@ export interface EmployeeStoreDeps {
   /** G2's economyStore vacation flag — no-op (never on vacation) until wired. */
   isVacationActive?: () => boolean;
   /** G2's economyStore Reputation award — no-op until wired. */
-  awardReputation?: (delta: number, reason: string) => void;
+  awardReputation?: (delta: number, cause: EconomyCause) => void;
   /** G2's economyStore Cash debit (GAME-DESIGN §3.1, F1) — mirrors
    *  economyStore.spend()'s contract exactly: returns false WITHOUT
    *  mutating anything (economy or employee state) when funds are
@@ -269,7 +270,7 @@ export interface EmployeeStoreDeps {
    *  instances that don't care about Cash, same posture as
    *  awardReputation's silent no-op default — only the process-wide
    *  singleton below wires the real economyStore.spend. */
-  spendCash?: (amount: number, reason: string, now: number) => boolean;
+  spendCash?: (amount: number, cause: EconomyCause, now: number) => boolean;
 }
 
 export class EmployeeStore {
@@ -282,8 +283,8 @@ export class EmployeeStore {
   private resolvedLedgerDir: string | undefined;
   private listeners: Array<(snapshot: Employee) => void> = [];
   private readonly isVacationActive: () => boolean;
-  private readonly awardReputation: (delta: number, reason: string) => void;
-  private readonly spendCash: (amount: number, reason: string, now: number) => boolean;
+  private readonly awardReputation: (delta: number, cause: EconomyCause) => void;
+  private readonly spendCash: (amount: number, cause: EconomyCause, now: number) => boolean;
 
   constructor(persistPath?: string, ledgerDir?: string, deps: EmployeeStoreDeps = {}) {
     this.explicitPath = persistPath;
@@ -452,7 +453,13 @@ export class EmployeeStore {
     // first mutation — every gate above is a free read-only refusal, so
     // insufficient Cash never burns the once/day cooldown or grants any
     // partial XP/mood/track effect (no dark patterns).
-    if (!this.spendCash(TRAIN_COST_CASH, `train-${track}`, now)) {
+    if (
+      !this.spendCash(
+        TRAIN_COST_CASH,
+        { label: `train-${track}`, sourceEventRefs: [`player-action:train:${id}:${track}`] },
+        now,
+      )
+    ) {
       return { ok: false, reason: 'insufficient-cash' };
     }
     emp.trainingBonus[track] = Math.min(tier.trainingCap, emp.trainingBonus[track] + 2);
@@ -479,7 +486,13 @@ export class EmployeeStore {
     // or the +15 moodBoost (no dark patterns).
     const nextTierIndex = currentIndex + 1;
     const cost = PROMOTE_COST_PER_TIER * nextTierIndex;
-    if (!this.spendCash(cost, `promote-${next.rank}`, now)) {
+    if (
+      !this.spendCash(
+        cost,
+        { label: `promote-${next.rank}`, sourceEventRefs: [`player-action:promote:${id}`] },
+        now,
+      )
+    ) {
       return { ok: false, reason: 'insufficient-cash' };
     }
     emp.rank = next.rank;
@@ -520,7 +533,10 @@ export class EmployeeStore {
     emp.status = 'fired';
     const data = this.ensureLoaded();
     if (!data.blacklist.includes(id)) data.blacklist.push(id);
-    this.awardReputation(-10, `fired:${id}`);
+    this.awardReputation(-10, {
+      label: `fired:${id}`,
+      sourceEventRefs: [`player-action:fire-employee:${id}`],
+    });
     this.finish(emp, now, 'fired', {});
     return { ok: true, employee: { ...emp } };
   }
@@ -533,7 +549,10 @@ export class EmployeeStore {
     const { level } = computeLevel(emp.xp, EMPLOYEE_LEVEL_CURVE);
     if (level < 10) return { ok: false, reason: 'level-too-low' };
     emp.status = 'retired';
-    this.awardReputation(10, `retired:${id}`);
+    this.awardReputation(10, {
+      label: `retired:${id}`,
+      sourceEventRefs: [`player-action:retire-employee:${id}`],
+    });
     this.finish(emp, now, 'retired', { rank: emp.rank, level });
     return { ok: true, employee: { ...emp } };
   }
@@ -852,6 +871,6 @@ export class EmployeeStore {
  *  instances (`new EmployeeStore(path, ledgerDir)`), never this one. */
 export const employeeStore = new EmployeeStore(undefined, undefined, {
   isVacationActive: () => economyStore.isVacationActive(),
-  awardReputation: (delta, reason) => economyStore.addReputation(delta, reason),
-  spendCash: (amount, reason, now) => economyStore.spend(amount, reason, now),
+  awardReputation: (delta, cause) => economyStore.addReputation(delta, cause),
+  spendCash: (amount, cause, now) => economyStore.spend(amount, cause, now),
 });

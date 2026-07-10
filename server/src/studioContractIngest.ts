@@ -45,6 +45,7 @@ import * as path from 'path';
 import type { DispatchBroadcast } from './dispatchStore.js';
 import { DispatchStore, dispatchStore } from './dispatchStore.js';
 import { STUDIO_CONTRACT_REWARD_CASH } from './economyConstants.js';
+import type { EconomyCause } from './economyStore.js';
 import { economyStore } from './economyStore.js';
 import { StudioContractStore, studioContractStore } from './studioContractStore.js';
 
@@ -120,17 +121,17 @@ export interface SweepResult {
 
 export class StudioContractIngest {
   private readonly store: StudioContractStore;
-  private readonly awardCash: (amount: number, reason: string, now: number) => void;
+  private readonly awardCash: (amount: number, cause: EconomyCause, now: number) => void;
   private subscribed = false;
   private processedDispatchIds = new Set<string>();
 
   constructor(
     store: StudioContractStore = studioContractStore,
-    awardCash?: (amount: number, reason: string, now: number) => void,
+    awardCash?: (amount: number, cause: EconomyCause, now: number) => void,
   ) {
     this.store = store;
     this.awardCash =
-      awardCash ?? ((amount, reason, now) => economyStore.addCash(amount, reason, now));
+      awardCash ?? ((amount, cause, now) => economyStore.addCash(amount, cause, now));
   }
 
   /** Subscribe the dispatch-progress feed. Idempotent — call exactly once
@@ -173,9 +174,20 @@ export class StudioContractIngest {
         const completed = this.store.complete(contract.id, now);
         if (completed.ok) {
           result.completed++;
-          // Bonus-only, through the existing pipeline, cause ref = the
-          // contract id (whose sourceTodo is the verbatim line — one tap).
-          this.awardCash(contract.reward, `studio-contract-completed:${contract.id}`, now);
+          // Bonus-only, through the existing pipeline. Receipt refs: the
+          // contract id (whose sourceTodo is the verbatim line — one tap)
+          // plus the todo file+line the done signal was observed against.
+          this.awardCash(
+            contract.reward,
+            {
+              label: `studio-contract-completed:${contract.id}`,
+              sourceEventRefs: [
+                `studio-contract:${contract.id}`,
+                `todo:${contract.sourceTodo.file}#L${contract.sourceTodo.line}`,
+              ],
+            },
+            now,
+          );
         }
       }
     }

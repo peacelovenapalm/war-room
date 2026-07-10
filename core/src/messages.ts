@@ -237,6 +237,22 @@ export interface ProgressionUpdate {
   streakCurrent: number;
   streakLongest: number;
   unlocks: Record<string, boolean>;
+  ledger: EconomyLedgerEntry[];
+}
+
+export interface EconomyLedgerEntry {
+  ts: number;
+  delta: number;
+  currency: EconomyCurrencyValue;
+  reason: string;
+  cause: EconomyCause;
+}
+
+export type EconomyCurrencyValue = 'cash' | 'reputation' | 'xp';
+
+export interface EconomyCause {
+  label: string;
+  sourceEventRefs: string[];
 }
 
 export interface DispatchUpdate {
@@ -351,15 +367,6 @@ export interface EconomyUpdate {
   bayCount: number;
   ledger: EconomyLedgerEntry[];
 }
-
-export interface EconomyLedgerEntry {
-  ts: number;
-  delta: number;
-  currency: EconomyCurrencyValue;
-  reason: string;
-}
-
-export type EconomyCurrencyValue = 'cash' | 'reputation';
 
 export interface OfficeExpanded {
   type: 'officeExpanded';

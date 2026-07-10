@@ -13,8 +13,18 @@
  * a dispatch exit — wired into the EXACT same call sites
  * progression.recordTurnEnd/recordCrisisResolved/recordShiftDayClosed
  * already use. Nothing here ever reads token volume as a reward signal.
- * `addCash`/`addReputation` both require a `reason` string — this IS the
- * anti-dark-pattern grep-test surface.
+ * `addCash`/`addReputation` both require a full `EconomyCause` receipt
+ * ({label, sourceEventRefs} — v3 REP receipts, KICKOFF-v3.1 §3 WS-C item
+ * 2): the label IS the anti-dark-pattern grep-test surface, and the refs
+ * are the one-tap-real decomposition — every movement names the observed
+ * events it derives from. The type system enforces it: there is NO
+ * mutation overload that accepts a bare string or omits the cause.
+ * Pre-receipt ledger entries are migrated on load with the sentinel
+ * UNKNOWN_LEGACY_LABEL and empty refs (honestly unknown, never guessed).
+ *
+ * Player-initiated debits/credits (bay/perk/room purchases, sells) carry
+ * `player-action:*` refs — the observed source event for a purchase is the
+ * player's own explicit API action; there is no deeper telemetry to cite.
  *
  * No `setInterval` tick loop — state is computed on-demand (real-event
  * award here; the WS-connect catch-up below covers Reputation decay over
@@ -25,6 +35,7 @@ import * as fs from 'fs';
 import * as os from 'os';
 import * as path from 'path';
 
+import type { EconomyCause, EconomyLedgerEntry } from '../../core/src/messages.js';
 import { LAYOUT_FILE_DIR } from './constants.js';
 import {
   CASH_PER_CRISIS_RESOLVED,
@@ -71,12 +82,14 @@ function addDays(date: string, n: number): string {
   return `${t.getFullYear()}-${String(t.getMonth() + 1).padStart(2, '0')}-${String(t.getDate()).padStart(2, '0')}`;
 }
 
-export interface EconomyLedgerEntry {
-  ts: number;
-  delta: number;
-  currency: 'cash' | 'reputation';
-  reason: string;
-}
+/** Ledger entries are the generated wire shape (core/asyncapi.yaml) —
+ *  re-exported so existing importers keep their path. `reason` always
+ *  equals `cause.label` (kept as its own field for v2 clients). */
+export type { EconomyCause, EconomyLedgerEntry } from '../../core/src/messages.js';
+
+/** Sentinel cause label stamped onto ledger entries persisted before
+ *  receipts existed (migration is honest: unknown stays unknown). */
+export const UNKNOWN_LEGACY_LABEL = 'UNKNOWN-LEGACY';
 
 export interface EconomySnapshot {
   cash: number;
@@ -175,31 +188,43 @@ export class EconomyStore {
    *  exclusion shiftStats/progression apply). Awards CASH_PER_TURN, plus a
    *  once-per-local-day CASH_STREAK_DAY_TOUCH (own last-active-date
    *  tracking — touchStreak is private on progressionStore).
-   *  `cashBonusPct` is the Server Room global Cash buff (G2, GAME-DESIGN
-   *  §5.4) — computed by the caller (economyStore.ts cannot read the
-   *  office layout itself: officeLayoutStore.ts already imports this
-   *  module, so a reverse import would cycle) and applied only to the
-   *  base turn award, never the once/day streak touch. */
-  recordTurnCompleted(now: number = Date.now(), cashBonusPct = 0): void {
+   *  `sourceRef` names the observed Stop event (receipt ref, e.g.
+   *  `hook-stop:<employeeId>`). `cashBonusPct` is the Server Room global
+   *  Cash buff (G2, GAME-DESIGN §5.4) — computed by the caller
+   *  (economyStore.ts cannot read the office layout itself:
+   *  officeLayoutStore.ts already imports this module, so a reverse import
+   *  would cycle) and applied only to the base turn award, never the
+   *  once/day streak touch. */
+  recordTurnCompleted(sourceRef: string, now: number = Date.now(), cashBonusPct = 0): void {
     const data = this.ensureLoaded();
     this.touchActivity(data, now);
-    this.addCash(this.withCashBonus(CASH_PER_TURN, cashBonusPct), 'turn-completed', now);
+    this.addCash(
+      this.withCashBonus(CASH_PER_TURN, cashBonusPct),
+      { label: 'turn-completed', sourceEventRefs: [sourceRef] },
+      now,
+    );
     const today = localDate(now);
     if (data.streakDayTouchedDate !== today) {
       data.streakDayTouchedDate = today;
-      this.addCash(CASH_STREAK_DAY_TOUCH, 'streak-day-touch', now);
+      this.addCash(
+        CASH_STREAK_DAY_TOUCH,
+        { label: 'streak-day-touch', sourceEventRefs: [sourceRef] },
+        now,
+      );
     }
   }
 
   /** An OBSERVED crisis resolution (real state transition, never a stale
    *  sweep clear — mirrors progressionStore's CrisisXpSink contract).
-   *  `cashBonusPct` — see recordTurnCompleted's doc above. */
-  recordCrisisResolved(now: number = Date.now(), cashBonusPct = 0): void {
+   *  `sourceRef` names the resolved crisis episode (receipt ref, e.g.
+   *  `crisis:agent:<id>@<since>`). `cashBonusPct` — see
+   *  recordTurnCompleted's doc above. */
+  recordCrisisResolved(sourceRef: string, now: number = Date.now(), cashBonusPct = 0): void {
     const data = this.ensureLoaded();
     this.touchActivity(data, now);
     this.addCash(
       this.withCashBonus(CASH_PER_CRISIS_RESOLVED, cashBonusPct),
-      'crisis-resolved',
+      { label: 'crisis-resolved', sourceEventRefs: [sourceRef] },
       now,
     );
   }
@@ -207,11 +232,16 @@ export class EconomyStore {
   /** A shift-report day closed with a grade (wired via ShiftStats'
    *  onDayClose callback, alongside progression.recordShiftDayClosed).
    *  Skips days with zero completed turns (nothing to grade) — HEAVY
-   *  always pays 0 Cash, never negative. */
+   *  always pays 0 Cash, never negative. Receipt ref: the closed real
+   *  day itself (`shift-day:<date>`). */
   recordShiftDayClosed(closed: DayCloseSummary, now: number = Date.now()): void {
     if (closed.turnsCompleted <= 0 || closed.efficiency === null) return;
-    this.addCash(CASH_SHIFT_GRADE[closed.efficiency], `shift-grade-${closed.efficiency}`, now);
-    this.addReputation(REP_SHIFT_GRADE[closed.efficiency], `shift-grade-${closed.efficiency}`, now);
+    const cause: EconomyCause = {
+      label: `shift-grade-${closed.efficiency}`,
+      sourceEventRefs: [`shift-day:${closed.date}`],
+    };
+    this.addCash(CASH_SHIFT_GRADE[closed.efficiency], cause, now);
+    this.addReputation(REP_SHIFT_GRADE[closed.efficiency], cause, now);
   }
 
   /** A dispatch run exited (v1 mechanic #6b). Any exit counts as activity
@@ -223,7 +253,12 @@ export class EconomyStore {
    *  anti-farming ceiling regardless of the buff. Not yet wired to a live
    *  route (dispatch chains land in G3) — implemented and unit-tested now
    *  per BUILD-PLAN §G2 task 4. */
-  recordDispatchExit(exitCode: number, now: number = Date.now(), cashBonusPct = 0): void {
+  recordDispatchExit(
+    exitCode: number,
+    sourceRef: string,
+    now: number = Date.now(),
+    cashBonusPct = 0,
+  ): void {
     const data = this.ensureLoaded();
     this.touchActivity(data, now);
     if (exitCode !== 0) {
@@ -239,7 +274,7 @@ export class EconomyStore {
     const award = Math.min(this.withCashBonus(CASH_PER_DISPATCH_EXIT_0, cashBonusPct), remaining);
     if (award > 0) {
       data.dispatchCashToday += award;
-      this.addCash(award, 'dispatch-exit-0', now);
+      this.addCash(award, { label: 'dispatch-exit-0', sourceEventRefs: [sourceRef] }, now);
     } else {
       this.persist(now);
     }
@@ -299,7 +334,12 @@ export class EconomyStore {
           const before = data.reputation;
           data.reputation = Math.max(0, data.reputation - REP_DECAY_DARK_DAY);
           if (data.reputation !== before) {
-            this.appendLedger(now, data.reputation - before, 'reputation', 'zero-activity-decay');
+            this.appendLedger(now, data.reputation - before, 'reputation', {
+              label: 'zero-activity-decay',
+              // The observed source event is the zero-activity calendar day
+              // itself — the specific dark day this decay line walked.
+              sourceEventRefs: [`dark-day:${cursor}`],
+            });
           }
         }
       }
@@ -327,7 +367,14 @@ export class EconomyStore {
   ): { ok: true; bayCount: number } | { ok: false } {
     const data = this.ensureLoaded();
     if (data.cash < cost) return { ok: false };
-    this.addCash(-cost, 'bay-expansion', now);
+    this.addCash(
+      -cost,
+      {
+        label: 'bay-expansion',
+        sourceEventRefs: [`player-action:expand-bay:${data.bayCount + 1}`],
+      },
+      now,
+    );
     data.bayCount += 1;
     this.persist(now, true);
     return { ok: true, bayCount: data.bayCount };
@@ -337,10 +384,10 @@ export class EconomyStore {
    *  a positive refund through the same method). Returns false without
    *  mutating state if funds are insufficient (0 or positive amounts never
    *  fail). */
-  spend(amount: number, reason: string, now: number = Date.now()): boolean {
+  spend(amount: number, cause: EconomyCause, now: number = Date.now()): boolean {
     const data = this.ensureLoaded();
     if (amount > 0 && data.cash < amount) return false;
-    this.addCash(-amount, reason, now);
+    this.addCash(-amount, cause, now);
     return true;
   }
 
@@ -355,7 +402,11 @@ export class EconomyStore {
     if (data.purchasedPerks.includes(id)) return { ok: false, reason: 'already-owned' };
     const cost = PERK_COST[id];
     if (data.cash < cost) return { ok: false, reason: 'insufficient-cash' };
-    this.addCash(-cost, `perk-${id}`, now);
+    this.addCash(
+      -cost,
+      { label: `perk-${id}`, sourceEventRefs: [`player-action:buy-perk:${id}`] },
+      now,
+    );
     data.purchasedPerks.push(id);
     this.persist(now, true);
     const snapshot = this.getSnapshot();
@@ -399,18 +450,21 @@ export class EconomyStore {
   }
 
   // ── Ledger mutations (the anti-dark-pattern grep-test surface) ────────
+  // MANDATORY receipts: `cause` is a required positional parameter with no
+  // string overload and no default — the type system refuses any mutation
+  // that can't name its observed source events (v3 REP receipts).
 
-  addCash(amount: number, reason: string, now: number = Date.now()): void {
+  addCash(amount: number, cause: EconomyCause, now: number = Date.now()): void {
     const data = this.ensureLoaded();
     data.cash = Math.max(0, data.cash + amount);
-    this.appendLedger(now, amount, 'cash', reason);
+    this.appendLedger(now, amount, 'cash', cause);
     this.finish(now);
   }
 
-  addReputation(amount: number, reason: string, now: number = Date.now()): void {
+  addReputation(amount: number, cause: EconomyCause, now: number = Date.now()): void {
     const data = this.ensureLoaded();
     data.reputation = Math.max(0, data.reputation + amount);
-    this.appendLedger(now, amount, 'reputation', reason);
+    this.appendLedger(now, amount, 'reputation', cause);
     this.finish(now);
   }
 
@@ -418,10 +472,12 @@ export class EconomyStore {
     ts: number,
     delta: number,
     currency: 'cash' | 'reputation',
-    reason: string,
+    cause: EconomyCause,
   ): void {
     const data = this.ensureLoaded();
-    data.ledger.push({ ts, delta, currency, reason });
+    // `reason` always mirrors cause.label — kept as its own wire field so
+    // v2 clients (webview-ui reads `reason`) stay working unchanged.
+    data.ledger.push({ ts, delta, currency, reason: cause.label, cause });
     if (data.ledger.length > LEDGER_CAP) {
       data.ledger.splice(0, data.ledger.length - LEDGER_CAP);
     }
@@ -455,7 +511,15 @@ export class EconomyStore {
       const raw = JSON.parse(fs.readFileSync(this.persistPath(), 'utf8')) as Partial<EconomyData>;
       if (raw && typeof raw.cash === 'number') {
         const base = emptyData();
-        return { ...base, ...raw, ledger: raw.ledger ?? [] };
+        // Receipt migration (v3 REP receipts): entries persisted before the
+        // mandatory cause existed get the honest sentinel — the label says
+        // UNKNOWN-LEGACY rather than a guessed backfill, refs stay empty.
+        const ledger = (raw.ledger ?? []).map((entry) =>
+          entry.cause
+            ? entry
+            : { ...entry, cause: { label: UNKNOWN_LEGACY_LABEL, sourceEventRefs: [] } },
+        );
+        return { ...base, ...raw, ledger };
       }
     } catch {
       /* missing/corrupt → fresh state */

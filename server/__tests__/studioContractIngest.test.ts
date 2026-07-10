@@ -184,9 +184,10 @@ describe('StudioContractIngest.sweep — completion on todo disappearance', () =
     expect(open?.status).toBe('offered');
 
     expect(awardCash).toHaveBeenCalledTimes(1);
-    const [amount, reason] = awardCash.mock.calls[0];
+    const [amount, awardCause] = awardCash.mock.calls[0];
     expect(amount).toBe(STUDIO_CONTRACT_REWARD_CASH);
-    expect(reason).toBe(`studio-contract-completed:${done!.id}`);
+    expect(awardCause.label).toBe(`studio-contract-completed:${done!.id}`);
+    expect(awardCause.sourceEventRefs).toContain(`studio-contract:${done!.id}`);
 
     // Re-sweep never double-completes or double-pays.
     ingest.sweep(now + 2000);

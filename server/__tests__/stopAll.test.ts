@@ -142,7 +142,7 @@ describe('STOP ALL (real HTTP round trip)', () => {
     // it manually BEFORE STOP ALL — resume must not resurrect it.
     await fetch(`http://127.0.0.1:${config.port}/api/economy`, { method: 'GET' });
     const { economyStore } = await import('../src/economyStore.js');
-    economyStore.addCash(500, 'test-seed');
+    economyStore.addCash(500, { label: 'test-seed', sourceEventRefs: ['test:test-seed'] });
     const buyRes = await fetch(`http://127.0.0.1:${config.port}/api/economy/perks/buy`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },

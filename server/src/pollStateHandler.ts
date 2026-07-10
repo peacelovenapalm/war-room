@@ -224,7 +224,10 @@ export function applyPollStates(
       // An OBSERVED resolution (the poller explicitly reported a new,
       // non-blocked state) — never fires for the silent "no longer
       // reported" clear below or the TTL sweep (see CrisisXpSink doc).
-      progressionSink?.recordCrisisResolved(now);
+      // Receipt ref (v3 REP receipts): the resolved crisis episode,
+      // identified by the agent and the observed blocked-transition time.
+      const crisisSourceRef = `crisis:agent:${agentId}@${prev.since}`;
+      progressionSink?.recordCrisisResolved(crisisSourceRef, now);
       // Building buffs (G2, GAME-DESIGN §5.4/§5.5) — point-in-time layout
       // read at the moment of the real, observed resolution (never cached,
       // never client-computed), same pattern as hookEventHandler.ts's Dev
@@ -244,7 +247,7 @@ export function applyPollStates(
         }
       }
       employeeSink?.recordCrisisResolved(agent.machine, agent.projectDir, now, crisisXpBonusPct);
-      economySink?.recordCrisisResolved(now, cashBonusPct);
+      economySink?.recordCrisisResolved(crisisSourceRef, now, cashBonusPct);
       // v3 (stage 2): the measured unblock duration, anchored to the real
       // blocked-transition time (`since`) — same observed-only contract.
       v3Sinks?.onCrisisResolved?.(agent.machine, agent.projectDir, agentId, now - prev.since, now);

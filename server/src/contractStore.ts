@@ -35,6 +35,7 @@ import * as path from 'path';
 
 import type { Briefing } from './briefingProvider.js';
 import { LAYOUT_FILE_DIR } from './constants.js';
+import type { EconomyCause } from './economyStore.js';
 import { economyStore } from './economyStore.js';
 
 const PERSIST_THROTTLE_MS = 5_000;
@@ -153,9 +154,11 @@ function emptyData(): ContractData {
 
 export interface ContractStoreDeps {
   /** Injected — never imports economyStore.ts directly (one-way layering,
-   *  same convention as standingOrderStore/chainOrchestrator). */
-  awardCash?: (amount: number, reason: string) => void;
-  awardReputation?: (amount: number, reason: string) => void;
+   *  same convention as standingOrderStore/chainOrchestrator). Awards carry
+   *  a full EconomyCause receipt (v3 REP receipts): label + refs to the
+   *  contract whose completion/expiry the movement derives from. */
+  awardCash?: (amount: number, cause: EconomyCause) => void;
+  awardReputation?: (amount: number, cause: EconomyCause) => void;
 }
 
 export class ContractStore {
@@ -164,8 +167,8 @@ export class ContractStore {
   private explicitPath: string | undefined;
   private resolvedPath: string | undefined;
   private usingDefaultPath = false;
-  private readonly awardCash: (amount: number, reason: string) => void;
-  private readonly awardReputation: (amount: number, reason: string) => void;
+  private readonly awardCash: (amount: number, cause: EconomyCause) => void;
+  private readonly awardReputation: (amount: number, cause: EconomyCause) => void;
   private completionListeners: Array<(contract: Contract) => void> = [];
 
   constructor(persistPath?: string, deps: ContractStoreDeps = {}) {
@@ -458,7 +461,10 @@ export class ContractStore {
       contract.status = 'expired';
       contract.expiredAt = now;
       if (contract.source === 'priority') {
-        this.awardReputation(-CONTRACT_PRIORITY_EXPIRY_REP_PENALTY, 'contract-priority-expired');
+        this.awardReputation(-CONTRACT_PRIORITY_EXPIRY_REP_PENALTY, {
+          label: 'contract-priority-expired',
+          sourceEventRefs: [`contract:${contract.id}`],
+        });
       }
       count++;
     }
@@ -471,11 +477,15 @@ export class ContractStore {
     contract.status = 'completed';
     contract.completionMethod = method;
     contract.completedAt = now;
+    const cause: EconomyCause = {
+      label: `contract-${contract.source}-${method}`,
+      sourceEventRefs: [`contract:${contract.id}`],
+    };
     if (contract.payoutCash > 0) {
-      this.awardCash(contract.payoutCash, `contract-${contract.source}-${method}`);
+      this.awardCash(contract.payoutCash, cause);
     }
     if (contract.payoutRep > 0) {
-      this.awardReputation(contract.payoutRep, `contract-${contract.source}-${method}`);
+      this.awardReputation(contract.payoutRep, cause);
     }
     for (const listener of this.completionListeners) listener(contract);
   }
@@ -535,6 +545,6 @@ function hashDate(date: string): number {
  *  `onCompleted` (the Bark "contract completed" big-moment hook) is wired
  *  below, after notifyBark.ts's declaration, to avoid a circular import. */
 export const contractStore = new ContractStore(undefined, {
-  awardCash: (amount, reason) => economyStore.addCash(amount, reason),
-  awardReputation: (amount, reason) => economyStore.addReputation(amount, reason),
+  awardCash: (amount, cause) => economyStore.addCash(amount, cause),
+  awardReputation: (amount, cause) => economyStore.addReputation(amount, cause),
 });

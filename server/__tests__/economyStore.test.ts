@@ -53,6 +53,9 @@ afterEach(() => {
 const DAY1 = new Date(2026, 6, 7, 12, 0, 0).getTime(); // Tue 2026-07-07 noon
 const ONE_DAY_MS = 86_400_000;
 
+/** Test receipt (v3 REP receipts) — mutations require a full cause. */
+const cause = (label: string) => ({ label, sourceEventRefs: [`test:${label}`] });
+
 describe('economyConstants', () => {
   it('matches the canonical GAME-DESIGN §3 numbers literally', () => {
     expect(CASH_PER_TURN).toBe(2);
@@ -78,16 +81,16 @@ describe('economyConstants', () => {
 describe('EconomyStore real-event awards', () => {
   it('recordTurnCompleted awards CASH_PER_TURN plus a once/day streak touch', () => {
     const store = new EconomyStore(statePath);
-    store.recordTurnCompleted(DAY1);
+    store.recordTurnCompleted('test:turn', DAY1);
     expect(store.getSnapshot().cash).toBe(CASH_PER_TURN + CASH_STREAK_DAY_TOUCH);
     // A second turn the same local day pays CASH_PER_TURN only (no repeat streak touch).
-    store.recordTurnCompleted(DAY1 + 60_000);
+    store.recordTurnCompleted('test:turn', DAY1 + 60_000);
     expect(store.getSnapshot().cash).toBe(CASH_PER_TURN * 2 + CASH_STREAK_DAY_TOUCH);
   });
 
   it('recordCrisisResolved awards CASH_PER_CRISIS_RESOLVED', () => {
     const store = new EconomyStore(statePath);
-    store.recordCrisisResolved(DAY1);
+    store.recordCrisisResolved('test:crisis', DAY1);
     expect(store.getSnapshot().cash).toBe(CASH_PER_CRISIS_RESOLVED);
   });
 
@@ -127,18 +130,18 @@ describe('EconomyStore Server Room cashBonusPct (G2, GAME-DESIGN §5.4) — F2',
     // CASH_PER_TURN (2) is small enough that a 10% bump rounds back down to
     // 2 — assert the exact rounded formula (the real regression check on
     // the wiring) rather than a "greater than" that a small base defeats.
-    store.recordTurnCompleted(DAY1, SERVER_ROOM_CASH_BONUS_PCT);
+    store.recordTurnCompleted('test:turn', DAY1, SERVER_ROOM_CASH_BONUS_PCT);
     const expectedTurnCash = Math.round(CASH_PER_TURN * (1 + SERVER_ROOM_CASH_BONUS_PCT / 100));
     expect(store.getSnapshot().cash).toBe(expectedTurnCash + CASH_STREAK_DAY_TOUCH);
     // A larger, more realistic bonus pct DOES measurably exceed the unbuffed award.
     const secondStore = new EconomyStore(path.join(tmpDir, 'economy-2.json'));
-    secondStore.recordTurnCompleted(DAY1, 200);
+    secondStore.recordTurnCompleted('test:turn', DAY1, 200);
     expect(secondStore.getSnapshot().cash).toBeGreaterThan(CASH_PER_TURN + CASH_STREAK_DAY_TOUCH);
   });
 
   it('recordCrisisResolved applies cashBonusPct to CASH_PER_CRISIS_RESOLVED', () => {
     const store = new EconomyStore(statePath);
-    store.recordCrisisResolved(DAY1, SERVER_ROOM_CASH_BONUS_PCT);
+    store.recordCrisisResolved('test:crisis', DAY1, SERVER_ROOM_CASH_BONUS_PCT);
     const expected = Math.round(CASH_PER_CRISIS_RESOLVED * (1 + SERVER_ROOM_CASH_BONUS_PCT / 100));
     expect(store.getSnapshot().cash).toBe(expected);
     expect(expected).toBeGreaterThan(CASH_PER_CRISIS_RESOLVED);
@@ -146,7 +149,7 @@ describe('EconomyStore Server Room cashBonusPct (G2, GAME-DESIGN §5.4) — F2',
 
   it('recordDispatchExit applies cashBonusPct to CASH_PER_DISPATCH_EXIT_0, still bounded by the daily cap', () => {
     const store = new EconomyStore(statePath);
-    store.recordDispatchExit(0, DAY1, SERVER_ROOM_CASH_BONUS_PCT);
+    store.recordDispatchExit(0, 'test:dispatch', DAY1, SERVER_ROOM_CASH_BONUS_PCT);
     const expected = Math.round(CASH_PER_DISPATCH_EXIT_0 * (1 + SERVER_ROOM_CASH_BONUS_PCT / 100));
     expect(store.getSnapshot().cash).toBe(expected);
     expect(expected).toBeGreaterThan(CASH_PER_DISPATCH_EXIT_0);
@@ -154,14 +157,14 @@ describe('EconomyStore Server Room cashBonusPct (G2, GAME-DESIGN §5.4) — F2',
     // exceeds DISPATCH_CASH_DAILY_CAP total for the day (anti-farming
     // guarantee holds regardless of Server Room).
     for (let i = 1; i < 12; i++) {
-      store.recordDispatchExit(0, DAY1 + i * 1000, SERVER_ROOM_CASH_BONUS_PCT);
+      store.recordDispatchExit(0, 'test:dispatch', DAY1 + i * 1000, SERVER_ROOM_CASH_BONUS_PCT);
     }
     expect(store.getSnapshot().cash).toBe(DISPATCH_CASH_DAILY_CAP);
   });
 
   it('a zero cashBonusPct (no Server Room) awards the plain unbuffed amount — default param', () => {
     const store = new EconomyStore(statePath);
-    store.recordTurnCompleted(DAY1);
+    store.recordTurnCompleted('test:turn', DAY1);
     expect(store.getSnapshot().cash).toBe(CASH_PER_TURN + CASH_STREAK_DAY_TOUCH);
   });
 });
@@ -170,25 +173,25 @@ describe('EconomyStore dispatch-cash daily cap (anti-farming, Fable review delta
   it('pays +5 per exit-0 up to the cap, then 0 — boundary-tested at the 11th call', () => {
     const store = new EconomyStore(statePath);
     for (let i = 0; i < 10; i++) {
-      store.recordDispatchExit(0, DAY1 + i * 1000);
+      store.recordDispatchExit(0, 'test:dispatch', DAY1 + i * 1000);
     }
     expect(store.getSnapshot().cash).toBe(DISPATCH_CASH_DAILY_CAP); // 10 * 5 = 50
     // 11th exit-0 the same local day pays 0 — cap boundary.
-    store.recordDispatchExit(0, DAY1 + 11_000);
+    store.recordDispatchExit(0, 'test:dispatch', DAY1 + 11_000);
     expect(store.getSnapshot().cash).toBe(DISPATCH_CASH_DAILY_CAP);
   });
 
   it('a nonzero exit pays 0, never negative', () => {
     const store = new EconomyStore(statePath);
-    store.recordDispatchExit(1, DAY1);
+    store.recordDispatchExit(1, 'test:dispatch', DAY1);
     expect(store.getSnapshot().cash).toBe(0);
   });
 
   it('the cap resets on a new local day', () => {
     const store = new EconomyStore(statePath);
-    for (let i = 0; i < 10; i++) store.recordDispatchExit(0, DAY1 + i * 1000);
+    for (let i = 0; i < 10; i++) store.recordDispatchExit(0, 'test:dispatch', DAY1 + i * 1000);
     expect(store.getSnapshot().cash).toBe(DISPATCH_CASH_DAILY_CAP);
-    store.recordDispatchExit(0, DAY1 + ONE_DAY_MS);
+    store.recordDispatchExit(0, 'test:dispatch', DAY1 + ONE_DAY_MS);
     expect(store.getSnapshot().cash).toBe(DISPATCH_CASH_DAILY_CAP + CASH_PER_DISPATCH_EXIT_0);
   });
 });
@@ -196,8 +199,8 @@ describe('EconomyStore dispatch-cash daily cap (anti-farming, Fable review delta
 describe('EconomyStore Reputation decay (§3.2, 1-day grace, 72h offline-catchup cap)', () => {
   it('grants the first zero-activity day free, decays from the second', () => {
     const store = new EconomyStore(statePath);
-    store.addReputation(20, 'test-seed', DAY1);
-    store.recordTurnCompleted(DAY1); // lastActiveDate = day1
+    store.addReputation(20, cause('test-seed'), DAY1);
+    store.recordTurnCompleted('test:turn', DAY1); // lastActiveDate = day1
 
     // Day 2 (first zero-activity day): grace, no decay.
     store.catchUpOffline(DAY1 + ONE_DAY_MS);
@@ -214,8 +217,8 @@ describe('EconomyStore Reputation decay (§3.2, 1-day grace, 72h offline-catchup
 
   it('floors at 0, never negative', () => {
     const store = new EconomyStore(statePath);
-    store.addReputation(1, 'test-seed', DAY1);
-    store.recordTurnCompleted(DAY1);
+    store.addReputation(1, cause('test-seed'), DAY1);
+    store.recordTurnCompleted('test:turn', DAY1);
     // Walk far enough forward (multiple catch-up calls) to exceed the balance.
     let now = DAY1;
     for (let i = 0; i < 10; i++) {
@@ -227,11 +230,11 @@ describe('EconomyStore Reputation decay (§3.2, 1-day grace, 72h offline-catchup
 
   it('no decay on any day with real activity, however small', () => {
     const store = new EconomyStore(statePath);
-    store.addReputation(10, 'test-seed', DAY1);
-    store.recordTurnCompleted(DAY1);
+    store.addReputation(10, cause('test-seed'), DAY1);
+    store.recordTurnCompleted('test:turn', DAY1);
     store.catchUpOffline(DAY1 + ONE_DAY_MS); // grace day
     // Activity resumes on day 3 before any decay-causing catch-up ran for it.
-    store.recordTurnCompleted(DAY1 + 2 * ONE_DAY_MS);
+    store.recordTurnCompleted('test:turn', DAY1 + 2 * ONE_DAY_MS);
     store.catchUpOffline(DAY1 + 2 * ONE_DAY_MS);
     expect(store.getSnapshot().reputation).toBe(10);
     // Day 4 is a fresh zero-activity streak start (grace again).
@@ -241,8 +244,8 @@ describe('EconomyStore Reputation decay (§3.2, 1-day grace, 72h offline-catchup
 
   it('caps a single catch-up call at 72h/3 days — a long gap never back-charges beyond it', () => {
     const store = new EconomyStore(statePath);
-    store.addReputation(100, 'test-seed', DAY1);
-    store.recordTurnCompleted(DAY1);
+    store.addReputation(100, cause('test-seed'), DAY1);
+    store.recordTurnCompleted('test:turn', DAY1);
     // Away for 30 days, one single catch-up call on return.
     store.catchUpOffline(DAY1 + 30 * ONE_DAY_MS);
     // At most (3 days processed - 1 grace day) = 2 decay days charged in one call.
@@ -251,8 +254,8 @@ describe('EconomyStore Reputation decay (§3.2, 1-day grace, 72h offline-catchup
 
   it('zero decay while vacation mode is on, and never back-charges once turned off', () => {
     const store = new EconomyStore(statePath);
-    store.addReputation(50, 'test-seed', DAY1);
-    store.recordTurnCompleted(DAY1);
+    store.addReputation(50, cause('test-seed'), DAY1);
+    store.recordTurnCompleted('test:turn', DAY1);
     store.setVacationMode(true, DAY1 + ONE_DAY_MS);
     // 10 days pass entirely on vacation.
     store.catchUpOffline(DAY1 + 11 * ONE_DAY_MS);
@@ -270,7 +273,7 @@ describe('EconomyStore Reputation decay (§3.2, 1-day grace, 72h offline-catchup
 describe('EconomyStore building sinks', () => {
   it('spendOnBay debits exact cost and increments bayCount on success', () => {
     const store = new EconomyStore(statePath);
-    store.addCash(1000, 'test-seed', DAY1);
+    store.addCash(1000, cause('test-seed'), DAY1);
     const result = store.spendOnBay(bayCost(0), DAY1);
     expect(result).toEqual({ ok: true, bayCount: 1 });
     expect(store.getSnapshot().cash).toBe(1000 - bayCost(0));
@@ -279,7 +282,7 @@ describe('EconomyStore building sinks', () => {
 
   it('rejects an insufficient-cash bay purchase without mutating state', () => {
     const store = new EconomyStore(statePath);
-    store.addCash(10, 'test-seed', DAY1);
+    store.addCash(10, cause('test-seed'), DAY1);
     const result = store.spendOnBay(bayCost(0), DAY1);
     expect(result).toEqual({ ok: false });
     expect(store.getSnapshot().cash).toBe(10);
@@ -288,17 +291,17 @@ describe('EconomyStore building sinks', () => {
 
   it('spend() rejects insufficient funds without mutating cash', () => {
     const store = new EconomyStore(statePath);
-    store.addCash(10, 'test-seed', DAY1);
-    expect(store.spend(300, 'room-shell:dev_pit', DAY1)).toBe(false);
+    store.addCash(10, cause('test-seed'), DAY1);
+    expect(store.spend(300, cause('room-shell:dev_pit'), DAY1)).toBe(false);
     expect(store.getSnapshot().cash).toBe(10);
   });
 
   it('spend() debits on sufficient funds; a negative amount (refund) credits', () => {
     const store = new EconomyStore(statePath);
-    store.addCash(300, 'test-seed', DAY1);
-    expect(store.spend(300, 'room-shell:dev_pit', DAY1)).toBe(true);
+    store.addCash(300, cause('test-seed'), DAY1);
+    expect(store.spend(300, cause('room-shell:dev_pit'), DAY1)).toBe(true);
     expect(store.getSnapshot().cash).toBe(0);
-    expect(store.spend(-25, 'sell-refund', DAY1)).toBe(true);
+    expect(store.spend(-25, cause('sell-refund'), DAY1)).toBe(true);
     expect(store.getSnapshot().cash).toBe(25);
   });
 });
@@ -306,7 +309,7 @@ describe('EconomyStore building sinks', () => {
 describe('EconomyStore ledger + vacation flag', () => {
   it('caps the ledger at 200 entries', () => {
     const store = new EconomyStore(statePath);
-    for (let i = 0; i < 210; i++) store.addCash(1, `entry-${i}`, DAY1 + i);
+    for (let i = 0; i < 210; i++) store.addCash(1, cause(`entry-${i}`), DAY1 + i);
     expect(store.getSnapshot().ledger.length).toBe(200);
     expect(store.getSnapshot().ledger[0]?.reason).toBe('entry-10');
   });
@@ -333,7 +336,7 @@ describe('EconomyStore ledger + vacation flag', () => {
 describe('EconomyStore automation perks (v2 mechanic G3, §7.4)', () => {
   it('buyPerk debits the exact cost and flips the flag on', () => {
     const store = new EconomyStore(statePath);
-    store.addCash(500, 'seed', DAY1);
+    store.addCash(500, cause('seed'), DAY1);
     expect(store.getPerkFlags()).toEqual({
       secondShift: false,
       chainGang: false,
@@ -354,7 +357,7 @@ describe('EconomyStore automation perks (v2 mechanic G3, §7.4)', () => {
 
   it('refuses a double-purchase of an already-owned perk (idempotent, never double-charges)', () => {
     const store = new EconomyStore(statePath);
-    store.addCash(1000, 'seed', DAY1);
+    store.addCash(1000, cause('seed'), DAY1);
     store.buyPerk('secondShift', DAY1);
     const cashAfterFirst = store.getSnapshot().cash;
     const result = store.buyPerk('secondShift', DAY1);
@@ -374,7 +377,7 @@ describe('VITEST guard (cloned from employeeStore.test.ts pattern)', () => {
   });
 
   it('never writes the real default sidecar path under VITEST, even via the process-wide singleton', () => {
-    economyStore.addCash(1, 'vitest-guard-probe', DAY1);
+    economyStore.addCash(1, cause('vitest-guard-probe'), DAY1);
     const expectedPath = path.join(vitestGuardHome, '.pixel-agents', 'economy.json');
     expect(fs.existsSync(expectedPath)).toBe(false);
   });

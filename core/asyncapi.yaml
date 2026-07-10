@@ -577,7 +577,17 @@ components:
       type: object
       additionalProperties: false
       required:
-        [type, xp, level, xpIntoLevel, xpForNextLevel, streakCurrent, streakLongest, unlocks]
+        [
+          type,
+          xp,
+          level,
+          xpIntoLevel,
+          xpForNextLevel,
+          streakCurrent,
+          streakLongest,
+          unlocks,
+          ledger,
+        ]
       properties:
         type:
           const: progressionUpdate
@@ -606,6 +616,14 @@ components:
             render decor in a later wave; nothing renders from them yet.
           additionalProperties:
             type: boolean
+        ledger:
+          type: array
+          description: >-
+            XP receipt lines (v3 REP receipts — capped ring buffer, 200
+            entries, currency always 'xp'): every XP movement carries a
+            mandatory cause naming the observed source event.
+          items:
+            $ref: '#/components/schemas/EconomyLedgerEntry'
 
     DispatchUpdate:
       description: >-
@@ -907,13 +925,40 @@ components:
 
     EconomyCurrencyValue:
       type: string
-      enum: [cash, reputation]
+      enum: [cash, reputation, xp]
 
-    EconomyLedgerEntry:
-      description: One Cash/Reputation ledger line (capped ring buffer, 200 entries).
+    EconomyCause:
+      description: >-
+        Receipt for one economy movement (v3 REP receipts, KICKOFF-v3.1 §3
+        WS-C item 2): a human-readable label plus references to the REAL
+        observed events the movement derives from — the one-tap-real hard
+        rule applied to money/XP. Ledger entries persisted before receipts
+        existed are migrated on load with the sentinel label UNKNOWN-LEGACY
+        and empty refs (honestly unknown, never guessed).
       type: object
       additionalProperties: false
-      required: [ts, delta, currency, reason]
+      required: [label, sourceEventRefs]
+      properties:
+        label:
+          type: string
+          description: Short machine-greppable movement label, e.g. turn-completed.
+        sourceEventRefs:
+          type: array
+          description: >-
+            References to the observed source events (e.g. dispatch:<id>,
+            shift-day:<date>, crisis:agent:<id>@<since>, player-action:<verb>).
+            Empty ONLY on migrated pre-receipt entries (UNKNOWN-LEGACY).
+          items:
+            type: string
+
+    EconomyLedgerEntry:
+      description: >-
+        One Cash/Reputation/XP ledger line (capped ring buffer, 200 entries).
+        Every line carries a mandatory cause receipt — no mutation path can
+        omit it (enforced at the type level server-side).
+      type: object
+      additionalProperties: false
+      required: [ts, delta, currency, reason, cause]
       properties:
         ts:
           type: integer
@@ -926,6 +971,9 @@ components:
           description: >-
             The anti-dark-pattern grep-test surface — every award traces to
             an observed real event, never a bare timer or token volume.
+            Always equals cause.label (kept as its own field for v2 clients).
+        cause:
+          $ref: '#/components/schemas/EconomyCause'
 
     EconomyUpdate:
       description: >-

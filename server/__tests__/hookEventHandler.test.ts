@@ -245,7 +245,11 @@ describe('HookEventHandler', () => {
     agents.set(91, baselineAgent);
     handler.registerAgent('sr-baseline', 91);
     handler.handleEvent('claude', { hook_event_name: 'Stop', session_id: 'sr-baseline' });
-    expect(recordTurnCompletedSpy).toHaveBeenLastCalledWith(undefined, 0);
+    expect(recordTurnCompletedSpy).toHaveBeenLastCalledWith(
+      expect.stringMatching(/^hook-stop:/),
+      undefined,
+      0,
+    );
 
     // Now write a layout with a Server Room + a qualifying PC_* furniture
     // piece placed inside it.
@@ -276,7 +280,11 @@ describe('HookEventHandler', () => {
     agents.set(92, buffedAgent);
     handler.registerAgent('sr-buffed', 92);
     handler.handleEvent('claude', { hook_event_name: 'Stop', session_id: 'sr-buffed' });
-    expect(recordTurnCompletedSpy).toHaveBeenLastCalledWith(undefined, SERVER_ROOM_CASH_BONUS_PCT);
+    expect(recordTurnCompletedSpy).toHaveBeenLastCalledWith(
+      expect.stringMatching(/^hook-stop:/),
+      undefined,
+      SERVER_ROOM_CASH_BONUS_PCT,
+    );
 
     recordTurnCompletedSpy.mockRestore();
   });
