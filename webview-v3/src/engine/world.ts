@@ -11,7 +11,7 @@ export const DEFAULT_COLS = 14;
 export const DEFAULT_ROWS = 10;
 export const DEFAULT_MAX_ELEVATION = 0;
 
-export type PropKind = 'desk' | 'plant' | 'coffee' | 'door';
+export type PropKind = 'desk' | 'plant' | 'coffee' | 'door' | 'walker';
 
 export interface Occupant {
   /** Real server agent id — chip click opens this agent's drawer. */
@@ -71,6 +71,15 @@ export function buildProps(occupants: readonly Occupant[]): WorldProp[] {
   return [...desks, ...STATIC_PROPS];
 }
 
+/** The tile a static prop of `kind` sits on — engine/walkers.ts anchors its
+ *  patrol/drift routes to the coffee station and door THIS way, so a floor
+ *  layout change never leaves ambient walkers pointed at stale coordinates.
+ *  Falls back to the origin if the layout ever drops that prop kind. */
+export function staticPropTile(kind: PropKind): TilePoint {
+  const prop = STATIC_PROPS.find((candidate) => candidate.kind === kind);
+  return prop ? { tileX: prop.tileX, tileY: prop.tileY } : { tileX: 0, tileY: 0 };
+}
+
 /** World-px lift from a desk's tile center to its chip anchor (above the
  *  desk box + occupant block; the DOM chip layer hangs labels here). */
 export const CHIP_ANCHOR_LIFT = 44;
@@ -84,6 +93,11 @@ export interface DeskAnchor {
   /** Desk tile center in WORLD px (camera walk target). */
   deskWorldX: number;
   deskWorldY: number;
+  /** Desk tile center in TILE space (engine/walkers.ts drift/pace routes —
+   *  ambient motion interpolates in tile space, the same space DESK_SLOTS
+   *  and STATIC_PROPS are already authored in). */
+  deskTileX: number;
+  deskTileY: number;
 }
 
 /**
@@ -104,6 +118,8 @@ export function occupiedDeskAnchors(occupants: readonly Occupant[]): DeskAnchor[
       worldY: worldY - CHIP_ANCHOR_LIFT,
       deskWorldX: worldX,
       deskWorldY: worldY,
+      deskTileX: slot.tileX,
+      deskTileY: slot.tileY,
     });
   });
   return anchors;

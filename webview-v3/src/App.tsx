@@ -20,6 +20,12 @@ import { RealSheet } from './components/RealSheet';
 import { SettingsModal } from './components/SettingsModal';
 import { ShiftPanel } from './components/ShiftPanel';
 import { TriageBoard } from './components/TriageBoard';
+import {
+  type CalmTransition,
+  displayedWarmth,
+  INITIAL_CALM,
+  updateCalmTransition,
+} from './engine/calm';
 import { type CameraState, clampPanToFit, fitToView } from './engine/camera';
 import { easeInOut, focusCamera, mixCamera, walkProgress } from './engine/focus';
 import {
@@ -33,12 +39,14 @@ import type { HotspotKind } from './engine/hotspots';
 import { mapWorldBounds } from './engine/iso';
 import { renderWorld } from './engine/renderer';
 import { getCanvasResolution } from './engine/resolution';
+import { computeWalkers, type WalkerAgentInput } from './engine/walkers';
 import {
   buildProps,
   DEFAULT_COLS,
   DEFAULT_MAX_ELEVATION,
   DEFAULT_ROWS,
   occupiedDeskAnchors,
+  type WorldProp,
 } from './engine/world';
 import { type AgentMap, EMPTY_AGENTS, reduceAgents, toOccupants } from './net/agentStore';
 import { type ConnectionStatus, connectToServer, type ServerConnection } from './net/connection';
@@ -57,6 +65,7 @@ import {
   requestAck,
   undoAck,
 } from './state/ackUndo';
+import { classifyWalkerAgents } from './state/ambient';
 import {
   reduceBudget,
   reduceChainRunReceivedAt,
@@ -127,7 +136,14 @@ export default function App() {
   const gestureRafRef = useRef<number | null>(null);
   const managerRef = useRef<TailManager | null>(null);
   const connectionRef = useRef<ServerConnection | null>(null);
+  const connectionStatusRef = useRef<ConnectionStatus>('connecting');
   const prevPinsRef = useRef<readonly number[]>([]);
+  // Ambient walkers + calm-channel lighting (KICKOFF-v3.1 WS-A item 4(c)) —
+  // real-telemetry-derived, recomputed on the same tick/occupancy effect
+  // that already redraws (draw() itself stays a stable ref-reading
+  // callback, matching every other piece of frame state here).
+  const walkerInputsRef = useRef<WalkerAgentInput[]>([]);
+  const calmRef = useRef<CalmTransition>(INITIAL_CALM);
   // Source-of-truth refs for values reduced OUTSIDE render (WS callbacks +
   // the age tick); the matching useState mirrors them for rendering.
   const agentsRef = useRef<AgentMap>(EMPTY_AGENTS);
@@ -212,13 +228,23 @@ export default function App() {
 
     const ctx = canvas.getContext('2d');
     if (!ctx) return;
+    // Ambient walkers (KICKOFF-v3.1 WS-A item 4(c)): real-time positions
+    // over already-classified real-telemetry inputs, converted into the
+    // SAME WorldProp shape every other prop uses (one depth-sort/render
+    // pass, no special-casing).
+    const walkerProps: WorldProp[] = computeWalkers(
+      walkerInputsRef.current,
+      connectionStatusRef.current === 'live',
+      Date.now(),
+    ).map((pose) => ({ kind: 'walker', tileX: pose.tileX, tileY: pose.tileY }));
     renderWorld(ctx, {
       cssSize,
       resolution,
       camera,
       cols: DEFAULT_COLS,
       rows: DEFAULT_ROWS,
-      props: buildProps(occupantsRef.current),
+      props: [...buildProps(occupantsRef.current), ...walkerProps],
+      warmth: displayedWarmth(calmRef.current, Date.now()),
     });
     renderCountRef.current += 1;
     lastResolutionRef.current = resolution;
@@ -342,11 +368,16 @@ export default function App() {
     };
   }, [draw]);
 
-  // Redraw when occupancy changes (ref keeps `draw` stable for the observer).
+  // Redraw when occupancy/agents/crisis change, AND on the 500ms age tick
+  // (`now`) so ambient walker motion + the calm-channel lerp actually
+  // advance between real-state changes (draw() itself stays a stable ref-
+  // reading callback for the ResizeObserver above).
   useEffect(() => {
     occupantsRef.current = occupants;
+    walkerInputsRef.current = classifyWalkerAgents(occupiedDeskAnchors(occupants), agents, now);
+    calmRef.current = updateCalmTransition(calmRef.current, openCrisisCount(crisis), Date.now());
     draw();
-  }, [draw, occupants]);
+  }, [draw, occupants, agents, crisis, now]);
 
   /** Ack-state writes go through here so the tick's sweep sees them. */
   const applyAcks = useCallback((next: AckState) => {
@@ -403,6 +434,7 @@ export default function App() {
         }
       },
       onStatus: (status) => {
+        connectionStatusRef.current = status;
         setConnectionStatus(status);
         managerRef.current?.handleStatus(status);
       },

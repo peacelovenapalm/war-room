@@ -14,6 +14,7 @@
  */
 
 import {
+  ambientWashColor,
   COLOR_DESK_GLOW,
   COLOR_DESK_LEFT,
   COLOR_DESK_RIGHT,
@@ -27,6 +28,9 @@ import {
   COLOR_PROP_LEFT,
   COLOR_PROP_RIGHT,
   COLOR_PROP_TOP,
+  COLOR_WALKER_LEFT,
+  COLOR_WALKER_RIGHT,
+  COLOR_WALKER_TOP,
   COLOR_WORLD_BG,
 } from '../constants';
 import type { CameraState, Size } from './camera';
@@ -43,6 +47,9 @@ export interface RenderInput {
   cols: number;
   rows: number;
   props: readonly WorldProp[];
+  /** Calm-channel ambient wash in [0, 1] (engine/calm.ts's displayedWarmth).
+   *  Omitted/undefined = no wash drawn (e.g. tests that don't care). */
+  warmth?: number;
 }
 
 const DESK_PALETTE: BoxPalette = {
@@ -60,12 +67,29 @@ const PROP_PALETTE: BoxPalette = {
   left: COLOR_PROP_LEFT,
   right: COLOR_PROP_RIGHT,
 };
+const WALKER_PALETTE: BoxPalette = {
+  top: COLOR_WALKER_TOP,
+  left: COLOR_WALKER_LEFT,
+  right: COLOR_WALKER_RIGHT,
+};
+
+const PROP_PALETTES: Record<WorldProp['kind'], BoxPalette> = {
+  desk: DESK_PALETTE,
+  plant: PROP_PALETTE,
+  coffee: PROP_PALETTE,
+  door: PROP_PALETTE,
+  walker: WALKER_PALETTE,
+};
 
 export const PROP_SHAPES: Record<WorldProp['kind'], { height: number; footprint: number }> = {
   desk: { height: 18, footprint: 0.8 },
   plant: { height: 22, footprint: 0.35 },
   coffee: { height: 26, footprint: 0.5 },
   door: { height: 30, footprint: 0.6 },
+  // Deliberately smaller/rounder than any real prop — a shape difference
+  // (not color-only) so ambient walkers read as "a small moving figure"
+  // even in grayscale.
+  walker: { height: 10, footprint: 0.22 },
 };
 
 /** Monitor-glow ellipse half-extents (world px) under an occupied desk. */
@@ -114,11 +138,21 @@ export function renderWorld(ctx: CanvasRenderingContext2D, input: RenderInput): 
   for (const prop of sortedProps) {
     const { worldX, worldY } = tileToWorld(prop.tileX, prop.tileY, prop.elevation ?? 0);
     const shape = PROP_SHAPES[prop.kind];
-    const palette = prop.kind === 'desk' ? DESK_PALETTE : PROP_PALETTE;
+    const palette = PROP_PALETTES[prop.kind];
     drawIsoBox(ctx, worldX, worldY, shape.height, shape.footprint, palette);
     if (prop.kind === 'desk' && prop.occupant) {
       // Occupant block sits on the desk top.
       drawIsoBox(ctx, worldX, worldY - shape.height, 14, 0.4, OCCUPANT_PALETTE);
     }
+  }
+
+  // Calm-channel ambient wash (engine/calm.ts) — screen-space, drawn LAST so
+  // it tints the whole painted frame uniformly regardless of zoom/pan.
+  // REINFORCEMENT only: state/hud.ts's mood chip (shape + text) is the
+  // actual signal; this never gates or gets checked for anything.
+  if (input.warmth !== undefined) {
+    ctx.setTransform(resolution, 0, 0, resolution, 0, 0);
+    ctx.fillStyle = ambientWashColor(input.warmth);
+    ctx.fillRect(0, 0, cssSize.width, cssSize.height);
   }
 }
