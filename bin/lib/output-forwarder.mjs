@@ -29,6 +29,13 @@
 export const OUTPUT_FLUSH_INTERVAL_MS = 1_000;
 /** Default per-stream byte threshold for an immediate flush. */
 export const OUTPUT_FLUSH_MAX_BYTES = 8 * 1024;
+/** Max POSTs queued-or-in-flight on the chain at once. A HUNG (not dead)
+ *  server serializes each POST behind a 10s abort — without a cap, a chatty
+ *  child (>8KB/s) queues chunks in runner memory faster than the chain
+ *  drains, for the whole run. At the cap, further flushes are DROPPED with
+ *  a ⚠ log (ephemeral telemetry — same posture as a failed POST), bounding
+ *  runner memory to ~cap x maxBytes. */
+export const OUTPUT_MAX_PENDING_POSTS = 8;
 
 const POST_TIMEOUT_MS = 10_000;
 
@@ -42,6 +49,7 @@ const POST_TIMEOUT_MS = 10_000;
  * @param {(url: string, init: object) => Promise<unknown>} [opts.fetchImpl]
  * @param {number} [opts.flushMs]
  * @param {number} [opts.maxBytes]
+ * @param {number} [opts.maxPendingPosts]
  * @param {(msg: string) => void} [opts.log]
  */
 export function createOutputForwarder({
@@ -51,6 +59,7 @@ export function createOutputForwarder({
   fetchImpl = fetch,
   flushMs = OUTPUT_FLUSH_INTERVAL_MS,
   maxBytes = OUTPUT_FLUSH_MAX_BYTES,
+  maxPendingPosts = OUTPUT_MAX_PENDING_POSTS,
   log = () => {},
 }) {
   /** @type {Map<string, { parts: string[], bytes: number, seq: number }>} */
@@ -60,6 +69,8 @@ export function createOutputForwarder({
   // Sequential POST chain: preserves chunk order end-to-end and gives
   // stop() one promise to await for the final flush.
   let chain = Promise.resolve();
+  // Chain-depth counter for the backlog cap (queued + in-flight POSTs).
+  let pendingPosts = 0;
 
   function streamState(stream) {
     let state = streams.get(stream);
@@ -71,6 +82,15 @@ export function createOutputForwarder({
   }
 
   function post(stream, chunk, seq) {
+    if (pendingPosts >= maxPendingPosts) {
+      // Backlog cap: a hung server sheds chunks instead of queuing runner
+      // memory unboundedly — same ephemeral-telemetry posture as a failed
+      // POST (the durable record stays the per-run log file).
+      const dropped = Buffer.byteLength(chunk, 'utf8');
+      log(`⚠ output backlog full for ${id}/${stream} — dropped a ${dropped}-byte chunk`);
+      return;
+    }
+    pendingPosts += 1;
     chain = chain.then(async () => {
       try {
         await fetchImpl(`${url}/api/dispatch/${id}/output`, {
@@ -86,6 +106,8 @@ export function createOutputForwarder({
         // Fire-and-forget: a dead server costs this chunk, nothing else.
         const m = err instanceof Error ? err.message : String(err);
         log(`⚠ output POST failed for ${id}/${stream} (${m.split('\n')[0].slice(0, 200)})`);
+      } finally {
+        pendingPosts -= 1;
       }
     });
   }

@@ -153,6 +153,52 @@ test('a dead server never throws or blocks: pushes and stop survive rejecting fe
   );
 });
 
+test('a HUNG (not dead) server bounds the POST backlog: excess flushes are dropped, never queued', async () => {
+  // A dead server fast-rejects and the chain drains; a hung server holds
+  // each POST for its full 10s abort window. Without a cap, a chatty child
+  // queues chunks in runner memory for the whole run. With the cap, at most
+  // maxPendingPosts flushes ever enter the chain — the rest are dropped
+  // with a ⚠ log.
+  const logs = [];
+  const calls = [];
+  const resolvers = [];
+  let released = false;
+  const hungFetch = (url, init) => {
+    calls.push(JSON.parse(init.body));
+    if (released) return Promise.resolve({ ok: true });
+    return new Promise((resolve) => resolvers.push(() => resolve({ ok: true })));
+  };
+  const fwd = createOutputForwarder({
+    url: 'http://server',
+    token: 'tok',
+    id: 'd-8',
+    fetchImpl: hungFetch,
+    flushMs: 60_000,
+    maxBytes: 4, // every push flushes immediately
+    maxPendingPosts: 3,
+    log: (m) => logs.push(m),
+  });
+
+  for (let i = 0; i < 10; i++) fwd.push('stdout', `chunk-${i}`);
+
+  const drops = () => logs.filter((m) => m.includes('output backlog full')).length;
+  assert.equal(drops(), 7, '3 queued at the cap, the other 7 dropped');
+
+  // Un-hang the server and drain the chain — only the capped queue posts.
+  released = true;
+  for (let i = 0; i < 10 && resolvers.length > 0; i++) {
+    resolvers.shift()();
+    await sleep(5);
+  }
+  await fwd.stop();
+  assert.equal(calls.length, 3, 'exactly maxPendingPosts POSTs ever reached fetch');
+  assert.deepEqual(
+    calls.map((c) => c.chunk),
+    ['chunk-0', 'chunk-1', 'chunk-2'],
+    'the retained flushes are the oldest ones, in order',
+  );
+});
+
 test('empty pushes are ignored (no empty POST bodies)', async () => {
   const { calls, impl } = fakeFetch();
   const fwd = createOutputForwarder({
