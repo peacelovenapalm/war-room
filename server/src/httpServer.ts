@@ -1312,6 +1312,14 @@ function registerWebSocketRoute(
     const tailSubscriptions = new Set<string>();
     const unsubscribeOutputChunks = outputRingStore.onChunk((chunk) => {
       if (!tailSubscriptions.has(outputStreamKey(chunk.source, chunk.id))) return;
+      // Slow-subscriber shed: streaming pushes materially more volume than
+      // the status broadcast planes, and ws's send() never blocks — a
+      // subscriber that stops draining would otherwise grow this socket's
+      // ws-library send buffer without bound for as long as the tail runs.
+      // Past the cap this chunk is simply not sent to THIS socket (ephemeral
+      // telemetry — the ring still retains it for replay; other subscribers
+      // and the producer are unaffected).
+      if (isTailSocketBackpressured(socket as { bufferedAmount?: number })) return;
       try {
         safeSend(socket, chunk as unknown as Record<string, unknown>);
       } catch {
@@ -1374,6 +1382,18 @@ function bearerAuth(expectedToken: string) {
 }
 
 // ── Utilities ──────────────────────────────────────────────────
+
+/** Max bytes a tail subscriber may leave undrained in the ws-library send
+ *  buffer before outputChunk delivery to that socket is shed (skipped, not
+ *  queued). Applies ONLY to the streaming fan-out — the low-volume status
+ *  broadcast planes keep their existing fire-and-forget posture. */
+export const OUTPUT_TAIL_MAX_BUFFERED_BYTES = 1024 * 1024;
+
+/** True when a socket's undrained send buffer exceeds the tail cap. A
+ *  socket without a bufferedAmount (unit-test fakes) is never shed. */
+export function isTailSocketBackpressured(socket: { bufferedAmount?: number }): boolean {
+  return (socket.bufferedAmount ?? 0) > OUTPUT_TAIL_MAX_BUFFERED_BYTES;
+}
 
 function safeSend(
   socket: { send: (data: string) => void; readyState: number },

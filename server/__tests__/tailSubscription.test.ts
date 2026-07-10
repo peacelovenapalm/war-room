@@ -31,6 +31,8 @@ vi.mock('os', async () => {
 const { PixelAgentsServer } = await import('../src/server.js');
 const { AgentStateStore } = await import('../src/agentStateStore.js');
 const { handleClientMessage } = await import('../src/clientMessageHandler.js');
+const { OUTPUT_TAIL_MAX_BUFFERED_BYTES, isTailSocketBackpressured } =
+  await import('../src/httpServer.js');
 const { OutputRingStore, outputRingStore, outputStreamKey } =
   await import('../src/outputRingStore.js');
 
@@ -215,6 +217,50 @@ describe('tail subscription WS fan-out', () => {
     // the throwing socket cost nothing but its own delivery.
     expect(store.replay('dispatch', id).map((c) => c.chunk)).toEqual(['chunk-0', 'chunk-1']);
     expect(delivered).toEqual(['chunk-0', 'chunk-1']);
+  });
+
+  it('sheds outputChunk delivery to a backpressured socket without touching the ring or other subscribers', () => {
+    // Mirrors the exact wiring registerWebSocketRoute installs per socket:
+    // subscription gate -> backpressure shed -> fire-and-forget send. A
+    // subscriber that stops draining (bufferedAmount over the cap) must be
+    // skipped — never queued against — while the ring and every healthy
+    // subscriber keep flowing.
+    const store = new OutputRingStore();
+    const id = uniqueId('run');
+    const tailSubscriptions = new Set([outputStreamKey('dispatch', id)]);
+    const stalled = { readyState: 1, bufferedAmount: OUTPUT_TAIL_MAX_BUFFERED_BYTES + 1, sent: 0 };
+    const healthy = { readyState: 1, bufferedAmount: 0, sent: 0 };
+    for (const socket of [stalled, healthy]) {
+      store.onChunk((chunk) => {
+        if (!tailSubscriptions.has(outputStreamKey(chunk.source, chunk.id))) return;
+        if (isTailSocketBackpressured(socket)) return;
+        socket.sent += 1;
+      });
+    }
+
+    store.append('dispatch', id, 'stdout', 'chunk-0');
+    store.append('dispatch', id, 'stdout', 'chunk-1');
+
+    expect(stalled.sent).toBe(0); // shed — nothing queued against the stall
+    expect(healthy.sent).toBe(2); // unaffected
+    expect(store.replay('dispatch', id).map((c) => c.chunk)).toEqual(['chunk-0', 'chunk-1']);
+
+    // The stall clears -> delivery resumes (shed is per chunk, not sticky).
+    stalled.bufferedAmount = 0;
+    store.append('dispatch', id, 'stdout', 'chunk-2');
+    expect(stalled.sent).toBe(1);
+    expect(healthy.sent).toBe(3);
+  });
+
+  it('isTailSocketBackpressured triggers only past the cap and never sheds bufferless fakes', () => {
+    expect(isTailSocketBackpressured({ bufferedAmount: 0 })).toBe(false);
+    expect(isTailSocketBackpressured({ bufferedAmount: OUTPUT_TAIL_MAX_BUFFERED_BYTES })).toBe(
+      false,
+    );
+    expect(isTailSocketBackpressured({ bufferedAmount: OUTPUT_TAIL_MAX_BUFFERED_BYTES + 1 })).toBe(
+      true,
+    );
+    expect(isTailSocketBackpressured({})).toBe(false);
   });
 
   it('evicts the ring when a dispatch reaches a terminal status (replay after exit is empty)', async () => {
