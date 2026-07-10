@@ -10,6 +10,7 @@ import { type ChipFrame, ChipLayer } from './components/ChipLayer';
 import { ContractsPanel } from './components/ContractsPanel';
 import { DebugView, type DiagnosticsRow } from './components/DebugView';
 import { DispatchTray } from './components/DispatchTray';
+import { FloorFeed } from './components/FloorFeed';
 import { HelpModal } from './components/HelpModal';
 import { HudStrip, type ViewMode } from './components/HudStrip';
 import { type DockPanelKind, PanelDock } from './components/PanelDock';
@@ -72,7 +73,14 @@ import {
   reduceCrisisState,
 } from './state/crisisStore';
 import { type EconomySnapshot, reduceEconomy } from './state/economy';
+import {
+  appendFloorFeedEntry,
+  EMPTY_FLOOR_FEED,
+  type FloorFeedEntry,
+  floorFeedLabel,
+} from './state/floorFeed';
 import { buildRealSheet, type RealSheetKind, tallyAgents, wingCounts } from './state/hud';
+import { parseLaunchTarget } from './state/launch';
 import { pinAgent, unpinAgent } from './state/pinDock';
 import { reduceSettings, type SettingsSnapshot } from './state/settings';
 import { appendChunk, EMPTY_TAILS, setPaused, tailKey, type TailMap } from './state/tailStore';
@@ -82,6 +90,11 @@ import { installTestHooksIfE2E } from './testHooks';
 const TICK_MS = 500;
 /** How long the DOCK FULL rejection stays on screen. */
 const DOCK_NOTICE_MS = 3_000;
+
+/** window.location.search, defensively (never throws outside a browser). */
+function readLocationSearch(): string {
+  return typeof window === 'undefined' ? '' : window.location.search;
+}
 
 /** Camera walk bookkeeping (▸ DESK / drawer close). `from` non-null means a
  *  walk is in flight; the RAF loop clears it when progress reaches 1. */
@@ -121,6 +134,11 @@ export default function App() {
   const acksRef = useRef<AckState>(EMPTY_ACKS);
   const dispatchEntriesRef = useRef<DispatchEntry[]>([]);
   const pendingSendsRef = useRef<PendingSend[]>([]);
+  const tailsRef = useRef<TailMap>(EMPTY_TAILS);
+  /** Push-landing deep link (state/launch.ts): the agent id a notification
+   *  wants auto-opened, cleared once the walk fires (or never set). */
+  const launchTargetRef = useRef<number | null>(parseLaunchTarget(readLocationSearch()).agentId);
+  const prevFloorFeedIdsRef = useRef<readonly number[]>([]);
 
   const [grayscale, setGrayscale] = useState(false);
   const [view, setView] = useState<ViewMode>('floor');
@@ -130,6 +148,7 @@ export default function App() {
   const [crisis, setCrisis] = useState<CrisisState>(EMPTY_CRISIS_STATE);
   const [acks, setAcks] = useState<AckState>(EMPTY_ACKS);
   const [tails, setTails] = useState<TailMap>(EMPTY_TAILS);
+  const [floorFeed, setFloorFeed] = useState<readonly FloorFeedEntry[]>(EMPTY_FLOOR_FEED);
   const [pins, setPins] = useState<readonly number[]>([]);
   const [dockNotice, setDockNotice] = useState<string | null>(null);
   const [drawerAgentId, setDrawerAgentId] = useState<number | null>(null);
@@ -350,7 +369,20 @@ export default function App() {
         }
         setEconomy((previous) => reduceEconomy(previous, message));
         if (message.type === 'outputChunk') {
-          setTails((previous) => appendChunk(previous, message));
+          const nextTails = appendChunk(tailsRef.current, message);
+          if (nextTails !== tailsRef.current) {
+            tailsRef.current = nextTails;
+            setTails(nextTails);
+            // FLOOR FEED (phone-only, GAME-DESIGN-V3 §3.2 item 4) — a merged
+            // agent-labeled log, fed only on a GENUINE new chunk (the same
+            // dedupe tailStore just did, via the reference check above).
+            const label = floorFeedLabel(
+              message.source,
+              message.id,
+              agentsRef.current.get(Number(message.id))?.name,
+            );
+            setFloorFeed((previous) => appendFloorFeedEntry(previous, message, label, at));
+          }
         }
         // Stage-3 panel ports — same "verbatim mirror" reducer convention.
         setSettings((previous) => reduceSettings(previous, message));
@@ -467,6 +499,36 @@ export default function App() {
     }
     prevPinsRef.current = pins;
   }, [pins]);
+
+  // FLOOR FEED subscribes to EVERY current agent's tail (not just the
+  // pinned/drawer-open ones) so the merged phone strip has real content
+  // regardless of what else is open — same refcounted diff pattern as the
+  // pin dock above.
+  useEffect(() => {
+    const manager = managerRef.current;
+    if (!manager) return;
+    const ids = [...agents.keys()];
+    const previous = prevFloorFeedIdsRef.current;
+    for (const id of ids) {
+      if (!previous.includes(id)) manager.acquire('agent', String(id));
+    }
+    for (const id of previous) {
+      if (!ids.includes(id)) manager.release('agent', String(id));
+    }
+    prevFloorFeedIdsRef.current = ids;
+  }, [agents]);
+
+  // Push-landing deep link (state/launch.ts): once the target agent shows
+  // up in the live roster, auto-open its drawer exactly once — the board
+  // itself is ALREADY the unconditional cold open (App's default layout),
+  // this only adds the "+ auto-opened crisis sheet" half of the decision.
+  useEffect(() => {
+    const target = launchTargetRef.current;
+    if (target === null || !agents.has(target)) return;
+    launchTargetRef.current = null;
+    setDrawerAgentId(target);
+    startWalk(target);
+  }, [agents, startWalk]);
 
   useEffect(() => {
     installTestHooksIfE2E({
@@ -663,6 +725,9 @@ export default function App() {
             applyAcks(undoAck(acksRef.current, key));
           }}
         />
+        {/* Phone-only (CSS-gated): GAME-DESIGN-V3 §3.2 item 4, below the
+            triage board, remaining-height merged tail strip. */}
+        <FloorFeed entries={floorFeed} />
       </div>
       <PinDock
         pins={pins}

@@ -364,6 +364,37 @@ body,
   opacity: 0.7;
 }
 
+/* ── Floor feed (phone-only merged tail strip, GAME-DESIGN-V3 §3.2 #4) ─ */
+
+/* Hidden by default (desktop, and phone BOARD view) — only the phone FLOOR
+   view media rule below turns it on, matching the pin dock's own pattern
+   of "one breakpoint, one view mode" gating. */
+.floor-feed {
+  display: none;
+}
+
+.floor-feed__log {
+  flex: 1 1 auto;
+  min-height: 0;
+  overflow-y: auto;
+  padding: 6px 8px;
+  background: #101318;
+  border-top: 1px solid #2c3240;
+  font-size: 11px;
+  line-height: 1.45;
+  white-space: pre-wrap;
+  word-break: break-word;
+  user-select: text;
+}
+
+.floor-feed__label {
+  font-weight: 700;
+}
+
+.floor-feed__empty {
+  opacity: 0.7;
+}
+
 /* ── Pin dock (desktop-only strip) ─────────────────────────── */
 
 .pin-dock {
@@ -559,18 +590,25 @@ body,
   }
 
   /* Office strip: the whole floor at a glance; triage below carries the
-     verbs. Strip + board are both above the fold (crisis-first cold open). */
+     verbs; FLOOR FEED fills the rest. Strip + board are both above the fold
+     (crisis-first cold open, GAME-DESIGN-V3 §3.2 items 2-4). */
   .surfaces[data-view='floor'] .world {
     flex: 0 0 280px;
   }
 
   .surfaces[data-view='floor'] .triage-board {
     position: static;
-    flex: 1 1 auto;
+    flex: 0 1 auto;
+    max-height: 42%;
     width: auto;
-    max-height: none;
     border-left: none;
     border-right: none;
+  }
+
+  .surfaces[data-view='floor'] .floor-feed {
+    display: flex;
+    flex: 1 1 auto;
+    min-height: 0;
   }
 
   /* One-hand touch grammar: every row/verb ≥44px. */
