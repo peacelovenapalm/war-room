@@ -1,13 +1,26 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 
+import type { ClientMessage } from '../../core/src/messages.js';
 import { AgentDrawer } from './components/AgentDrawer';
+import { AutomationPanel } from './components/AutomationPanel';
+import { BriefingPanel } from './components/BriefingPanel';
+import { CallModal, type CallModalPrefill } from './components/CallModal';
 import { type ChipFrame, ChipLayer } from './components/ChipLayer';
+import { ContractsPanel } from './components/ContractsPanel';
+import { DebugView, type DiagnosticsRow } from './components/DebugView';
+import { DispatchTray } from './components/DispatchTray';
+import { HelpModal } from './components/HelpModal';
 import { HudStrip, type ViewMode } from './components/HudStrip';
+import { type DockPanelKind, PanelDock } from './components/PanelDock';
 import { PinDock } from './components/PinDock';
+import { PropHotspots } from './components/PropHotspots';
 import { RealSheet } from './components/RealSheet';
+import { SettingsModal } from './components/SettingsModal';
+import { ShiftPanel } from './components/ShiftPanel';
 import { TriageBoard } from './components/TriageBoard';
 import { type CameraState, fitToView } from './engine/camera';
 import { easeInOut, focusCamera, mixCamera, walkProgress } from './engine/focus';
+import type { HotspotKind } from './engine/hotspots';
 import { mapWorldBounds } from './engine/iso';
 import { renderWorld } from './engine/renderer';
 import { getCanvasResolution } from './engine/resolution';
@@ -19,7 +32,13 @@ import {
   occupiedDeskAnchors,
 } from './engine/world';
 import { type AgentMap, EMPTY_AGENTS, reduceAgents, toOccupants } from './net/agentStore';
-import { type ConnectionStatus, connectToServer } from './net/connection';
+import { type ConnectionStatus, connectToServer, type ServerConnection } from './net/connection';
+import {
+  detectSendFailures,
+  type DispatchEntry,
+  type PendingSend,
+  type SendFailure,
+} from './net/dispatchFacts';
 import { TailManager } from './net/tailManager';
 import {
   type AckState,
@@ -30,6 +49,14 @@ import {
   undoAck,
 } from './state/ackUndo';
 import {
+  reduceBudget,
+  reduceChainRunReceivedAt,
+  reduceChainRuns,
+  reduceDispatchEntries,
+} from './state/automationStore';
+import type { BudgetSnapshotClient } from './state/budget';
+import type { ChainRunClient } from './state/chain';
+import {
   acknowledgeDebris,
   type CrisisState,
   EMPTY_CRISIS_STATE,
@@ -39,6 +66,7 @@ import {
 import { type EconomySnapshot, reduceEconomy } from './state/economy';
 import { buildRealSheet, type RealSheetKind, tallyAgents, wingCounts } from './state/hud';
 import { pinAgent, unpinAgent } from './state/pinDock';
+import { reduceSettings, type SettingsSnapshot } from './state/settings';
 import { appendChunk, EMPTY_TAILS, setPaused, tailKey, type TailMap } from './state/tailStore';
 import { installTestHooksIfE2E } from './testHooks';
 
@@ -70,11 +98,14 @@ export default function App() {
   const walkRef = useRef<WalkState>({ targetAgentId: null, from: null, startTs: 0 });
   const rafRef = useRef<number | null>(null);
   const managerRef = useRef<TailManager | null>(null);
+  const connectionRef = useRef<ServerConnection | null>(null);
   const prevPinsRef = useRef<readonly number[]>([]);
   // Source-of-truth refs for values reduced OUTSIDE render (WS callbacks +
   // the age tick); the matching useState mirrors them for rendering.
   const agentsRef = useRef<AgentMap>(EMPTY_AGENTS);
   const acksRef = useRef<AckState>(EMPTY_ACKS);
+  const dispatchEntriesRef = useRef<DispatchEntry[]>([]);
+  const pendingSendsRef = useRef<PendingSend[]>([]);
 
   const [grayscale, setGrayscale] = useState(false);
   const [view, setView] = useState<ViewMode>('floor');
@@ -90,6 +121,18 @@ export default function App() {
   const [realKind, setRealKind] = useState<RealSheetKind | null>(null);
   const [now, setNow] = useState(() => Date.now());
   const [chipFrame, setChipFrame] = useState<ChipFrame | null>(null);
+
+  // ── Stage-3 panel ports ──────────────────────────────────────────
+  const [openPanel, setOpenPanel] = useState<DockPanelKind | null>(null);
+  const [settings, setSettings] = useState<SettingsSnapshot | null>(null);
+  const [dispatchEntries, setDispatchEntries] = useState<DispatchEntry[]>([]);
+  const [sendFailures, setSendFailures] = useState<SendFailure[]>([]);
+  const [chainRuns, setChainRuns] = useState<ChainRunClient[]>([]);
+  const [chainRunReceivedAt, setChainRunReceivedAt] = useState<Record<string, number>>({});
+  const [budget, setBudget] = useState<BudgetSnapshotClient | null>(null);
+  const [diagnostics, setDiagnostics] = useState<DiagnosticsRow[]>([]);
+  const [callPrefill, setCallPrefill] = useState<CallModalPrefill | null>(null);
+  const [viewingResult, setViewingResult] = useState<DispatchEntry | null>(null);
 
   const occupants = useMemo(() => toOccupants(agents, now), [agents, now]);
   const occupantsRef = useRef(occupants);
@@ -224,17 +267,43 @@ export default function App() {
         if (message.type === 'outputChunk') {
           setTails((previous) => appendChunk(previous, message));
         }
+        // Stage-3 panel ports — same "verbatim mirror" reducer convention.
+        setSettings((previous) => reduceSettings(previous, message));
+        setBudget((previous) => reduceBudget(previous, message));
+        if (message.type === 'dispatchUpdate') {
+          setDispatchEntries((previous) => {
+            const next = reduceDispatchEntries(previous, message, at);
+            dispatchEntriesRef.current = next;
+            return next;
+          });
+        }
+        if (message.type === 'chainRunUpdate') {
+          setChainRuns((previous) => reduceChainRuns(previous, message));
+          setChainRunReceivedAt((previous) => reduceChainRunReceivedAt(previous, message, at));
+        }
+        if (message.type === 'agentDiagnostics') {
+          setDiagnostics(message.agents);
+        }
       },
       onStatus: (status) => {
         setConnectionStatus(status);
         managerRef.current?.handleStatus(status);
       },
     });
+    connectionRef.current = connection;
     managerRef.current = new TailManager(connection);
     return () => {
+      connectionRef.current = null;
       managerRef.current = null;
       connection.dispose();
     };
+  }, []);
+
+  /** send() for panels that write to the real server (CALL modal, Settings
+   *  toggles) — queued client-side until the WS is live (connection.ts's
+   *  own behavior), never a no-op when momentarily offline. */
+  const send = useCallback((message: ClientMessage) => {
+    connectionRef.current?.send(message);
   }, []);
 
   // Age tick — board ages, poll TTLs (fires go out when a poll expires),
@@ -248,6 +317,28 @@ export default function App() {
       if (expired.length > 0) {
         applyAcks(clearAcks(acksRef.current, expired));
         setCrisis((previous) => expired.reduce(acknowledgeDebris, previous));
+      }
+      // dispatchRequest has no ack on the wire — a send with no matching
+      // dispatchUpdate within DISPATCH_SEND_TIMEOUT_MS is honestly reported
+      // as "not queued" rather than silently doing nothing.
+      if (pendingSendsRef.current.length > 0) {
+        const { stillPending, failed } = detectSendFailures(
+          pendingSendsRef.current,
+          dispatchEntriesRef.current,
+          at,
+        );
+        pendingSendsRef.current = stillPending;
+        if (failed.length > 0) {
+          setSendFailures((previous) => [
+            ...previous,
+            ...failed.map((f) => ({
+              id: f.id,
+              machine: f.machine,
+              action: f.action,
+              detectedAt: at,
+            })),
+          ]);
+        }
       }
     }, TICK_MS);
     return () => {
@@ -334,6 +425,94 @@ export default function App() {
     setTails((previous) => setPaused(previous, key, !(previous.get(key)?.paused ?? false)));
   }, []);
 
+  // ── Stage-3 panel handlers ───────────────────────────────────────
+
+  /** `?` reopens HELP from anywhere, except while typing (a prompt
+   *  textarea legitimately contains "?" characters). */
+  useEffect(() => {
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key !== '?') return;
+      const target = e.target;
+      const typing =
+        target instanceof HTMLElement &&
+        (target.tagName === 'INPUT' || target.tagName === 'TEXTAREA' || target.isContentEditable);
+      if (typing) return;
+      setOpenPanel('help');
+    };
+    window.addEventListener('keydown', onKey);
+    return () => {
+      window.removeEventListener('keydown', onKey);
+    };
+  }, []);
+
+  const closePanel = useCallback(() => {
+    setOpenPanel(null);
+  }, []);
+
+  const handleOpenHotspot = useCallback((kind: HotspotKind) => {
+    setOpenPanel(kind);
+  }, []);
+
+  const handleDispatchSend = useCallback((machine: string, action: 'dispatch') => {
+    pendingSendsRef.current = [
+      ...pendingSendsRef.current,
+      { id: crypto.randomUUID(), machine, action, sentAt: Date.now() },
+    ];
+  }, []);
+
+  const handleDispatchTodo = useCallback((prompt: string) => {
+    setCallPrefill({ prompt });
+    setOpenPanel('call');
+  }, []);
+
+  const handleDispatchContract = useCallback((contract: { id: string; title: string }) => {
+    setCallPrefill({
+      prompt: `Contract ${contract.id}: ${contract.title}`,
+      contractId: contract.id,
+    });
+    setOpenPanel('call');
+  }, []);
+
+  const handleToggleSound = useCallback(() => {
+    setSettings((previous) => {
+      if (previous === null) return previous;
+      const enabled = !previous.soundEnabled;
+      send({ type: 'setSoundEnabled', enabled });
+      return { ...previous, soundEnabled: enabled };
+    });
+  }, [send]);
+
+  const handleToggleWatchAllSessions = useCallback(() => {
+    setSettings((previous) => {
+      if (previous === null) return previous;
+      const enabled = !previous.watchAllSessions;
+      send({ type: 'setWatchAllSessions', enabled });
+      return { ...previous, watchAllSessions: enabled };
+    });
+  }, [send]);
+
+  const handleToggleHooksEnabled = useCallback(() => {
+    setSettings((previous) => {
+      if (previous === null) return previous;
+      const enabled = !previous.hooksEnabled;
+      send({ type: 'setHooksEnabled', enabled });
+      return { ...previous, hooksEnabled: enabled };
+    });
+  }, [send]);
+
+  const handleToggleAlwaysShowLabels = useCallback(() => {
+    setSettings((previous) => {
+      if (previous === null) return previous;
+      const enabled = !previous.alwaysShowLabels;
+      send({ type: 'setAlwaysShowLabels', enabled });
+      return { ...previous, alwaysShowLabels: enabled };
+    });
+  }, [send]);
+
+  const handleRequestDiagnostics = useCallback(() => {
+    send({ type: 'requestDiagnostics' });
+  }, [send]);
+
   const tally = useMemo(() => tallyAgents(agents, now), [agents, now]);
   const wings = useMemo(() => wingCounts(agents, crisis), [agents, crisis]);
   const openCrises = openCrisisCount(crisis);
@@ -360,11 +539,24 @@ export default function App() {
           setView((value) => (value === 'floor' ? 'board' : 'floor'));
         }}
         onOpenReal={setRealKind}
+        onOpenCall={() => {
+          setOpenPanel('call');
+        }}
+        onOpenShift={() => {
+          setOpenPanel('shift');
+        }}
+        onOpenHelp={() => {
+          setOpenPanel('help');
+        }}
       />
       <div className="surfaces" data-view={view}>
         <div className="world" ref={containerRef}>
           <canvas data-testid="iso-canvas" ref={canvasRef} />
           <ChipLayer frame={chipFrame} occupants={occupants} onChipClick={handleDesk} />
+          {/* Room-is-interface half of the desktop chrome model — desktop
+              only (CSS-hidden on phone, matching the pin dock's own
+              breakpoint: no free camera play there). */}
+          <PropHotspots frame={chipFrame} onOpen={handleOpenHotspot} />
         </div>
         <TriageBoard
           agents={agents}
@@ -413,6 +605,91 @@ export default function App() {
           setRealKind(null);
         }}
       />
+
+      <DispatchTray
+        entries={dispatchEntries}
+        sendFailures={sendFailures}
+        onDismiss={(id) => {
+          setDispatchEntries((previous) => previous.filter((e) => e.id !== id));
+        }}
+        onView={setViewingResult}
+      />
+      {/* Compact-dock half of the desktop chrome model — the cross-platform
+          affordance (works on phone too, where PropHotspots doesn't apply). */}
+      <PanelDock onOpen={setOpenPanel} />
+
+      <HelpModal isOpen={openPanel === 'help'} onClose={closePanel} />
+      <SettingsModal
+        isOpen={openPanel === 'settings'}
+        onClose={closePanel}
+        settings={settings}
+        onToggleSound={handleToggleSound}
+        onToggleWatchAllSessions={handleToggleWatchAllSessions}
+        onToggleHooksEnabled={handleToggleHooksEnabled}
+        onToggleAlwaysShowLabels={handleToggleAlwaysShowLabels}
+      />
+      <DebugView
+        isOpen={openPanel === 'debug'}
+        onClose={closePanel}
+        agents={agents}
+        connectionStatus={connectionStatus}
+        crisis={crisis}
+        economy={economy}
+        diagnostics={diagnostics}
+        onRequestDiagnostics={handleRequestDiagnostics}
+      />
+      <CallModal
+        isOpen={openPanel === 'call'}
+        onClose={() => {
+          closePanel();
+          setCallPrefill(null);
+        }}
+        prefill={callPrefill}
+        send={send}
+        onSend={handleDispatchSend}
+        budget={budget}
+      />
+      <ShiftPanel isOpen={openPanel === 'shift'} onClose={closePanel} />
+      <BriefingPanel
+        isOpen={openPanel === 'briefing'}
+        onClose={closePanel}
+        onDispatchTodo={handleDispatchTodo}
+      />
+      <AutomationPanel
+        isOpen={openPanel === 'automation'}
+        onClose={closePanel}
+        chainRuns={chainRuns}
+        chainRunReceivedAt={chainRunReceivedAt}
+        now={now}
+      />
+      <ContractsPanel
+        isOpen={openPanel === 'contracts'}
+        onClose={closePanel}
+        onDispatchContract={handleDispatchContract}
+      />
+      {viewingResult && (
+        <div className="modal-backdrop" onClick={() => setViewingResult(null)}>
+          <div className="modal" role="dialog" onClick={(e) => e.stopPropagation()}>
+            <header className="modal__head">
+              <span className="modal__title">RESULT — {viewingResult.machine}</span>
+              <button
+                type="button"
+                className="verb"
+                onClick={() => {
+                  setViewingResult(null);
+                }}
+              >
+                ✕ CLOSE
+              </button>
+            </header>
+            <div className="modal__body">
+              <pre className="dispatch-result">
+                {viewingResult.resultTail ?? '(no output captured)'}
+              </pre>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 }

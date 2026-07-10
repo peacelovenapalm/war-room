@@ -1,0 +1,152 @@
+import { useEffect, useState } from 'react';
+
+import { formatAge } from '../state/crisis';
+import {
+  compactTokens,
+  EFFICIENCY_WORDS,
+  formatClock,
+  isShiftReportStale,
+  type ShiftReport,
+  type ShiftSnapshot,
+} from '../state/shiftReport';
+import { Modal } from './Modal';
+
+const REFRESH_INTERVAL_MS = 60_000;
+
+export interface ShiftPanelProps {
+  isOpen: boolean;
+  onClose: () => void;
+}
+
+function Row({ glyph, word, value }: { glyph: string; word: string; value: string }) {
+  return (
+    <div className="shift-row" data-testid="shift-row">
+      <span className="shift-row__label">
+        {glyph} {word}
+      </span>
+      <span className="shift-row__value">{value}</span>
+    </div>
+  );
+}
+
+function YesterdayCard({ report }: { report: ShiftReport }) {
+  return (
+    <div className="shift-yesterday" data-testid="shift-yesterday">
+      <div className="shift-yesterday__head">◐ YESTERDAY — {report.date}</div>
+      <div>
+        {report.turnsCompleted} turns · {compactTokens(report.tokensOut)} tokens out ·{' '}
+        {report.crisesResolved}/{report.crisesIgnited} crises resolved ·{' '}
+        <strong>{report.efficiency ?? 'n/a'}</strong>
+      </div>
+    </div>
+  );
+}
+
+/** SHIFT REPORT (KICKOFF-v3.1 stage-3 port): today's scorecard from real
+ *  events — completed turns, real token spend, crisis throughput. Fetches
+ *  GET /api/shift on open + every 60s. Efficiency rewards LOW spend. */
+export function ShiftPanel({ isOpen, onClose }: ShiftPanelProps) {
+  const [snapshot, setSnapshot] = useState<ShiftSnapshot | null>(null);
+  const [error, setError] = useState(false);
+  const [lastUpdatedAt, setLastUpdatedAt] = useState<number | null>(null);
+
+  useEffect(() => {
+    if (!isOpen) return;
+    let cancelled = false;
+    const load = async () => {
+      try {
+        const res = await fetch('/api/shift');
+        if (!res.ok) throw new Error(`HTTP ${String(res.status)}`);
+        const data = (await res.json()) as ShiftSnapshot;
+        if (!cancelled) {
+          setSnapshot(data);
+          setError(false);
+          setLastUpdatedAt(Date.now());
+        }
+      } catch {
+        if (!cancelled) setError(true);
+      }
+    };
+    void load();
+    const interval = setInterval(() => void load(), REFRESH_INTERVAL_MS);
+    return () => {
+      cancelled = true;
+      clearInterval(interval);
+    };
+  }, [isOpen]);
+
+  const report = snapshot?.today ?? null;
+  const stale = isShiftReportStale(report !== null, error);
+
+  return (
+    <Modal
+      isOpen={isOpen}
+      onClose={onClose}
+      title={`SHIFT REPORT${report ? ` — ${report.date}` : ''}`}
+      testId="shift-panel"
+    >
+      {error && !report && <div className="modal__warn">⚠ unable to reach /api/shift</div>}
+      {stale && (
+        <div className="modal__warn" data-testid="shift-stale">
+          ⚠ STALE — last updated {lastUpdatedAt !== null ? formatClock(lastUpdatedAt) : '—'}
+        </div>
+      )}
+      {report && (
+        <>
+          <div className="shift-rows">
+            <Row glyph="✓" word="TURNS" value={`${String(report.turnsCompleted)} completed`} />
+            <Row
+              glyph="⚠"
+              word="CRISES"
+              value={`${String(report.crisesIgnited)} ignited · ${String(report.crisesResolved)} resolved · ${String(report.crisesOpen)} open`}
+            />
+            <Row
+              glyph="◷"
+              word="MEAN UNBLOCK"
+              value={
+                report.meanTimeToUnblockMs !== null
+                  ? `${formatAge(report.meanTimeToUnblockMs)} (worst ${formatAge(report.longestBlockedMs)})`
+                  : '— none resolved yet'
+              }
+            />
+            <Row
+              glyph="◔"
+              word="TOKENS"
+              value={`${compactTokens(report.tokensIn)} in · ${compactTokens(report.tokensOut)} out`}
+            />
+            <Row
+              glyph="○"
+              word="TODOS CLOSED"
+              value={report.todosClosed !== null ? String(report.todosClosed) : 'no source'}
+            />
+            <Row
+              glyph="◆"
+              word="GATES ADVANCED"
+              value={report.gatesAdvanced !== null ? String(report.gatesAdvanced) : 'no source'}
+            />
+          </div>
+          <div className="shift-efficiency" data-testid="shift-efficiency">
+            <strong>✦ EFFICIENCY </strong>
+            {report.efficiency === null ? (
+              <span className="modal__muted">no completed turns yet today</span>
+            ) : (
+              <>
+                <strong>{report.efficiency}</strong>
+                <span className="modal__muted">
+                  {' '}
+                  · {report.outputTokensPerTurn} output tokens per completed turn —{' '}
+                  {EFFICIENCY_WORDS[report.efficiency]}
+                </span>
+              </>
+            )}
+          </div>
+          <p className="modal__footnote">
+            Counted from real events today: hook turn-ends, JSONL token usage, poller
+            blocked-episodes. Lower spend is always the better score.
+          </p>
+          {snapshot?.yesterday && <YesterdayCard report={snapshot.yesterday} />}
+        </>
+      )}
+    </Modal>
+  );
+}

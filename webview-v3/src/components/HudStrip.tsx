@@ -3,6 +3,7 @@ import type { EconomySnapshot } from '../state/economy';
 import { formatCashChip, formatRepChip } from '../state/economy';
 import type { AgentTally, RealSheetKind, WingCount } from '../state/hud';
 import { formatTally, formatWing, officeMood } from '../state/hud';
+import { StopAllControl } from './StopAllControl';
 
 const CONNECTION_CHIP: Record<ConnectionStatus, string> = {
   connecting: '◌ CONNECTING',
@@ -24,6 +25,9 @@ export interface HudStripProps {
   onToggleView: () => void;
   /** One-tap-real (hard rule 5): every chip decomposes into verbatim telemetry. */
   onOpenReal: (kind: RealSheetKind) => void;
+  onOpenCall: () => void;
+  onOpenShift: () => void;
+  onOpenHelp: () => void;
 }
 
 /**
@@ -44,6 +48,9 @@ export function HudStrip({
   onToggleGrayscale,
   onToggleView,
   onOpenReal,
+  onOpenCall,
+  onOpenShift,
+  onOpenHelp,
 }: HudStripProps) {
   return (
     <header className="hud">
@@ -110,13 +117,19 @@ export function HudStrip({
         {officeMood(openCrises)}
       </button>
       <span className="hud__spacer" />
-      <button type="button" disabled title="Stage-3 panel port — not wired yet">
-        ＋ DISPATCH
+      {/* Always visible, desktop AND phone (hard rule 8: never weaken the
+          unattended-run safety net) — the HUD sits above every modal's
+          backdrop (z-index) so this stays clickable even with a panel
+          open. AutomationPanel repeats the SAME control for convenience
+          while that panel is open; both hit the one real server endpoint. */}
+      <StopAllControl />
+      <button type="button" data-testid="hud-open-call" onClick={onOpenCall}>
+        ☎ CALL
       </button>
-      <button type="button" disabled title="Stage-3 panel port — not wired yet">
+      <button type="button" data-testid="hud-open-shift" onClick={onOpenShift}>
         ▦ SHIFT
       </button>
-      <button type="button" disabled title="Stage-3 panel port — not wired yet">
+      <button type="button" data-testid="hud-open-help" onClick={onOpenHelp}>
         ? HELP
       </button>
       <button
