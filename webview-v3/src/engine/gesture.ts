@@ -121,8 +121,15 @@ export function gesturePointerMove(
     const dist = distance(points[0], points[1]);
     if (state.lastDistance !== null && state.lastDistance > 0) {
       const bounds = interactiveZoomBounds(canvasCssSize, world);
-      const zoomed = zoomAt(camera, nextCentroid.x, nextCentroid.y, dist / state.lastDistance);
-      next = { ...zoomed, zoom: Math.min(bounds.max, Math.max(bounds.min, zoomed.zoom)) };
+      // Clamp the TARGET zoom first, then re-derive the factor that lands
+      // exactly on it, so zoomAt computes offsets anchored for the zoom we
+      // actually end up at — not offsets anchored for the raw (unclamped)
+      // zoom with only the `.zoom` number swapped out after the fact (that
+      // left the anchor point jumping the instant a pinch crossed a bound).
+      const rawFactor = dist / state.lastDistance;
+      const targetZoom = Math.min(bounds.max, Math.max(bounds.min, camera.zoom * rawFactor));
+      const clampedFactor = camera.zoom > 0 ? targetZoom / camera.zoom : 1;
+      next = zoomAt(camera, nextCentroid.x, nextCentroid.y, clampedFactor);
       moved = true;
     }
     if (state.lastCentroid) {

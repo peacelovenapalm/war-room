@@ -3,7 +3,7 @@ import { fileURLToPath } from 'node:url';
 
 import { describe, expect, it } from 'vitest';
 
-import { fitToView, MAX_ZOOM } from '../src/engine/camera';
+import { canvasToWorld, fitToView, interactiveZoomBounds, MAX_ZOOM } from '../src/engine/camera';
 import {
   EMPTY_GESTURE,
   gesturePointerDown,
@@ -110,6 +110,46 @@ describe('pinch/pan gesture reducer', () => {
     }
     const bound = fitToView(PHONE, bounds).zoom * 0.6; // matches camera.ts multiple
     expect(camera.zoom).toBeGreaterThanOrEqual(bound - 1e-6);
+  });
+
+  it('a clamped pinch zoom keeps the world point under the centroid anchored (no jump when the bound fires)', () => {
+    const bounds = mapWorldBounds(14, 10);
+    const fit = fitToView(PHONE, bounds);
+    const zoomBounds = interactiveZoomBounds(PHONE, bounds);
+    // Start just under the interactive zoom-IN ceiling, framed like fitToView
+    // so clampPanToFit's offset window is wide open (not the constraint under
+    // test — see the "anchored" invariant below).
+    const camera = { zoom: zoomBounds.max * 0.9, offsetX: fit.offsetX, offsetY: fit.offsetY };
+    // Hand-built GestureState (a plain data type, legitimate to construct
+    // directly) with lastCentroid pre-set to the centroid THIS move will
+    // land on — isolates the zoom-clamp anchor math from panBy's separate,
+    // orthogonal centroid-translation step (panBy(next, 0, 0) is a no-op),
+    // matching the module's own "reproduces the SAME camera" zero-delta
+    // pattern above.
+    const anchorCentroid = { x: (10 + 240) / 2, y: 300 };
+    const gesture: GestureState = {
+      pointers: new Map([
+        [1, { id: 1, x: 150, y: 300 }],
+        [2, { id: 2, x: 240, y: 300 }],
+      ]),
+      lastDistance: 90,
+      lastCentroid: anchorCentroid,
+    };
+
+    // Pointer 1 jumps far away: distance 90 -> 230, a factor that pushes the
+    // RAW (unclamped) target zoom well past zoomBounds.max, guaranteeing the
+    // clamp branch fires.
+    const result = gesturePointerMove(gesture, { id: 1, x: 10, y: 300 }, camera, PHONE, bounds);
+    expect(result.camera).not.toBeNull();
+    expect(result.camera!.zoom).toBeCloseTo(zoomBounds.max, 6); // confirms the clamp fired
+
+    // zoomAt's whole contract is "the world point under the anchor
+    // (canvasX,canvasY) stays fixed" — that must still hold for whatever
+    // zoom the clamp actually lands on, not just the raw unclamped one.
+    const worldBefore = canvasToWorld(camera, anchorCentroid.x, anchorCentroid.y);
+    const worldAfter = canvasToWorld(result.camera!, anchorCentroid.x, anchorCentroid.y);
+    expect(worldAfter.x).toBeCloseTo(worldBefore.x, 3);
+    expect(worldAfter.y).toBeCloseTo(worldBefore.y, 3);
   });
 
   it('lifting one finger of a pinch drops back to single-pointer pan without a jump', () => {
