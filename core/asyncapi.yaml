@@ -712,8 +712,12 @@ components:
           type: boolean
           description: >-
             True on the first replayed chunk of a stream whose older history
-            was evicted by the ring buffer's byte budget — a late subscriber
-            knows it is seeing a tail, not the full output.
+            was evicted by the ring buffer's retention limits (per-stream
+            byte budget or chunk-count cap) — a late subscriber knows it is
+            seeing a tail, not the full output. Marks REPLAY eviction only:
+            chunks a runner dropped in transit (dead/hung server, backlog
+            shed) are not signaled here — the durable record stays the
+            per-run log and resultTail.
 
     OutputSourceValue:
       description: Which plane the output stream belongs to.
