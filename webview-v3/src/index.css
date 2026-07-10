@@ -1,0 +1,85 @@
+/* webview-v3 base styles. Layout/colors for the DOM chrome live in CSS
+   (the eslint no-inline-colors rule covers TS/TSX; canvas colors live in
+   src/constants.ts). */
+
+* {
+  box-sizing: border-box;
+}
+
+html,
+body,
+#root {
+  margin: 0;
+  padding: 0;
+  width: 100%;
+  height: 100%;
+  overflow: hidden;
+  background: #20242c;
+  color: #f2f4f8;
+  font-family: ui-monospace, Menlo, Consolas, monospace;
+}
+
+.app {
+  display: flex;
+  flex-direction: column;
+  width: 100%;
+  height: 100%;
+}
+
+/* GRAYSCALE toggle target: the whole app, canvas included. Signals must
+   stay readable here — shape + text labels are the primary channel. */
+.app.grayscale {
+  filter: grayscale(1);
+}
+
+.hud {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 6px 10px;
+  font-size: 12px;
+  line-height: 1;
+  background: #14171d;
+  border-bottom: 1px solid #2c3240;
+  flex: 0 0 auto;
+  white-space: nowrap;
+  overflow-x: auto;
+}
+
+.hud .brand {
+  font-weight: 700;
+  letter-spacing: 0.08em;
+}
+
+.hud .chip {
+  padding: 4px 6px;
+  border: 1px solid #2c3240;
+  background: #1b1f27;
+}
+
+.hud button {
+  margin-left: auto;
+  padding: 6px 8px;
+  font: inherit;
+  color: inherit;
+  background: #1b1f27;
+  border: 1px solid #3a4150;
+  cursor: pointer;
+  min-height: 28px;
+}
+
+.hud button[aria-pressed='true'] {
+  background: #3a4150;
+}
+
+.world {
+  position: relative;
+  flex: 1 1 auto;
+  min-height: 0;
+}
+
+.world canvas {
+  position: absolute;
+  inset: 0;
+  display: block;
+}
