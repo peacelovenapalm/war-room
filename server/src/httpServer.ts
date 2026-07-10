@@ -20,12 +20,14 @@ import { contractStore } from './contractStore.js';
 import { renderDigest } from './digest.js';
 import { dispatchStore } from './dispatchStore.js';
 import { dispatchTemplateStore } from './dispatchTemplateStore.js';
+import { dossierDerivation } from './dossierDerivation.js';
 import { dossierStore } from './dossierStore.js';
 import type { PerkId } from './economyConstants.js';
 import { PERK_IDS } from './economyConstants.js';
 import { economyStore } from './economyStore.js';
 import type { Employee, ScoreTrack } from './employeeStore.js';
 import { employeeStore } from './employeeStore.js';
+import { matchDayDerivation } from './matchDayDerivation.js';
 import { matchDayStore, toMatchDayEvent } from './matchDayStore.js';
 import {
   createBudgetPauseNotifier,
@@ -38,11 +40,14 @@ import { RoomType as RoomTypeValues } from './officeLayoutTypes.js';
 import { outputRingStore, outputStreamKey } from './outputRingStore.js';
 import { applyPollStates, parsePollBody, startPollStateSweep } from './pollStateHandler.js';
 import { progression } from './progressionStore.js';
+import { reworkBinIngest } from './reworkBinIngest.js';
 import { reworkBinStore } from './reworkBinStore.js';
+import { RIVALRY_SWEEP_INTERVAL_MS, rivalryDerivation } from './rivalryDerivation.js';
 import { rivalryStore } from './rivalryStore.js';
 import { shiftStats } from './shiftStats.js';
 import type { StandingOrderSchedule } from './standingOrderStore.js';
 import { standingOrderStore } from './standingOrderStore.js';
+import { STUDIO_CONTRACT_SWEEP_INTERVAL_MS, studioContractIngest } from './studioContractIngest.js';
 import { studioContractStore } from './studioContractStore.js';
 import type { AgentState } from './types.js';
 import { v3StoreEnabled } from './v3Flags.js';
@@ -127,6 +132,8 @@ export async function createHttpServer(options: HttpServerOptions): Promise<Http
   registerBudgetRoutes(app, options);
   registerAutomationStopAllRoutes(app, options);
   registerContractRoutes(app);
+  registerStudioContractRoutes(app);
+  registerReworkRoutes(app);
   // Live-tick socket tracker (v2 mechanic G4, GAME-DESIGN §2's unified
   // cadence model: "Live tick ... ≥1 socket connected, every 5 min ...
   // stops the instant the last socket disconnects"). A plain mutable
@@ -158,6 +165,51 @@ export async function createHttpServer(options: HttpServerOptions): Promise<Http
   const chainSweepTimer = setInterval(() => chainOrchestrator.sweep(), CHAIN_SWEEP_INTERVAL_MS);
   chainSweepTimer.unref?.();
   app.addHook('onClose', () => clearInterval(chainSweepTimer));
+
+  // ── v3 Living Studio derivation loops (WS-C stage 2 — KICKOFF-v3.1 §3) ──
+  // Each module owns its own store subscription via an idempotent start()
+  // (the chainOrchestrator.start() discipline: once per process, no
+  // per-connection wiring). All of them DERIVE game-face state from real
+  // observed events; none of them can gate, spawn, or stop anything real.
+  studioContractIngest.start(); // dispatch exit-0 → contract progress
+  dossierDerivation.start(); //     dispatch kills/exits → staff telemetry
+  matchDayDerivation.start(); //    chain runs → fixtures + commentary
+  reworkBinIngest.start(); //       failed/killed dispatches → crates
+  rivalryDerivation.start(); //     completed chain runs → bonds
+
+  // Contract ingest tick (mint from the real todo file, complete on todo
+  // disappearance, quiet expiry). One immediate sweep so a fresh boot
+  // doesn't wait a full interval to surface the wall.
+  studioContractIngest.sweep();
+  const studioContractTimer = setInterval(
+    () => studioContractIngest.sweep(),
+    STUDIO_CONTRACT_SWEEP_INTERVAL_MS,
+  );
+  studioContractTimer.unref?.();
+  app.addHook('onClose', () => clearInterval(studioContractTimer));
+
+  // Rivalry live-overlap sweep — the genuine worktree-collision early
+  // warning (incident 74d74e8's class) recomputed from live agent cwds.
+  const rivalrySweepTimer = setInterval(
+    () => rivalryDerivation.sweepLiveOverlap(options.store.values(), options.machineLabel),
+    RIVALRY_SWEEP_INTERVAL_MS,
+  );
+  rivalrySweepTimer.unref?.();
+  app.addHook('onClose', () => clearInterval(rivalrySweepTimer));
+
+  // Dossier "sessions run" feed — a real agentAdded with a known project
+  // dir is one observed session (deduped by sessionId inside the module).
+  const onAgentAddedDossier = (_id: number, agent: AgentState) => {
+    if (!agent.projectDir) return;
+    dossierDerivation.recordSession(
+      agent.machine ?? options.machineLabel,
+      agent.projectDir,
+      agent.folderName ?? agent.projectDir,
+      agent.sessionId,
+    );
+  };
+  options.store?.on('agentAdded', onAgentAddedDossier);
+  app.addHook('onClose', () => options.store?.off('agentAdded', onAgentAddedDossier));
 
   // standingOrderTick (v2 mechanic G3, §7.2) — timerManager.ts has no
   // generic tick primitive (verified by grep, BUILD-PLAN §G3 task 6), so
@@ -402,6 +454,18 @@ function registerPollRoute(app: FastifyInstance, options: HttpServerOptions): vo
         progression,
         employeeStore,
         economyStore,
+        // v3 Living Studio sinks (WS-C stage 2) — observed transitions
+        // only; see V3CrisisSinks' contract in pollStateHandler.ts.
+        {
+          onCrisisStarted: (m, projectDir, agentId, now) =>
+            dossierDerivation.recordCrisisStarted(m, projectDir, agentId, now),
+          onCrisisResolved: (m, projectDir, agentId, durationMs, now) => {
+            dossierDerivation.recordCrisisResolved(m, projectDir, agentId, durationMs, now);
+            studioContractIngest.recordCrisisResolved(m, projectDir, agentId, now);
+          },
+          onCrisisAbandoned: (m, projectDir, agentId, waitingFor, now) =>
+            reworkBinIngest.recordAbandonedCrisis(agentId, m, projectDir, waitingFor, now),
+        },
       );
       if (!options.embedded && (result.matched > 0 || result.cleared > 0)) {
         console.log(
@@ -1152,6 +1216,85 @@ function registerContractRoutes(app: FastifyInstance): void {
 
   app.post<{ Params: { id: string } }>('/api/contracts/:id/claim', async (request, reply) => {
     reply.send(contractStore.claim(request.params.id));
+  });
+}
+
+// ── Studio contracts (v3 WS-C stage 2 — KICKOFF-v3.1 §1 "Aging contracts") ──
+
+/**
+ * Studio contract routes. Same trust level as /api/contracts
+ * (unauthenticated local-webview player-action plane; the server is
+ * tailnet-only). GET is read-only; ACCEPT is the one player verb — every
+ * other transition is derivation-owned (studioContractIngest.ts): mint
+ * from the real todo file, progress from observed events, completion on
+ * todo disappearance, QUIET expiry. There is deliberately no decline/
+ * dismiss-with-penalty verb: ignoring an offered contract costs nothing.
+ */
+function registerStudioContractRoutes(app: FastifyInstance): void {
+  app.get('/api/studio-contracts', async () => studioContractStore.getAll());
+
+  app.post<{ Params: { id: string } }>(
+    '/api/studio-contracts/:id/accept',
+    async (request, reply) => {
+      reply.send(studioContractStore.accept(request.params.id));
+    },
+  );
+}
+
+// ── Scrap & Rework Bin (v3 WS-C stage 2 — KICKOFF-v3.1 §1 "failure loop") ──
+
+/**
+ * Rework bin routes. Same trust level as the player-action planes above.
+ * REWORK re-enqueues the crate's ORIGINAL dispatch parameters through the
+ * NORMAL dispatch path — dispatchStore.enqueue applies the ringing cap,
+ * the runner's own allowlist decides, the TTL sweep applies; nothing here
+ * bypasses any gate (a rework click is a conscious human act, the same
+ * class as a CallModal Send). DISMISS is the REQUIRED first-class verb —
+ * counted on the SHIFT scorecard, never penalized, never re-nagged.
+ */
+function registerReworkRoutes(app: FastifyInstance): void {
+  app.get('/api/rework', async () => reworkBinStore.getAll());
+
+  app.post<{ Params: { id: string }; Body: Record<string, unknown> }>(
+    '/api/rework/:id/dismiss',
+    async (request, reply) => {
+      const reason = typeof request.body?.reason === 'string' ? request.body.reason : undefined;
+      const result = reworkBinStore.dismiss(request.params.id, reason);
+      if (result.ok) shiftStats.recordReworkDismissed();
+      reply.send(result);
+    },
+  );
+
+  app.post<{ Params: { id: string } }>('/api/rework/:id/redispatch', async (request, reply) => {
+    const crate = reworkBinStore.getById(request.params.id);
+    if (!crate) {
+      reply.send({ ok: false, reason: 'not-found' });
+      return;
+    }
+    if (crate.status !== 'piled') {
+      reply.send({ ok: false, reason: 'not-piled' });
+      return;
+    }
+    if (crate.source !== 'dispatch') {
+      // Crisis crates hold a dead session, not a dispatch — there is
+      // nothing to re-enqueue; dismiss is the verb for those.
+      reply.send({ ok: false, reason: 'not-redispatchable' });
+      return;
+    }
+    const input = dispatchStore.getRedispatchInput(crate.failureRef.id);
+    if (!input) {
+      reply.send({ ok: false, reason: 'original-dispatch-missing' });
+      return;
+    }
+    // The NORMAL path: every enqueue gate applies; a refusal (e.g. the
+    // ringing cap) leaves the crate piled — the gate is never bypassed.
+    const enqueued = dispatchStore.enqueue(input);
+    if (!enqueued.ok) {
+      reply.send({ ok: false, reason: enqueued.reason });
+      return;
+    }
+    reworkBinStore.markReworked(crate.id);
+    reply.send({ ok: true, dispatchId: enqueued.record.id });
   });
 }
 
