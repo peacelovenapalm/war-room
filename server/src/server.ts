@@ -75,9 +75,20 @@ export class PixelAgentsServer {
     /** TEXT label identifying this machine (e.g. "NEXUS"). */
     machineLabel?: string;
   }): Promise<ServerConfig> {
-    // Check if another instance already has a server running
+    // Check if another instance already has a server running. When the
+    // recorded pid is OUR OWN pid, pid-liveness proves nothing: it is either a
+    // second instance in this same process (legitimate reuse — the VS Code
+    // multi-window case) or a stale file from a PREVIOUS boot that got the
+    // same pid — guaranteed in containers, where node is always PID 1, which
+    // made every state-volume-backed recreate "reuse" a dead server and never
+    // bind (found live on NEXUS, 2026-07-10). Disambiguate by probing the
+    // recorded port for a real listener.
     const existing = this.readServerJson();
-    if (existing && isProcessRunning(existing.pid)) {
+    const existingAlive =
+      existing &&
+      isProcessRunning(existing.pid) &&
+      (existing.pid !== process.pid || (await isServerResponding(existing.port)));
+    if (existing && existingAlive) {
       this.config = existing;
       this.ownsServer = false;
       console.log(
@@ -194,6 +205,22 @@ function isProcessRunning(pid: number): boolean {
   try {
     process.kill(pid, 0);
     return true;
+  } catch {
+    return false;
+  }
+}
+
+/**
+ * True only if something actually answers /api/health on the recorded port.
+ * Used to disambiguate a same-pid server.json (see start()): a live listener
+ * means legitimate same-process reuse; a dead port means a stale file.
+ */
+async function isServerResponding(port: number): Promise<boolean> {
+  try {
+    const res = await fetch(`http://127.0.0.1:${port}/api/health`, {
+      signal: AbortSignal.timeout(750),
+    });
+    return res.ok;
   } catch {
     return false;
   }

@@ -27,5 +27,13 @@ EOF
   echo "[war-room] Seeded ${CONFIG_FILE} (hooksEnabled=false guard)"
 fi
 
+# server.json is per-boot coordination state (pid+port of the live listener),
+# not persistent app state. With the state volume (2026-07-10) it now survives
+# recreates — and inside a fresh container it is stale BY DEFINITION, and
+# dangerously so: the old container's node also ran as PID 1, so the pid
+# liveness check in server.ts would "reuse" a server that no longer exists and
+# never bind a listener. Always clear it at boot.
+rm -f "${CONFIG_DIR}/server.json"
+
 # 0.0.0.0 INSIDE the container only; the host publish binds 127.0.0.1.
 exec node /app/dist/cli.js --host 0.0.0.0 --port 3141

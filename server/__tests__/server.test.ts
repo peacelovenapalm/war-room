@@ -92,6 +92,22 @@ describe('PixelAgentsServer', () => {
     expect(await res.json()).toEqual({ sha: 'unknown', builtAt: 'unknown' });
   });
 
+  // 2c. Stale server.json recording OUR OWN pid must not be "reused" — in a
+  // container node is always PID 1, so a previous boot's server.json passes
+  // the pid-liveness check forever and the server would never bind (found
+  // live on NEXUS, 2026-07-10 state-volume deploy).
+  it('ignores a stale server.json whose pid equals our own pid', async () => {
+    fs.writeFileSync(
+      serverJsonPath,
+      JSON.stringify({ port: 59999, pid: process.pid, token: 'stale-token', startedAt: 1 }),
+    );
+    const config = await server.start();
+    expect(config.port).not.toBe(59999);
+    expect(config.token).not.toBe('stale-token');
+    const res = await fetch(`http://127.0.0.1:${config.port}/api/health`);
+    expect(res.status).toBe(200);
+  });
+
   // 3. Hook endpoint requires auth
   it('hook endpoint returns 401 without auth', async () => {
     const config = await server.start();
