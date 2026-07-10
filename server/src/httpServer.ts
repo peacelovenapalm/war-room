@@ -598,6 +598,44 @@ function registerDispatchRoutes(app: FastifyInstance, options: HttpServerOptions
       reply.send(result);
     },
   );
+
+  // POST /api/dispatch/:id/output -- runner-forwarded live output telemetry
+  // (Bearer, same auth tier as /status: machine telemetry, not a player
+  // action). KICKOFF-v2.0 Phase 2 slice 2.5. Appends the coalesced chunk
+  // into the output ring, from which the subscription-gated WS fan-out
+  // delivers it — output NEVER rides the poll response, and this route
+  // never touches the dispatch record or containment. Liveness-gated:
+  // appending is only allowed while the dispatch is non-terminal
+  // (ringing/answered) so a straggler POST arriving after the terminal
+  // eviction can't resurrect a ring entry nothing would ever evict again.
+  // Refusal is a 2xx decision ({ok:false, reason}), never a 4xx — the
+  // runner's forwarder is fire-and-forget either way.
+  app.post<{ Params: { id: string }; Body: Record<string, unknown> }>(
+    '/api/dispatch/:id/output',
+    { preHandler: bearerAuth(options.token) },
+    async (request, reply) => {
+      const body = request.body ?? {};
+      const stream = body.stream === 'stdout' || body.stream === 'stderr' ? body.stream : undefined;
+      const chunk = typeof body.chunk === 'string' && body.chunk !== '' ? body.chunk : undefined;
+      const seqValid = body.seq === undefined || typeof body.seq === 'number';
+      if (!stream || chunk === undefined || !seqValid) {
+        reply
+          .code(400)
+          .send({ error: 'expected body { stream: "stdout" | "stderr", chunk, seq? }' });
+        return;
+      }
+      const record = dispatchStore.getRecord(request.params.id);
+      if (!record || (record.status !== 'ringing' && record.status !== 'answered')) {
+        reply.send({ ok: false, reason: 'unknown-or-terminal' });
+        return;
+      }
+      // The ring assigns the authoritative wire seq; the runner's own seq is
+      // validated above but not trusted for ordering (the forwarder already
+      // serializes its POSTs per dispatch).
+      outputRingStore.append('dispatch', request.params.id, stream, chunk);
+      reply.send({ ok: true });
+    },
+  );
 }
 
 // ── Observed-session pid-kill (KICKOFF v1.1 item 3) ─────────────

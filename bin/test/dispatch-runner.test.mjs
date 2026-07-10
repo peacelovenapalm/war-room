@@ -249,6 +249,84 @@ test('tick: exited status carries a resultTail read from the per-run log', async
   assert.match(exited.body.resultTail, /CODEX DISPATCH OK/);
 });
 
+test('tick: child stdout/stderr are forwarded to /api/dispatch/:id/output (final flush on exit)', async () => {
+  const item = {
+    id: 'req-fwd',
+    action: 'dispatch',
+    provider: 'claude',
+    cwd: tmpDir,
+    prompt: 'stream me',
+  };
+  const { server, captured, port } = await startStubServer(stubHandler({ pending: [item] }));
+  const cfg = baseCfg(port);
+  const allowlist = { providers: ['claude'], roots: [tmpDir], focus: false };
+  await tick(
+    cfg,
+    { handled: new Set(), children: new Map() },
+    {
+      readAllowlist: () => allowlist,
+      spawn: () => {
+        const child = new EventEmitter();
+        child.pid = 4242;
+        child.stdout = new EventEmitter();
+        child.stderr = new EventEmitter();
+        setImmediate(() => {
+          child.stdout.emit('data', Buffer.from('live line 1\n'));
+          child.stdout.emit('data', Buffer.from('live line 2\n'));
+          child.stderr.emit('data', Buffer.from('warn line\n'));
+          setImmediate(() => child.emit('exit', 0));
+        });
+        return child;
+      },
+    },
+  );
+  // The forwarder's default window is 1s; the child's exit triggers the
+  // final flush immediately — the settle below is for the POSTs themselves.
+  await new Promise((resolve) => setTimeout(resolve, 150));
+  server.close();
+
+  const outputPosts = captured.filter((c) => c.url === '/api/dispatch/req-fwd/output');
+  const stdout = outputPosts.find((c) => c.body.stream === 'stdout');
+  const stderr = outputPosts.find((c) => c.body.stream === 'stderr');
+  assert.ok(stdout, 'expected a coalesced stdout output POST');
+  assert.equal(stdout.body.chunk, 'live line 1\nlive line 2\n'); // coalesced, in order
+  assert.equal(stdout.body.seq, 0);
+  assert.equal(stdout.headers.authorization, 'Bearer test-token');
+  assert.ok(stderr, 'expected a stderr output POST');
+  assert.equal(stderr.body.chunk, 'warn line\n');
+  // Output NEVER rides the poll/status planes: exit reporting is unchanged.
+  const exited = captured.find(
+    (c) => c.url === '/api/dispatch/req-fwd/status' && c.body.event === 'exited',
+  );
+  assert.ok(exited, 'exited status POST still happens');
+});
+
+test('tick: a child with no output produces no output POSTs', async () => {
+  const item = {
+    id: 'req-silent',
+    action: 'dispatch',
+    provider: 'claude',
+    cwd: tmpDir,
+    prompt: 'quiet',
+  };
+  const { server, captured, port } = await startStubServer(stubHandler({ pending: [item] }));
+  const cfg = baseCfg(port);
+  const allowlist = { providers: ['claude'], roots: [tmpDir], focus: false };
+  await tick(
+    cfg,
+    { handled: new Set(), children: new Map() },
+    { readAllowlist: () => allowlist, spawn: () => fakeChild(0) },
+  );
+  await new Promise((resolve) => setTimeout(resolve, 150));
+  server.close();
+
+  assert.equal(
+    captured.some((c) => c.url === '/api/dispatch/req-silent/output'),
+    false,
+    'no empty output POSTs for a silent child',
+  );
+});
+
 test('tick: a missing/unreadable log file yields an undefined resultTail, never throws', async () => {
   const item = {
     id: 'req-no-log',

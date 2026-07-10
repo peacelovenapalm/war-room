@@ -78,6 +78,7 @@ import {
   parseAllowlist,
   validateRequest,
 } from './lib/dispatch-rules.mjs';
+import { createOutputForwarder } from './lib/output-forwarder.mjs';
 
 const execAsync = promisify(exec);
 
@@ -365,8 +366,28 @@ function runDispatch(cfg, item, argv, state, deps) {
   // instruction's SIGTERM).
   state.children.set(item.id, { child, killRequested: false });
 
-  child.stdout?.on('data', (chunk) => logStream?.write(chunk));
-  child.stderr?.on('data', (chunk) => logStream?.write(chunk));
+  // Live output forwarding (KICKOFF-v2.0 Phase 2 slice 2.5) — ADDITIVE tap
+  // beside the per-run log stream (which stays the durable record):
+  // coalesced chunks POST to the Bearer-authed /api/dispatch/:id/output.
+  // Telemetry only, fire-and-forget: a dead server never crashes or blocks
+  // the runner (the forwarder swallows every POST failure), and the flush
+  // loop stops with a final flush when the child exits.
+  const forwarder = (deps.createOutputForwarder ?? createOutputForwarder)({
+    url: cfg.url,
+    token: cfg.token,
+    id: item.id,
+    fetchImpl: deps.fetch ?? fetch,
+    log,
+  });
+
+  child.stdout?.on('data', (chunk) => {
+    logStream?.write(chunk);
+    forwarder.push('stdout', chunk);
+  });
+  child.stderr?.on('data', (chunk) => {
+    logStream?.write(chunk);
+    forwarder.push('stderr', chunk);
+  });
 
   void postStatus(cfg, item.id, { event: 'started', pid: child.pid }, deps.fetch ?? fetch);
   audit(cfg, 'started', { id: item.id, pid: child.pid, provider: item.provider, cwd: item.cwd });
@@ -375,6 +396,9 @@ function runDispatch(cfg, item, argv, state, deps) {
     const registryEntry = state.children.get(item.id);
     const wasKilled = registryEntry?.killRequested === true;
     state.children.delete(item.id);
+    // Final output flush — stops the coalescing loop; never blocks or
+    // fails the exit reporting below (stop() swallows POST failures).
+    void forwarder.stop();
     const exitCode = typeof code === 'number' ? code : -1;
     // Read the tail AFTER the log stream settles — reading immediately on
     // 'exit' can race the write stream's buffered data. Guards against
@@ -401,6 +425,7 @@ function runDispatch(cfg, item, argv, state, deps) {
   });
   child.on('error', (err) => {
     state.children.delete(item.id);
+    void forwarder.stop();
     log(`⚠ spawn error for ${item.id}: ${shortErr(err)}`);
     audit(cfg, 'spawn-error', { id: item.id, reason: shortErr(err) });
   });

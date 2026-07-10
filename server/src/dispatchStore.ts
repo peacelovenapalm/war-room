@@ -592,7 +592,10 @@ export class DispatchStore {
   getRecord(
     id: string,
   ):
-    | Pick<DispatchRecord, 'provider' | 'employeeId' | 'chainRunId' | 'chainStep' | 'contractId'>
+    | Pick<
+        DispatchRecord,
+        'provider' | 'employeeId' | 'chainRunId' | 'chainStep' | 'contractId' | 'status'
+      >
     | undefined {
     const record = this.ensureLoaded().get(id);
     if (!record) return undefined;
@@ -602,6 +605,10 @@ export class DispatchStore {
       chainRunId: record.chainRunId,
       chainStep: record.chainStep,
       contractId: record.contractId,
+      // Liveness gate for the output-telemetry route (slice 2.5): a
+      // straggler output POST after terminal status must not resurrect an
+      // evicted ring entry that no lifecycle site would ever evict again.
+      status: record.status,
     };
   }
 
