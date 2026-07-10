@@ -1811,3 +1811,36 @@ across 3 redeploys" — that discrepancy is flagged, not resolved, in
 verified. Deploy is the only remaining item, and it's gated on Greg's
 explicit decision** (accept the state wipe, or fix the runbook's volume
 mount first). Session handoff written to `SESSION-HANDOFF-2026-07-09.md`.
+
+### 2026-07-10 (planning session) — Fable audit of v1.1 + KICKOFF v2.0 authored ("new face, same plane")
+
+Fable 5 ultracode planning session (plans only — Greg's explicit call).
+A 6-agent read-only audit workflow (wf_3001ff90-5cb) adversarially
+verified the v1.1 run: **every spot-checked claim CONFIRMED at file:line**
+(items 1–8, 10–13 + F1–F4), original BUILD-GOAL M0–M4 done-verified,
+M5 soak ~2/30 days. Critic pass added: the 2026-07-08 handoff's "state
+survived 3 redeploys" claim is **REFUTED** (no runbook revision ever had
+a state volume; the 07-09 recreate demonstrably wiped the prior save);
+KICKOFF-v1.1's deploy smoke criterion encoded that refuted assumption;
+WAR_ROOM_TOKEN leaked into an audit transcript (rotate at next deploy);
+`war-room/v1` has NO remote (192 commits laptop-only — backup push is
+KICKOFF-v2.0 Phase 0's first act); Mac Mini onboarding + soak clock +
+`/api/version` were missing from every ledger.
+
+Greg's sprint decisions (2026-07-10, live): headline = works + works on
+mobile (current face: loads poorly, wrong scale, no assets on iPhone;
+office editing NOT needed on mobile); rebuild = **new face, same plane**
+(new webview against the existing core/asyncapi contract; server plane
+untouched); sequencing = straight to rebuild, desktop-primary with
+mobile thoughtfully designed and implemented; deploy = migrate state +
+add volume mount (zero loss); SaaS angle = assessment doc task; GPT-5.6
+(released 2026-07-09: Luna/Terra/Sol) = update Codex wiring, delegation
+lane = cross-model reviewer only. v1.2's LIVE OUTPUT STREAMING folds
+into the new face as a core surface (Phase 2, server-side additive).
+
+Authored + committed: `.planning/v2/KICKOFF-v2.0.md` (sprint contract,
+Phases 0–4, Greg design gate, loop protocol, STATE-v2.0 ledger spec),
+`.planning/v2/DESIGN-BRIEF-V3.md` (design-panel seed: 7 GAMIFICATION-
+BRIEF principles as rubric, hard rules, panel protocol),
+`SESSION-HANDOFF-2026-07-10.md` (repo root). Execution session entry
+point: KICKOFF-v2.0.md.
