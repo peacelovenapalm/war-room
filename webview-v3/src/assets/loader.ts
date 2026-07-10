@@ -165,6 +165,7 @@ export function createSpriteStore<TImage>(
         return;
       }
       for (const name of names) pendingNames.add(name);
+      if (manifestState === 'failed') manifestState = 'idle'; // allow retry
       ensureManifest();
     },
     get(name) {
@@ -275,6 +276,7 @@ export function createImageStore<TImage>(
         return;
       }
       for (const name of names) pendingNames.add(name);
+      if (manifestState === 'failed') manifestState = 'idle'; // allow retry
       ensureManifest();
     },
     get(name) {

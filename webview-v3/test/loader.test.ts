@@ -132,6 +132,67 @@ describe('sprite-sheet manifest schema (WS-B real pipeline contract)', () => {
       }), // missing anchor
     ).toBeNull();
   });
+
+  function baseSprite(overrides: Record<string, unknown> = {}): Record<string, unknown> {
+    return {
+      name: 'desk',
+      size: [64, 48],
+      anchor: [32, 40],
+      rotations: ['N'],
+      footprint: [1, 1],
+      sheet: 0,
+      frames: { N: { x: 0, y: 0, anchor: [32, 40] } },
+      ...overrides,
+    };
+  }
+
+  function manifestWith(overrides: Record<string, unknown> = {}): Record<string, unknown> {
+    return {
+      version: 1,
+      sheets: ['a.png'],
+      sheetSizes: [[512, 512]],
+      tilePx: 128,
+      renderScale: 2,
+      sprites: [baseSprite()],
+      ...overrides,
+    };
+  }
+
+  it('rejects non-finite or non-positive dimensions instead of producing NaN/Infinity draw geometry', () => {
+    // tilePx: 0 -> a real renderer division (spriteScaleFor) would divide by zero.
+    expect(parseSpriteSheetManifest(manifestWith({ tilePx: 0 }))).toBeNull();
+    expect(parseSpriteSheetManifest(manifestWith({ tilePx: Number.NaN }))).toBeNull();
+    expect(parseSpriteSheetManifest(manifestWith({ tilePx: Number.POSITIVE_INFINITY }))).toBeNull();
+    expect(parseSpriteSheetManifest(manifestWith({ renderScale: -1 }))).toBeNull();
+    // sheetSizes: a zero/negative sheet dimension.
+    expect(parseSpriteSheetManifest(manifestWith({ sheetSizes: [[0, 512]] }))).toBeNull();
+    expect(parseSpriteSheetManifest(manifestWith({ sheetSizes: [[-1, 512]] }))).toBeNull();
+    // sprite.size: 0 width -> drawHeight = drawWidth*(srcH/srcW) = Infinity downstream.
+    expect(
+      parseSpriteSheetManifest(manifestWith({ sprites: [baseSprite({ size: [0, 100] })] })),
+    ).toBeNull();
+    expect(
+      parseSpriteSheetManifest(
+        manifestWith({ sprites: [baseSprite({ size: [Number.NaN, 100] })] }),
+      ),
+    ).toBeNull();
+    // footprint (tile count) must be positive too.
+    expect(
+      parseSpriteSheetManifest(manifestWith({ sprites: [baseSprite({ footprint: [0, 1] })] })),
+    ).toBeNull();
+    // frame rect x/y must be finite (NaN/Infinity sheet coordinates).
+    expect(
+      parseSpriteSheetManifest(
+        manifestWith({
+          sprites: [
+            baseSprite({ frames: { N: { x: Number.POSITIVE_INFINITY, y: 0, anchor: [0, 0] } } }),
+          ],
+        }),
+      ),
+    ).toBeNull();
+    // A well-formed manifest is still accepted.
+    expect(parseSpriteSheetManifest(manifestWith())).not.toBeNull();
+  });
 });
 
 describe('imagegen manifest schema', () => {
@@ -144,6 +205,17 @@ describe('imagegen manifest schema', () => {
   it('rejects malformed payloads instead of throwing', () => {
     expect(parseImageManifest(null)).toBeNull();
     expect(parseImageManifest({ version: 1, images: [{ name: 'x' }] })).toBeNull();
+  });
+
+  it('rejects non-finite or non-positive image size (would produce Infinity draw geometry)', () => {
+    const bad = (size: unknown): unknown => ({
+      version: 1,
+      images: [{ name: 'poster_stop_all', path: 'posters/x.png', size, purpose: 'wall' }],
+    });
+    expect(parseImageManifest(bad([0, 1536]))).toBeNull();
+    expect(parseImageManifest(bad([1024, Number.NaN]))).toBeNull();
+    expect(parseImageManifest(bad([1024, Number.POSITIVE_INFINITY]))).toBeNull();
+    expect(parseImageManifest(bad([-1024, 1536]))).toBeNull();
   });
 });
 
@@ -222,6 +294,25 @@ describe('createSpriteStore — lazy, sheet-indexed chunking', () => {
     await settle();
     expect(store.get('desk')).toEqual({ kind: 'placeholder', name: 'desk' });
     expect(store.stats().manifestState).toBe('failed');
+  });
+
+  it('retries the manifest on a later request after a transient failure (recoverable degradation)', async () => {
+    let fail = true;
+    const fetchJson = vi.fn(() =>
+      fail ? Promise.reject(new Error('offline')) : Promise.resolve<unknown>(SPRITE_MANIFEST),
+    );
+    const { deps, loadImage } = makeDeps(SPRITE_MANIFEST, { fetchJson });
+    const store = createSpriteStore('/assets/props.manifest.json', deps);
+    store.request(['desk']);
+    await settle();
+    expect(store.stats().manifestState).toBe('failed');
+    // Network recovers; a later request() must not be stuck queuing forever.
+    fail = false;
+    store.request(['desk']);
+    await settle();
+    expect(store.stats().manifestState).toBe('ready');
+    expect(store.get('desk').kind).toBe('sprite');
+    expect(loadImage).toHaveBeenCalledTimes(1);
   });
 
   it('degrades to placeholder on sheet failure and allows a retry', async () => {

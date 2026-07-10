@@ -83,13 +83,30 @@ function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === 'object' && value !== null;
 }
 
+function isFiniteNumber(value: unknown): value is number {
+  return typeof value === 'number' && Number.isFinite(value);
+}
+
+/** Any finite pair — legitimate for offsets/anchors that may be 0 or
+ *  negative. NaN/Infinity are always rejected (would propagate into draw
+ *  geometry as non-finite coordinates). */
 function isPoint(value: unknown): value is Point {
   return (
     Array.isArray(value) &&
     value.length === 2 &&
-    typeof value[0] === 'number' &&
-    typeof value[1] === 'number'
+    isFiniteNumber(value[0]) &&
+    isFiniteNumber(value[1])
   );
+}
+
+/** A pixel/tile dimension pair — must be finite AND strictly positive.
+ *  Used for anything a renderer later divides by or scales with (sprite
+ *  size, sheet size, footprint tile count, standalone image size); a
+ *  zero/negative dimension here becomes an Infinity/NaN draw call
+ *  downstream (renderer.ts drawHeight = drawWidth*(srcH/srcW), spriteScaleFor
+ *  dividing by tilePx). */
+function isPositivePoint(value: unknown): value is Point {
+  return isPoint(value) && value[0] > 0 && value[1] > 0;
 }
 
 function isRotation(value: unknown): value is Rotation {
@@ -98,10 +115,7 @@ function isRotation(value: unknown): value is Rotation {
 
 function isFrameRect(value: unknown): value is FrameRect {
   return (
-    isRecord(value) &&
-    typeof value.x === 'number' &&
-    typeof value.y === 'number' &&
-    isPoint(value.anchor)
+    isRecord(value) && isFiniteNumber(value.x) && isFiniteNumber(value.y) && isPoint(value.anchor)
   );
 }
 
@@ -118,11 +132,13 @@ function isFramesMap(value: unknown): value is SpriteDef['frames'] {
 function isSpriteDef(value: unknown): value is SpriteDef {
   if (!isRecord(value)) return false;
   if (typeof value.name !== 'string' || value.name.length === 0) return false;
-  if (!isPoint(value.size) || !isPoint(value.anchor) || !isPoint(value.footprint)) return false;
+  if (!isPositivePoint(value.size)) return false;
+  if (!isPoint(value.anchor)) return false;
+  if (!isPositivePoint(value.footprint)) return false;
   if (!Array.isArray(value.rotations) || !value.rotations.every(isRotation)) return false;
-  if (typeof value.sheet !== 'number') return false;
+  if (!isFiniteNumber(value.sheet) || value.sheet < 0) return false;
   if (!isFramesMap(value.frames)) return false;
-  if (value.fps !== undefined && typeof value.fps !== 'number') return false;
+  if (value.fps !== undefined && (!isFiniteNumber(value.fps) || value.fps < 0)) return false;
   return true;
 }
 
@@ -133,8 +149,9 @@ export function parseSpriteSheetManifest(raw: unknown): SpriteSheetManifest | nu
   if (!isRecord(raw)) return null;
   if (typeof raw.version !== 'number') return null;
   if (!Array.isArray(raw.sheets) || !raw.sheets.every((s) => typeof s === 'string')) return null;
-  if (!Array.isArray(raw.sheetSizes) || !raw.sheetSizes.every(isPoint)) return null;
-  if (typeof raw.tilePx !== 'number' || typeof raw.renderScale !== 'number') return null;
+  if (!Array.isArray(raw.sheetSizes) || !raw.sheetSizes.every(isPositivePoint)) return null;
+  if (!isFiniteNumber(raw.tilePx) || raw.tilePx <= 0) return null;
+  if (!isFiniteNumber(raw.renderScale) || raw.renderScale <= 0) return null;
   if (!Array.isArray(raw.sprites) || !raw.sprites.every(isSpriteDef)) return null;
   return {
     version: raw.version,
@@ -153,7 +170,7 @@ function isImageAsset(value: unknown): value is ImageAsset {
     value.name.length > 0 &&
     typeof value.path === 'string' &&
     value.path.length > 0 &&
-    isPoint(value.size) &&
+    isPositivePoint(value.size) &&
     typeof value.purpose === 'string'
   );
 }
