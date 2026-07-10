@@ -1,0 +1,855 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>WAR ROOM V3 — Concept C: Isometric Depth</title>
+<style>
+/* ============================================================
+   CONCEPT C — ISOMETRIC DEPTH
+   The camera IS the information hierarchy:
+     FAR  = whole-floor health (crisis columns visible from orbit)
+     MID  = wings + full state chips
+     NEAR = one desk; its MONITOR is the live-tail streaming home
+   Aesthetic: "ink & phosphor" — architectural night-blueprint,
+   vector prisms, warm screen glow. Color is reinforcement only;
+   every signal is SHAPE + TEXT LABEL (hit GRAYSCALE to prove it).
+   ============================================================ */
+:root{
+  --bg:#080c14; --bg2:#0d1220; --panel:#0f1626; --panel2:#131c30;
+  --line:#22304a; --line2:#31456b;
+  --ink:#dce6f5; --dim:#7e92b0; --faint:#4a5b78;
+  --glow:#ffb454; --calm:#7ec8ff;
+  --mono:ui-monospace,"SF Mono",Menlo,Consolas,monospace;
+  --sans:-apple-system,"SF Pro Text",system-ui,Segoe UI,sans-serif;
+}
+*{box-sizing:border-box;margin:0;padding:0}
+html,body{height:100%}
+body{background:#04070d;color:var(--ink);font-family:var(--sans);
+  display:flex;align-items:center;justify-content:center;overflow:hidden}
+body.gray #app{filter:grayscale(1)}
+
+/* ---------- app frame (desktop fills, phone becomes a handset) ---------- */
+#app{width:100vw;height:100vh;background:var(--bg);display:flex;flex-direction:column;
+  position:relative;overflow:hidden;transition:width .3s,height .3s,border-radius .3s}
+body.phone{background:
+  radial-gradient(1200px 600px at 50% -10%,#0c1424 0%,#04070d 60%)}
+body.phone #app{width:390px;height:min(812px,96vh);border:1px solid var(--line2);
+  border-radius:38px;box-shadow:0 0 0 8px #10182b,0 30px 80px #000}
+
+/* ---------- topbar / HUD ---------- */
+#topbar{display:flex;align-items:center;gap:18px;padding:10px 18px;
+  border-bottom:1px solid var(--line);background:linear-gradient(180deg,var(--panel2),var(--panel));
+  flex:0 0 auto;z-index:30}
+#brand{font-family:var(--mono);font-weight:700;font-size:15px;letter-spacing:.32em;white-space:nowrap}
+#brand small{display:block;font-weight:400;font-size:9px;letter-spacing:.22em;color:var(--dim)}
+.hudstat{font-family:var(--mono);font-size:12px;line-height:1.15;white-space:nowrap}
+.hudstat b{font-size:15px;font-weight:700;display:block}
+.hudstat span{font-size:9px;letter-spacing:.18em;color:var(--dim)}
+#hudcrisis b{font-size:15px}
+.hudsep{width:1px;height:30px;background:var(--line);flex:0 0 auto}
+#topbar .spacer{flex:1}
+button{font-family:var(--mono);font-size:11px;letter-spacing:.08em;color:var(--ink);
+  background:var(--panel2);border:1px solid var(--line2);border-radius:6px;
+  padding:7px 12px;cursor:pointer;min-height:34px}
+button:hover{border-color:var(--dim);background:#18233c}
+button.primary{background:var(--ink);color:#0b1020;border-color:var(--ink);font-weight:700}
+button.danger{border-style:dashed}
+button:active{transform:translateY(1px)}
+
+/* ---------- main split ---------- */
+#main{flex:1;display:flex;min-height:0;position:relative}
+
+/* ---------- rail: triage queue + roster ---------- */
+#rail{width:288px;flex:0 0 auto;border-right:1px solid var(--line);
+  background:var(--bg2);overflow-y:auto;padding:12px;display:flex;flex-direction:column;gap:14px}
+.railhead{font-family:var(--mono);font-size:10px;letter-spacing:.26em;color:var(--dim);
+  display:flex;align-items:baseline;gap:8px}
+.railhead em{font-style:normal;color:var(--ink);font-weight:700}
+.crisiscard{border:1px solid var(--line2);border-radius:8px;background:var(--panel);
+  padding:10px;cursor:pointer;position:relative;overflow:hidden}
+.crisiscard.alarm{border-style:double;border-width:3px;border-color:var(--ink)}
+.crisiscard .row1{display:flex;align-items:center;gap:8px;font-family:var(--mono)}
+.crisiscard .stageglyph{font-size:20px;line-height:1}
+.crisiscard .stagelabel{font-size:12px;font-weight:700;letter-spacing:.14em}
+.crisiscard .age{margin-left:auto;font-size:12px;color:var(--ink);font-weight:700;font-variant-numeric:tabular-nums}
+.crisiscard .row2{font-family:var(--mono);font-size:11px;color:var(--dim);margin-top:6px}
+.crisiscard .row3{display:flex;gap:6px;margin-top:9px}
+.crisiscard .row3 button{flex:1;padding:6px 4px;font-size:10px;min-height:32px}
+.crisiscard.alarm .row1{color:var(--ink)}
+.crisiscard.alarm::before{content:"";position:absolute;inset:0;pointer-events:none;
+  animation:alarmwash 1.2s steps(2,jump-none) infinite;background:#fff;opacity:0}
+@keyframes alarmwash{0%{opacity:0}50%{opacity:.07}}
+.emptyq{font-family:var(--mono);font-size:11px;color:var(--faint);border:1px dashed var(--line);
+  border-radius:8px;padding:14px;text-align:center}
+.agentrow{display:flex;align-items:center;gap:9px;padding:8px 9px;border:1px solid var(--line);
+  border-radius:7px;background:var(--panel);cursor:pointer;min-height:44px}
+.agentrow:hover{border-color:var(--line2)}
+.agentrow .aname{font-family:var(--mono);font-size:12px;font-weight:600}
+.agentrow .ameta{font-family:var(--mono);font-size:9px;letter-spacing:.12em;color:var(--dim)}
+.agentrow .chip{margin-left:auto}
+
+/* state chips (HTML flavor) — SHAPE + LABEL first, color reinforces */
+.chip{font-family:var(--mono);font-size:9px;font-weight:700;letter-spacing:.1em;
+  border:1px solid var(--line2);border-radius:4px;padding:3px 6px;white-space:nowrap;color:var(--dim)}
+.chip .g{font-size:11px;margin-right:3px}
+.chip.loud{background:var(--ink);color:#0a0f1c;border-color:var(--ink);font-size:10px;padding:4px 7px}
+.chip.working{color:var(--glow);border-color:#5a4a2c}
+.chip.done{color:#9ec89e}
+.chip.failed{background:var(--ink);color:#0a0f1c;border-color:var(--ink)}
+.chip.stopped,.chip.idle{color:var(--faint)}
+
+/* ---------- stage (the isometric floor) ---------- */
+#stage{flex:1;position:relative;min-width:0;background:
+  radial-gradient(900px 500px at 60% 20%,#0e1526 0%,var(--bg) 65%)}
+#floor{width:100%;height:100%;display:block;cursor:grab;touch-action:none}
+#floor:active{cursor:grabbing}
+#camctl{position:absolute;top:12px;left:12px;display:flex;gap:6px;z-index:10}
+#camctl button{padding:6px 10px;font-size:10px}
+#camctl button.on{background:var(--ink);color:#0b1020;font-weight:700}
+#lodtag{position:absolute;top:12px;right:12px;font-family:var(--mono);font-size:9px;
+  letter-spacing:.28em;color:var(--faint);border:1px solid var(--line);border-radius:4px;
+  padding:5px 9px;background:rgba(8,12,20,.7);z-index:10}
+#lenscap{position:absolute;bottom:10px;left:14px;font-family:var(--mono);font-size:9px;
+  letter-spacing:.22em;color:var(--faint);z-index:10}
+
+/* SVG scene paint */
+.face-top{fill:#1a2540;stroke:#33477000;stroke-width:0}
+.face-r{fill:#101a30}
+.face-l{fill:#0b1322}
+.desk .face-top{fill:#243354;stroke:#3d548a;stroke-width:1}
+.desk .face-r{fill:#16223c}
+.desk .face-l{fill:#101a30}
+.desk-sel .face-top{stroke:var(--ink);stroke-width:1.6}
+.mon .face-top{fill:#0d1424}.mon .face-r{fill:#0a101e}.mon .face-l{fill:#080d18}
+.screenq{fill:#0c1220;stroke:#3d548a;stroke-width:1}
+.screenq.on{fill:#241d0c;stroke:var(--glow);animation:scrflick 3.1s linear infinite}
+.screenq.loudscr{fill:#e9eef7;stroke:#e9eef7;animation:scrblink 1s steps(2,jump-none) infinite}
+@keyframes scrflick{0%,92%{opacity:1}95%{opacity:.75}100%{opacity:1}}
+@keyframes scrblink{0%{opacity:1}50%{opacity:.55}}
+.scrline{stroke:#caa04f;stroke-width:1;opacity:.8}
+.gridline{stroke:#1a2440;stroke-width:1}
+.wingedge{fill:none;stroke:#2b3c60;stroke-width:1.4;stroke-dasharray:5 4}
+.floortxt{font-family:var(--mono);font-size:15px;letter-spacing:.5em;fill:#2c3d61;font-weight:700}
+.chair{fill:#141e36;stroke:#2b3c60;stroke-width:1}
+.coffee .face-top{fill:#2c2438}.coffee .face-r{fill:#1d1826}.coffee .face-l{fill:#151120}
+
+/* SVG billboards (counter-scaled in JS) */
+.bb{cursor:pointer}
+.bb rect.bbg{fill:#0d1424;stroke:#31456b;stroke-width:1;rx:4}
+.bb text{font-family:var(--mono)}
+.bb .l1{font-size:11px;font-weight:700;letter-spacing:.08em;fill:var(--dim)}
+.bb .l2{font-size:8.5px;letter-spacing:.1em;fill:#5f7397}
+.bb.loud rect.bbg{fill:#e9eef7;stroke:#e9eef7}
+.bb.loud .l1{fill:#0a0f1c;font-size:12px}
+.bb.loud .l2{fill:#3c4a66}
+.bb.working .l1{fill:var(--glow)}
+.bb.done .l1{fill:#9ec89e}
+.bb.idle .l1,.bb.stopped .l1{fill:#5f7397}
+
+/* crisis columns (world-anchored, mild counter-scale) */
+.crisisg{pointer-events:none}
+.crisisg text{font-family:var(--mono);font-weight:700}
+.crisisg .cg{font-size:30px;fill:var(--ink)}
+.crisisg .cl{font-size:10px;letter-spacing:.2em;fill:var(--ink)}
+.crisisg .ca{font-size:11px;fill:var(--dim);font-variant-numeric:tabular-nums}
+.crisisg.fire .cg{animation:firepulse 1s ease-in-out infinite}
+@keyframes firepulse{0%,100%{transform:translateY(0)}50%{transform:translateY(-4px)}}
+.crisisg.alarm .cg{animation:alarmspin 2.4s linear infinite;transform-origin:center;transform-box:fill-box}
+@keyframes alarmspin{to{transform:rotate(360deg)}}
+.crisisg.alarm rect{fill:#e9eef7}
+.crisisg.alarm .cg{fill:#0a0f1c}
+.crisisg.alarm .cl{fill:#0a0f1c}
+.crisisg.alarm .ca{fill:#dce6f5;font-weight:700}
+.smokey text{font-size:16px;fill:#5f7397;animation:smokerise 2.6s linear infinite;opacity:0}
+@keyframes smokerise{0%{opacity:0;transform:translateY(0)}25%{opacity:.9}100%{opacity:0;transform:translateY(-26px)}}
+.debrisg text{font-family:var(--mono)}
+.debrisg .dx{font-size:14px;fill:var(--dim)}
+.debrisg .dl{font-size:8px;letter-spacing:.18em;fill:var(--faint)}
+.calmring{fill:none;stroke:var(--calm);stroke-width:2;opacity:0}
+.calmring.go{animation:calm 1.4s ease-out forwards}
+@keyframes calm{0%{opacity:.9;r:6}100%{opacity:0;r:120}}
+
+/* ---------- monitor overlay (desktop streaming home at NEAR zoom) ---------- */
+#monitor{position:absolute;top:52px;right:14px;bottom:14px;width:min(430px,46%);
+  background:linear-gradient(180deg,#101828,#0c1220);border:1px solid var(--line2);
+  border-radius:10px;display:none;flex-direction:column;z-index:20;
+  box-shadow:-18px 0 50px rgba(0,0,0,.5)}
+#monitor.open{display:flex}
+#monitor header{display:flex;align-items:center;gap:10px;padding:10px 12px;border-bottom:1px solid var(--line)}
+#monitor header .mtitle{font-family:var(--mono);font-size:11px;letter-spacing:.14em;font-weight:700}
+#monitor header .msub{font-family:var(--mono);font-size:9px;letter-spacing:.14em;color:var(--dim)}
+#monitor header .x{margin-left:auto}
+.termwrap{flex:1;display:flex;flex-direction:column;min-height:0;padding:10px 12px;gap:8px}
+.term{flex:1;overflow-y:auto;font-family:var(--mono);font-size:11px;line-height:1.55;
+  color:#b9c8de;background:#070b13;border:1px solid var(--line);border-radius:7px;padding:9px 11px}
+.term .t-dim{color:var(--faint)}
+.term .t-ok{color:#9ec89e}
+.term .t-warn{background:var(--ink);color:#0a0f1c;font-weight:700;padding:0 4px;border-radius:3px}
+.term .t-tok{color:var(--glow)}
+.waitline{font-family:var(--mono);font-size:11px;font-weight:700;background:var(--ink);color:#0a0f1c;
+  border-radius:6px;padding:8px 10px;letter-spacing:.04em}
+.actrow{display:flex;gap:8px}
+.actrow button{flex:1;min-height:40px}
+#monitor .taskline{font-family:var(--mono);font-size:10px;color:var(--dim);padding:0 12px 4px}
+
+/* ---------- live-tail dock (persistent streaming, desktop) ---------- */
+#dock{flex:0 0 168px;border-top:1px solid var(--line);background:var(--bg2);
+  display:flex;flex-direction:column;min-height:0}
+#dockhead{display:flex;align-items:center;gap:10px;padding:6px 14px;border-bottom:1px solid var(--line)}
+#dockhead .dh{font-family:var(--mono);font-size:9px;letter-spacing:.26em;color:var(--dim)}
+#docktabs{display:flex;gap:8px;flex:1;min-height:0;padding:8px 12px;overflow-x:auto}
+.docktail{flex:1;min-width:220px;max-width:420px;display:flex;flex-direction:column;
+  border:1px solid var(--line);border-radius:7px;background:#070b13;overflow:hidden}
+.docktail .dt-h{display:flex;align-items:center;gap:6px;padding:4px 8px;border-bottom:1px solid var(--line);
+  font-family:var(--mono);font-size:9px;letter-spacing:.1em;color:var(--dim)}
+.docktail .dt-h b{color:var(--ink)}
+.docktail .dt-h button{min-height:20px;padding:1px 6px;font-size:9px;margin-left:auto;border-radius:4px}
+.docktail .term{border:0;border-radius:0;font-size:10px}
+
+/* ---------- toasts ---------- */
+#toasts{position:absolute;top:64px;left:50%;transform:translateX(-50%);z-index:60;
+  display:flex;flex-direction:column;gap:8px;align-items:center;pointer-events:none}
+.toast{font-family:var(--mono);font-size:11px;font-weight:700;letter-spacing:.06em;
+  background:var(--ink);color:#0a0f1c;border-radius:7px;padding:9px 16px;
+  animation:toastin 3.6s ease forwards;box-shadow:0 8px 30px rgba(0,0,0,.55)}
+@keyframes toastin{0%{opacity:0;transform:translateY(-8px)}8%,80%{opacity:1;transform:translateY(0)}100%{opacity:0}}
+
+/* ---------- modal (dispatch + help) ---------- */
+.scrim{position:absolute;inset:0;background:rgba(3,6,12,.72);z-index:70;display:none;
+  align-items:center;justify-content:center;backdrop-filter:blur(2px)}
+.scrim.open{display:flex}
+.modal{width:min(460px,92%);max-height:86%;overflow-y:auto;background:var(--panel);
+  border:1px solid var(--line2);border-radius:12px;padding:18px}
+.modal h2{font-family:var(--mono);font-size:13px;letter-spacing:.24em;margin-bottom:4px}
+.modal .sub{font-family:var(--mono);font-size:10px;color:var(--dim);margin-bottom:14px}
+.modal label{display:block;font-family:var(--mono);font-size:9px;letter-spacing:.2em;color:var(--dim);margin:12px 0 6px}
+.optrow{display:flex;gap:6px}
+.optrow button{flex:1}
+.optrow button.on{background:var(--ink);color:#0b1020;font-weight:700}
+.modal textarea{width:100%;height:74px;background:#070b13;border:1px solid var(--line2);
+  border-radius:7px;color:var(--ink);font-family:var(--mono);font-size:11px;padding:9px;resize:none}
+.modal .est{font-family:var(--mono);font-size:10px;color:var(--dim);margin:12px 0}
+.modal .mrow{display:flex;gap:8px;margin-top:14px}
+.modal .mrow button{flex:1;min-height:42px}
+.legend{display:flex;flex-direction:column;gap:7px;margin-top:10px}
+.legrow{display:flex;align-items:center;gap:12px;font-family:var(--mono);font-size:11px}
+.legrow .chip{width:130px;text-align:center;flex:0 0 auto}
+.legrow span{color:var(--dim);font-size:10px}
+.helpnote{font-family:var(--mono);font-size:10px;color:var(--dim);line-height:1.7;margin-top:12px;
+  border-top:1px dashed var(--line);padding-top:10px}
+
+/* ============================================================
+   PHONE MODE — monitoring / triage / dispatch / kill / live tail.
+   No office editing. Same camera semantics: floor glance up top,
+   tap = fly to desk + full-screen tail sheet.
+   ============================================================ */
+body.phone #topbar{gap:6px 12px;padding:10px 12px 8px;flex-wrap:wrap}
+body.phone #brand{font-size:12px;letter-spacing:.18em}
+body.phone .hudstat b{font-size:13px}
+body.phone #btn-dispatch,body.phone #btn-view{min-height:30px;padding:5px 9px;font-size:10px}
+body.phone.real #app{width:100%;height:100%;border:0;border-radius:0;box-shadow:none}
+body.phone.real #btn-view{display:none}
+body.phone #btn-gray,body.phone #btn-help{display:none}
+body.phone .hudsep{display:none}
+body.phone #hudburn{display:none}
+body.phone #main{flex-direction:column}
+body.phone #stage{flex:0 0 252px;border-bottom:1px solid var(--line);order:-1}
+body.phone #rail{width:auto;flex:1;border-right:0}
+body.phone #lodtag{display:none}
+body.phone #dock{display:none}
+body.phone #monitor{display:none!important}
+body.phone #camctl button{min-height:30px;padding:5px 8px}
+body.phone #lenscap{display:none}
+/* bottom sheet = phone streaming home */
+#sheet{position:absolute;left:0;right:0;bottom:0;top:18%;z-index:50;
+  background:linear-gradient(180deg,#111a2c,#0b1120);border-top:2px solid var(--line2);
+  border-radius:18px 18px 0 0;display:none;flex-direction:column;
+  box-shadow:0 -20px 60px rgba(0,0,0,.6)}
+body.phone #sheet.open{display:flex}
+#sheet .grab{width:44px;height:4px;border-radius:2px;background:var(--faint);margin:8px auto 2px}
+#sheet header{display:flex;align-items:center;gap:9px;padding:8px 14px;border-bottom:1px solid var(--line)}
+#sheet header .mtitle{font-family:var(--mono);font-size:12px;font-weight:700;letter-spacing:.1em}
+#sheet header .msub{font-family:var(--mono);font-size:9px;color:var(--dim);letter-spacing:.12em}
+#sheet header .x{margin-left:auto;min-height:38px}
+#sheet .termwrap{padding:10px 12px}
+#sheet .actrow button{min-height:46px;font-size:12px}
+#viewport-note{position:absolute;bottom:8px;right:14px;z-index:10;font-family:var(--mono);
+  font-size:9px;letter-spacing:.18em;color:var(--faint)}
+</style>
+</head>
+<body>
+<div id="app">
+
+  <div id="topbar">
+    <div id="brand">WAR ROOM<small>FLOOR 3 · ISO</small></div>
+    <div class="hudsep"></div>
+    <div class="hudstat"><b id="hud-cash">$142.50</b><span>CASH</span></div>
+    <div class="hudstat"><b id="hud-rep">78</b><span>REPUTATION</span></div>
+    <div class="hudstat" id="hudburn"><b id="hud-burn">$1.84/h</b><span>BURN · $0.31/COMPLETION</span></div>
+    <div class="hudsep"></div>
+    <div class="hudstat" id="hudcrisis"><b id="hud-crisis">✱ 2 CRISES</b><span id="hud-agents">7 AGENTS · 3 MACHINES</span></div>
+    <div class="spacer"></div>
+    <button id="btn-dispatch" class="primary">▶ DISPATCH</button>
+    <button id="btn-help">? HELP</button>
+    <button id="btn-gray">GRAYSCALE ◐</button>
+    <button id="btn-view">VIEW: DESKTOP ⇄ PHONE</button>
+  </div>
+
+  <div id="main">
+    <div id="rail">
+      <div class="railhead">TRIAGE QUEUE <em id="qcount">2</em> <span style="margin-left:auto;font-size:8px">AGE × SEVERITY</span></div>
+      <div id="queue"></div>
+      <div class="railhead" style="margin-top:6px">ROSTER <em>7</em></div>
+      <div id="roster" style="display:flex;flex-direction:column;gap:7px"></div>
+    </div>
+
+    <div id="stage">
+      <svg id="floor" preserveAspectRatio="xMidYMid meet"></svg>
+      <div id="camctl">
+        <button data-cam="floor" class="on">⌂ FLOOR</button>
+        <button data-cam="MACBOOK">▤ MACBOOK</button>
+        <button data-cam="NEXUS">▥ NEXUS</button>
+        <button data-cam="MINI">▦ MINI</button>
+      </div>
+      <div id="lodtag">LOD · FAR</div>
+      <div id="lenscap">CONCEPT C — ISOMETRIC DEPTH · CAMERA = HIERARCHY · drag to pan · wheel to zoom · click a desk</div>
+
+      <!-- desktop streaming home: the desk MONITOR, opens at NEAR zoom -->
+      <div id="monitor">
+        <header>
+          <div>
+            <div class="mtitle" id="mon-title">▣ MONITOR</div>
+            <div class="msub" id="mon-sub"></div>
+          </div>
+          <button class="x" id="mon-close">✕ CLOSE</button>
+        </header>
+        <div class="taskline" id="mon-task"></div>
+        <div class="termwrap">
+          <div class="term" id="mon-term"></div>
+          <div class="waitline" id="mon-wait" style="display:none"></div>
+          <div class="actrow">
+            <button id="mon-input" class="primary">✓ SEND INPUT</button>
+            <button id="mon-pin">▣ PIN TAIL</button>
+            <button id="mon-kill" class="danger">■ KILL</button>
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <div id="dock">
+    <div id="dockhead"><span class="dh">LIVE TAILS — PINNED</span><span class="dh" id="dockcount"></span></div>
+    <div id="docktabs"></div>
+  </div>
+
+  <!-- phone streaming home: full bottom sheet -->
+  <div id="sheet">
+    <div class="grab"></div>
+    <header>
+      <div>
+        <div class="mtitle" id="sh-title"></div>
+        <div class="msub" id="sh-sub"></div>
+      </div>
+      <button class="x" id="sh-close">▼ CLOSE</button>
+    </header>
+    <div class="termwrap">
+      <div class="term" id="sh-term"></div>
+      <div class="waitline" id="sh-wait" style="display:none"></div>
+      <div class="actrow">
+        <button id="sh-input" class="primary">✓ SEND INPUT</button>
+        <button id="sh-kill" class="danger">■ KILL</button>
+      </div>
+    </div>
+  </div>
+
+  <div id="toasts"></div>
+
+  <!-- dispatch modal -->
+  <div class="scrim" id="dispatch-scrim">
+    <div class="modal">
+      <h2>▶ DISPATCH</h2>
+      <div class="sub">spawn a real run on a chosen machine (gated surface)</div>
+      <label>TARGET MACHINE</label>
+      <div class="optrow" id="d-machine">
+        <button data-v="MACBOOK">▤ MACBOOK</button><button data-v="NEXUS">▥ NEXUS</button><button data-v="MINI" class="on">▦ MINI</button>
+      </div>
+      <label>COWORKER</label>
+      <div class="optrow" id="d-provider">
+        <button data-v="CLAUDE" class="on">[CLAUDE]</button><button data-v="CODEX">[CODEX]</button><button data-v="GEMINI">[GEMINI]</button>
+      </div>
+      <label>TASK</label>
+      <textarea id="d-task">Run the vault-health probe and summarize new flags.</textarea>
+      <div class="est">est. spend $0.10–0.18 · budget ✓ OK · rewards efficiency, never volume</div>
+      <div class="mrow">
+        <button id="d-cancel">✕ CANCEL</button>
+        <button id="d-go" class="primary">▶ DISPATCH TO MINI</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- help / legend -->
+  <div class="scrim" id="help-scrim">
+    <div class="modal">
+      <h2>? HELP — SIGNAL VOCABULARY</h2>
+      <div class="sub">every signal is SHAPE + TEXT LABEL; color only reinforces. Try GRAYSCALE ◐.</div>
+      <div class="legend">
+        <div class="legrow"><span class="chip loud"><span class="g">⚠</span>NEEDS INPUT</span><span>loudest chip — a real session is blocked on you</span></div>
+        <div class="legrow"><span class="chip working"><span class="g">▶</span>WORKING</span><span>live session emitting output</span></div>
+        <div class="legrow"><span class="chip done"><span class="g">✓</span>DONE</span><span>finished clean</span></div>
+        <div class="legrow"><span class="chip failed"><span class="g">✗</span>FAILED</span><span>exited nonzero — leaves ✗ DEBRIS until acknowledged</span></div>
+        <div class="legrow"><span class="chip stopped"><span class="g">■</span>STOPPED</span><span>killed by operator</span></div>
+        <div class="legrow"><span class="chip idle"><span class="g">○</span>IDLE</span><span>desk free — dispatch target</span></div>
+        <div class="legrow"><span class="chip"><span class="g">≋</span>SMOKE &lt;90s</span><span>crisis stage 1 — wisps rise from the desk</span></div>
+        <div class="legrow"><span class="chip"><span class="g">▲</span>FIRE ≥90s</span><span>stage 2 — pulsing column, visible from FAR zoom</span></div>
+        <div class="legrow"><span class="chip loud"><span class="g">✱</span>ALARM ≥240s</span><span>stage 3 — inverted, spinning; ages are server-real</span></div>
+      </div>
+      <div class="helpnote">
+        CAMERA = HIERARCHY: FAR shows whole-floor health (crisis columns tower over desks);
+        MID shows wings + chips; NEAR turns a desk's monitor into the live tail.
+        All data is real — sessions, token spend, crises ages. Economy rewards LOW
+        spend per completion, never volume. Nothing here is gated behind game progress.
+      </div>
+      <div class="mrow"><button id="help-close" class="primary">✓ GOT IT</button></div>
+    </div>
+  </div>
+
+  <div id="viewport-note"></div>
+</div>
+
+<script>
+'use strict';
+/* ================= data plane (realistic fake, mirrors asyncapi vocab) ================= */
+const NOW0 = Date.now();
+const FIRE_AT = 90_000, ALARM_AT = 240_000; // real thresholds from office/crisis.ts
+
+const AGENTS = [
+ {id:'a1',name:'opus-migrate', machine:'MACBOOK',provider:'CLAUDE',model:'fable-5',   state:'working',    desk:[1.2,1.2],task:'vault schema v1.5 migration', tok:84.3, cost:0.42},
+ {id:'a2',name:'twe-deploy',   machine:'MACBOOK',provider:'CLAUDE',model:'sonnet-4.6',state:'needs-input',desk:[7.6,1.2],task:'prod deploy — permission gate', tok:31.8, cost:0.18, crisisSince:NOW0-130_000, waitingFor:'Bash(vercel deploy --prod)'},
+ {id:'a3',name:'vault-fixer',  machine:'MACBOOK',provider:'CLAUDE',model:'haiku-4.5', state:'done',       desk:[1.2,6],  task:'frontmatter repair sweep', tok:12.1, cost:0.04},
+ {id:'a4',name:'codex-review', machine:'MACBOOK',provider:'CODEX', model:'gpt-5.5',   state:'failed',     desk:[7.6,6],  task:'PR #77 review', tok:22.6, cost:0.11, debris:true},
+ {id:'a5',name:'nexus-watchdog',machine:'NEXUS', provider:'CLAUDE',model:'haiku-4.5', state:'working',    desk:[14.2,1.2],task:'RAID + backup probe', tok:6.4, cost:0.02},
+ {id:'a6',name:'graph-build',  machine:'NEXUS',  provider:'CLAUDE',model:'sonnet-4.6',state:'needs-input',desk:[21,3.5], task:'knowledge graph rebuild', tok:57.9, cost:0.31, crisisSince:NOW0-402_000, waitingFor:'Edit(_meta/graph/edges.json)'},
+ {id:'a7',name:'mini-runner',  machine:'MINI',   provider:'GEMINI',model:'gemini-3-pro',state:'idle',     desk:[15.5,12],task:'awaiting dispatch', tok:0, cost:0},
+];
+const CHIPS = {
+ 'needs-input':{g:'⚠',label:'NEEDS INPUT',cls:'loud'},
+ 'working':    {g:'▶',label:'WORKING',    cls:'working'},
+ 'done':       {g:'✓',label:'DONE',       cls:'done'},
+ 'failed':     {g:'✗',label:'FAILED',     cls:'failed loud'},
+ 'stopped':    {g:'■',label:'STOPPED',    cls:'stopped'},
+ 'idle':       {g:'○',label:'IDLE',       cls:'idle'},
+};
+const WINGS = {
+ MACBOOK:{x:0.4,y:0.4,w:11,h:8,glyph:'▤'},
+ NEXUS:  {x:13,y:0.4,w:12.6,h:8,glyph:'▥'},
+ MINI:   {x:13,y:10,w:9,h:6.5,glyph:'▦'},
+};
+
+const POOL_WORK = [
+ ['⏺ Read(src/office/crisis.ts) — 214 lines','t-dim'],
+ ['⏺ Bash(npm test -- crisis) … ','t-dim'],['  ✓ 14 passed · 3.2s','t-ok'],
+ ['⏺ Edit(src/hudLayout.ts) +18 −4',''],
+ ['tokens 2.1k ▸ session total ↗','t-tok'],
+ ['⏺ Grep("tailSubscribe") — 6 hits','t-dim'],
+ ['⏺ Bash(git diff --stat) — 6 files',''],
+ ['thinking… mapping viewBox to camera lerp','t-dim'],
+ ['⏺ Write(webview-v3/src/camera.ts) 96 lines',''],
+ ['  ✓ typecheck clean','t-ok'],
+];
+const POOL_WATCH = [
+ ['probe: RAID md0 ✓ clean','t-ok'],['probe: disk 71% — ok','t-dim'],
+ ['probe: docker 9/9 up ✓','t-ok'],['probe: backup v2 last run 04:12 ✓','t-ok'],
+ ['idle 30s — next sweep queued','t-dim'],
+];
+function seedTail(a){
+ if(a.state==='failed') return [
+   ['⏺ Bash(npx tsc --noEmit)','t-dim'],['  src/review.ts:88 — TS2339 prop missing',''],
+   ['✗ FAILED — exit 1 (tsc)','t-warn'],['✗ debris at desk — acknowledge to clear','t-dim']];
+ if(a.state==='done') return [
+   ['⏺ Edit(Knowledge/…/schema.md) ✓','t-ok'],['✓ DONE — 9 notes repaired, $0.04','t-ok'],
+   ['session closed 07:41','t-dim']];
+ if(a.state==='idle') return [['○ idle — desk free, awaiting dispatch','t-dim']];
+ if(a.state==='needs-input') return [
+   ['⏺ Bash(next build) … ✓ 41s','t-ok'],
+   ['⏺ runtime-verify: next start + curl / → 200','t-ok'],
+   ['requesting permission…','t-dim']];
+ return a.name==='nexus-watchdog'?POOL_WATCH.slice(0,3):POOL_WORK.slice(0,4);
+}
+const tails = {}; AGENTS.forEach(a=>tails[a.id]=seedTail(a).slice());
+
+/* ================= iso projection + svg helpers ================= */
+const NSVG='http://www.w3.org/2000/svg';
+const S=(t,at={},p)=>{const e=document.createElementNS(NSVG,t);for(const k in at)e.setAttribute(k,at[k]);if(p)p.appendChild(e);return e};
+const px=(x,y,z=0)=>[(x-y)*24,(x+y)*12-z];
+const pts=a=>a.map(p=>p[0].toFixed(1)+','+p[1].toFixed(1)).join(' ');
+function prism(g,tx,ty,w,d,h,cls){
+ const A=px(tx,ty),B=px(tx+w,ty),C=px(tx+w,ty+d),D=px(tx,ty+d);
+ const up=p=>[p[0],p[1]-h];
+ const grp=S('g',{class:cls},g);
+ S('polygon',{points:pts([B,C].map(up).concat([C,B])),class:'face-r'},grp);
+ S('polygon',{points:pts([D,C].map(up).concat([C,D])),class:'face-l'},grp);
+ S('polygon',{points:pts([A,B,C,D].map(up)),class:'face-top'},grp);
+ return grp;
+}
+
+/* ================= scene build ================= */
+const svg=document.getElementById('floor');
+const FIT={x:-490,y:-90,w:1180,h:700};
+let vb={...FIT}, vbT={...FIT}, tween=null;
+const layers={};
+function buildScene(){
+ svg.innerHTML='';
+ const root=S('g',{id:'world'},svg);
+ // floor slab
+ const slab=S('g',{},root);
+ const F=[px(-1,-1),px(27,-1),px(27,19),px(-1,19)];
+ S('polygon',{points:pts(F),fill:'#0d1424'},slab);
+ for(let i=0;i<=28;i++){const a=px(i-1,-1),b=px(i-1,19);S('line',{x1:a[0],y1:a[1],x2:b[0],y2:b[1],class:'gridline'},slab)}
+ for(let j=0;j<=20;j++){const a=px(-1,j-1),b=px(27,j-1);S('line',{x1:a[0],y1:a[1],x2:b[0],y2:b[1],class:'gridline'},slab)}
+ // wings: dashed edge + floor label laid into the plane (pattern-free, text = signal)
+ for(const [m,wg] of Object.entries(WINGS)){
+  const P=[px(wg.x,wg.y),px(wg.x+wg.w,wg.y),px(wg.x+wg.w,wg.y+wg.h),px(wg.x,wg.y+wg.h)];
+  S('polygon',{points:pts(P),class:'wingedge'},slab);
+  const o=px(wg.x+0.6,wg.y+wg.h-0.5);
+  const t=S('text',{class:'floortxt',transform:`matrix(0.83,0.42,-0.83,0.42,${o[0]},${o[1]})`},slab);
+  t.textContent=wg.glyph+' '+m+' WING';
+ }
+ // commons flavor: coffee machine, plants, kanban (emergence hooks — idle agents wander here)
+ prism(slab,10.2,12.6,0.9,0.9,26,'coffee');
+ const co=px(10.6,14.2); const ct=S('text',{class:'floortxt',style:'font-size:8px;letter-spacing:.3em',transform:`matrix(0.83,0.42,-0.83,0.42,${co[0]},${co[1]})`},slab);
+ ct.textContent='COFFEE';
+ prism(slab,2.2,12.4,0.7,0.7,14,'coffee');prism(slab,3.4,15.2,0.7,0.7,14,'coffee');
+ prism(slab,6.4,13.6,1.6,0.3,22,'mon');
+ const kb=px(7.4,15); const kt=S('text',{class:'floortxt',style:'font-size:8px;letter-spacing:.3em',transform:`matrix(0.83,0.42,-0.83,0.42,${kb[0]},${kb[1]})`},slab);
+ kt.textContent='KANBAN · COMMONS';
+ // desks
+ layers.desks=S('g',{},root);
+ layers.fx=S('g',{},root);
+ layers.bb=S('g',{},root);
+ const DH=17; // desk height
+ AGENTS.forEach(a=>{
+  const [tx,ty]=a.desk;
+  const dg=prism(layers.desks,tx,ty,2.0,1.2,DH,'desk');
+  dg.id='desk-'+a.id; dg.style.cursor='pointer';
+  // chair
+  const cc=px(tx+1.0,ty+1.75);
+  S('ellipse',{cx:cc[0],cy:cc[1],rx:12,ry:6.5,class:'chair'},dg);
+  // monitor prism + screen quad
+  prism(dg,tx+0.55,ty+0.2,1.0,0.14,20,'mon').setAttribute('transform',`translate(0,${-DH})`);
+  const s1=px(tx+0.45,ty+0.26,DH+3),s2=px(tx+1.55,ty+0.26,DH+3),s3=px(tx+1.55,ty+0.26,DH+21),s4=px(tx+0.45,ty+0.26,DH+21);
+  const scr=S('polygon',{points:pts([s4,s3,s2,s1]),class:'screenq',id:'scr-'+a.id},dg);
+  if(a.state==='working')scr.classList.add('on');
+  if(a.state==='needs-input')scr.classList.add('loudscr');
+  if(a.state==='working'){ // tiny text lines on screen (near-zoom delight)
+    for(let i=0;i<4;i++){const y1=px(tx+0.55,ty+0.26,DH+17-i*4),y2=px(tx+0.75+0.18*((i*3)%3+1)+0.3*i,ty+0.26,DH+17-i*4);
+      S('line',{x1:y1[0],y1:y1[1],x2:y2[0],y2:y2[1],class:'scrline',style:`animation:scrflick ${1.3+i*.7}s linear infinite`},dg);}
+  }
+  dg.addEventListener('click',ev=>{ev.stopPropagation();select(a.id)});
+  // billboard chip (counter-scaled)
+  const c=CHIPS[a.state],anchor=px(tx+1.0,ty+0.6);
+  const bb=S('g',{class:'bb '+c.cls,id:'bb-'+a.id,'data-ax':anchor[0],'data-ay':anchor[1]-60},layers.bb);
+  const label=c.g+' '+c.label, sub=(a.provider!=='CLAUDE'?'['+a.provider+'] ':'')+a.name+' · '+a.machine;
+  const w=Math.max(label.length,sub.length*0.82)*7.4+18;
+  S('rect',{class:'bbg',x:-w/2,y:-30,width:w,height:34,rx:4},bb);
+  const t1=S('text',{class:'l1',x:0,y:-16,'text-anchor':'middle'},bb);t1.textContent=label;
+  const t2=S('text',{class:'l2',x:0,y:-4,'text-anchor':'middle'},bb);t2.textContent=sub;
+  bb.addEventListener('click',ev=>{ev.stopPropagation();select(a.id)});
+  // debris
+  if(a.debris){
+   const d=S('g',{class:'debrisg',id:'debris-'+a.id,style:'cursor:pointer'},layers.fx);
+   [[tx-0.4,ty+2.1],[tx+0.5,ty+2.4],[tx+1.6,ty+2.2]].forEach(p=>{const q=px(p[0],p[1]);
+     const x=S('text',{class:'dx',x:q[0],y:q[1]},d);x.textContent='✗';});
+   const q=px(tx+0.6,ty+3.0);const l=S('text',{class:'dl',x:q[0],y:q[1],'text-anchor':'middle'},d);
+   l.textContent='✗ DEBRIS — TAP TO ACK';
+   d.addEventListener('click',ev=>{ev.stopPropagation();ackDebris(a.id)});
+  }
+ });
+ rebuildCrisisGlyphs();
+}
+function crisisStage(ms){return ms>=ALARM_AT?'alarm':ms>=FIRE_AT?'fire':'smoke'}
+const STAGE_SPEC={smoke:{g:'≋',label:'SMOKE'},fire:{g:'▲',label:'FIRE'},alarm:{g:'✱',label:'ALARM'}};
+function rebuildCrisisGlyphs(){
+ layers.fx.querySelectorAll('.crisisg').forEach(n=>n.remove());
+ AGENTS.filter(a=>a.crisisSince&&a.state==='needs-input').forEach(a=>{
+  const st=crisisStage(Date.now()-a.crisisSince),sp=STAGE_SPEC[st];
+  const [tx,ty]=a.desk,anchor=px(tx+1.0,ty+0.6);
+  const g=S('g',{class:'crisisg '+st,id:'cri-'+a.id,'data-ax':anchor[0],'data-ay':anchor[1]-112,'data-cs':'1'},layers.fx);
+  if(st==='alarm')S('rect',{x:-34,y:-46,width:68,height:58,rx:5},g);
+  const cg=S('text',{class:'cg',x:0,y:-8,'text-anchor':'middle'},g);cg.textContent=sp.g;
+  const cl=S('text',{class:'cl',x:0,y:4,'text-anchor':'middle'},g);cl.textContent=sp.label;
+  const ca=S('text',{class:'ca',x:0,y:26,'text-anchor':'middle',id:'age-'+a.id},g);
+  if(st==='smoke'){const sm=S('g',{class:'smokey'},g);
+    [[-10,0],[2,-6],[12,2]].forEach((p,i)=>{const w=S('text',{x:p[0],y:p[1]-30,style:`animation-delay:${i*.8}s`},sm);w.textContent='≋'});}
+ });
+}
+function ackDebris(id){
+ const a=AGENTS.find(x=>x.id===id);a.debris=false;
+ document.getElementById('debris-'+id)?.remove();
+ toast('✓ DEBRIS ACKNOWLEDGED — desk clear');
+}
+
+/* ================= camera ================= */
+function setVB(){svg.setAttribute('viewBox',`${vb.x} ${vb.y} ${vb.w} ${vb.h}`)}
+function goTo(t,ms=650){
+ const s={...vb},t0=performance.now();cancelAnimationFrame(tween);
+ vbT={...t};
+ const step=n=>{let k=Math.min(1,(n-t0)/ms);k=k<.5?2*k*k:1-Math.pow(-2*k+2,2)/2;
+  vb={x:s.x+(t.x-s.x)*k,y:s.y+(t.y-s.y)*k,w:s.w+(t.w-s.w)*k,h:s.h+(t.h-s.h)*k};
+  setVB();if(k<1)tween=requestAnimationFrame(step)};
+ tween=requestAnimationFrame(step);
+}
+function deskBox(a){const [tx,ty]=a.desk,c=px(tx+1.0,ty+0.6);
+ return {x:c[0]-210,y:c[1]-190,w:420,h:250}}
+function wingBox(m){const wg=WINGS[m],P=[px(wg.x,wg.y),px(wg.x+wg.w,wg.y),px(wg.x+wg.w,wg.y+wg.h),px(wg.x,wg.y+wg.h)];
+ const xs=P.map(p=>p[0]),ys=P.map(p=>p[1]);
+ const x0=Math.min(...xs)-60,y0=Math.min(...ys)-110;
+ return {x:x0,y:y0,w:Math.max(...xs)-x0+60,h:Math.max(...ys)-y0+60}}
+function lod(){return vb.w<560?'NEAR':vb.w<1000?'MID':'FAR'}
+// per-frame billboard counter-scale + LOD tag
+function frame(){
+ const k=Math.min(0.84,Math.max(0.4,vb.w/FIT.w*0.84));
+ layers.bb?.querySelectorAll('.bb').forEach(b=>{
+  b.setAttribute('transform',`translate(${b.dataset.ax},${b.dataset.ay}) scale(${k.toFixed(3)})`)});
+ const kc=Math.min(1,Math.max(0.55,vb.w/FIT.w));
+ layers.fx?.querySelectorAll('[data-cs]').forEach(b=>{
+  b.setAttribute('transform',`translate(${b.dataset.ax},${b.dataset.ay}) scale(${kc.toFixed(3)})`)});
+ document.getElementById('lodtag').textContent='LOD · '+lod();
+ requestAnimationFrame(frame);
+}
+// pan / wheel-zoom
+let drag=null;
+svg.addEventListener('pointerdown',e=>{drag={x:e.clientX,y:e.clientY,vb:{...vb},moved:false};svg.setPointerCapture(e.pointerId)});
+svg.addEventListener('pointermove',e=>{if(!drag)return;
+ const r=svg.getBoundingClientRect(),sc=vb.w/r.width;
+ const dx=(e.clientX-drag.x)*sc,dy=(e.clientY-drag.y)*sc;
+ if(Math.abs(e.clientX-drag.x)+Math.abs(e.clientY-drag.y)>6)drag.moved=true;
+ if(drag.moved){cancelAnimationFrame(tween);vb.x=drag.vb.x-dx;vb.y=drag.vb.y-dy;setVB()}});
+svg.addEventListener('pointerup',()=>{drag=null});
+svg.addEventListener('wheel',e=>{e.preventDefault();cancelAnimationFrame(tween);
+ const r=svg.getBoundingClientRect(),mx=vb.x+(e.clientX-r.left)/r.width*vb.w,my=vb.y+(e.clientY-r.top)/r.height*vb.h;
+ const f=e.deltaY>0?1.12:0.89,w=Math.min(1500,Math.max(230,vb.w*f)),k=w/vb.w;
+ vb={x:mx-(mx-vb.x)*k,y:my-(my-vb.y)*k,w,h:vb.h*k};setVB()},{passive:false});
+document.querySelectorAll('#camctl button').forEach(b=>b.addEventListener('click',()=>{
+ document.querySelectorAll('#camctl button').forEach(x=>x.classList.remove('on'));b.classList.add('on');
+ closeMonitor();
+ goTo(b.dataset.cam==='floor'?FIT:wingBox(b.dataset.cam));
+}));
+
+/* ================= selection / streaming homes ================= */
+let selected=null, phoneMode=false;
+function select(id){
+ selected=id;const a=AGENTS.find(x=>x.id===id);
+ document.querySelectorAll('.desk-sel').forEach(d=>d.classList.remove('desk-sel'));
+ document.getElementById('desk-'+id)?.classList.add('desk-sel');
+ goTo(deskBox(a));
+ if(phoneMode)openSheet(a);else openMonitor(a);
+}
+function chipHTML(a){const c=CHIPS[a.state];return `<span class="chip ${c.cls}"><span class="g">${c.g}</span>${c.label}</span>`}
+function renderTerm(el,a){
+ el.innerHTML=tails[a.id].map(l=>`<div class="${l[1]||''}">${l[0]}</div>`).join('');
+ el.scrollTop=el.scrollHeight;
+}
+function openMonitor(a){
+ const m=document.getElementById('monitor');m.classList.add('open');
+ document.getElementById('mon-title').textContent='▣ MONITOR — '+a.name;
+ document.getElementById('mon-sub').textContent=(a.provider!=='CLAUDE'?'['+a.provider+'] ':'')+a.model+' @ '+a.machine+' · desk '+a.id.toUpperCase();
+ document.getElementById('mon-task').textContent='task: '+a.task+' · session '+a.tok+'k tok · $'+a.cost.toFixed(2);
+ renderTerm(document.getElementById('mon-term'),a);
+ syncWait(a,'mon');
+}
+function closeMonitor(){document.getElementById('monitor').classList.remove('open');
+ document.querySelectorAll('.desk-sel').forEach(d=>d.classList.remove('desk-sel'));selected=null}
+function openSheet(a){
+ document.getElementById('sheet').classList.add('open');
+ document.getElementById('sh-title').textContent='▣ '+a.name;
+ document.getElementById('sh-sub').textContent=(a.provider!=='CLAUDE'?'['+a.provider+'] ':'')+a.model+' @ '+a.machine+' · '+a.task;
+ renderTerm(document.getElementById('sh-term'),a);
+ syncWait(a,'sh');
+}
+function syncWait(a,pre){
+ const w=document.getElementById(pre+'-wait'),inp=document.getElementById(pre+'-input');
+ if(a.state==='needs-input'){w.style.display='block';
+  w.textContent='⚠ WAITING '+ageStr(Date.now()-a.crisisSince)+' — '+a.waitingFor;
+  inp.style.display='';}
+ else{w.style.display='none';inp.style.display='none';}
+}
+document.getElementById('mon-close').addEventListener('click',()=>{closeMonitor();goTo(FIT);
+ document.querySelectorAll('#camctl button').forEach(x=>x.classList.toggle('on',x.dataset.cam==='floor'))});
+document.getElementById('sh-close').addEventListener('click',()=>{document.getElementById('sheet').classList.remove('open');selected=null});
+
+/* pinned dock tails (desktop persistent streaming) */
+const pinned=new Set(['a1']);
+function renderDock(){
+ const d=document.getElementById('docktabs');d.innerHTML='';
+ pinned.forEach(id=>{const a=AGENTS.find(x=>x.id===id);
+  const t=document.createElement('div');t.className='docktail';
+  t.innerHTML=`<div class="dt-h"><b>${a.name}</b> · ${a.machine} ${chipHTML(a)}<button data-un="${id}">✕ UNPIN</button></div><div class="term" id="dock-term-${id}"></div>`;
+  d.appendChild(t);renderTerm(document.getElementById('dock-term-'+id),a);
+  t.querySelector('[data-un]').addEventListener('click',()=>{pinned.delete(id);renderDock()});
+ });
+ if(pinned.size<3){const hint=document.createElement('div');
+  hint.className='emptyq';hint.style.cssText='flex:0 0 200px;align-self:stretch;display:flex;align-items:center;justify-content:center';
+  hint.textContent='▣ click a desk → PIN TAIL';d.appendChild(hint)}
+ document.getElementById('dockcount').textContent=pinned.size+' / 3';
+}
+document.getElementById('mon-pin').addEventListener('click',()=>{
+ if(!selected)return;if(pinned.size>=3&&!pinned.has(selected)){toast('⚠ DOCK FULL — unpin a tail first');return}
+ pinned.add(selected);renderDock();toast('▣ TAIL PINNED to dock');});
+
+/* ================= triage queue + roster ================= */
+function ageStr(ms){const s=Math.max(0,Math.floor(ms/1000));return Math.floor(s/60)+'m '+String(s%60).padStart(2,'0')+'s'}
+function crises(){return AGENTS.filter(a=>a.state==='needs-input'&&a.crisisSince)
+ .map(a=>({a,age:Date.now()-a.crisisSince,st:crisisStage(Date.now()-a.crisisSince)}))
+ .sort((p,q)=>(q.age*({smoke:1,fire:2,alarm:3})[q.st])-(p.age*({smoke:1,fire:2,alarm:3})[p.st]))}
+function renderQueue(){
+ const q=document.getElementById('queue'),cs=crises();
+ document.getElementById('qcount').textContent=cs.length;
+ document.getElementById('hud-crisis').textContent=cs.length?((cs.some(c=>c.st==='alarm')?'✱ ':'▲ ')+cs.length+' CRIS'+(cs.length===1?'IS':'ES')):'✓ ALL CALM';
+ if(!cs.length){q.innerHTML='<div class="emptyq">✓ ALL CALM — no blocked sessions<br>the floor breathes easy</div>';return}
+ q.innerHTML='';
+ cs.forEach(({a,age,st})=>{
+  const sp=STAGE_SPEC[st],c=document.createElement('div');
+  c.className='crisiscard '+st;
+  c.innerHTML=`<div class="row1"><span class="stageglyph">${sp.g}</span><span class="stagelabel">${sp.label}</span><span class="age" data-age="${a.id}">${ageStr(age)}</span></div>
+   <div class="row2">${a.name} · ${a.machine} — ${a.waitingFor}</div>
+   <div class="row3"><button data-goto="${a.id}">▸ GO TO DESK</button><button class="primary" data-solve="${a.id}">✓ SEND INPUT</button></div>`;
+  q.appendChild(c);
+  c.querySelector('[data-goto]').addEventListener('click',e=>{e.stopPropagation();select(a.id)});
+  c.querySelector('[data-solve]').addEventListener('click',e=>{e.stopPropagation();resolve(a.id)});
+  c.addEventListener('click',()=>select(a.id));
+ });
+ q.style.display='flex';q.style.flexDirection='column';q.style.gap='9px';
+}
+function renderRoster(){
+ const r=document.getElementById('roster');r.innerHTML='';
+ AGENTS.forEach(a=>{
+  const row=document.createElement('div');row.className='agentrow';
+  row.innerHTML=`<div><div class="aname">${a.provider!=='CLAUDE'?'['+a.provider+'] ':''}${a.name}</div><div class="ameta">${WINGS[a.machine].glyph} ${a.machine} · ${a.model}</div></div>${chipHTML(a)}`;
+  row.addEventListener('click',()=>select(a.id));
+  r.appendChild(row);
+ });
+}
+
+/* ================= actions: resolve / kill / dispatch ================= */
+function refreshAgentPaint(a){
+ // desk screen + billboard + fx re-render
+ const scr=document.getElementById('scr-'+a.id);
+ if(scr){scr.classList.remove('on','loudscr');
+  if(a.state==='working')scr.classList.add('on');
+  if(a.state==='needs-input')scr.classList.add('loudscr');}
+ buildScene(); // cheap at this scale; keeps mockup honest
+ if(selected===a.id)document.getElementById('desk-'+a.id)?.classList.add('desk-sel');
+ renderQueue();renderRoster();renderDock();
+}
+function calmRipple(a){
+ const [tx,ty]=a.desk,c=px(tx+1.0,ty+0.6);
+ const ring=S('circle',{cx:c[0],cy:c[1],r:6,class:'calmring go'},layers.fx);
+ setTimeout(()=>ring.remove(),1500);
+}
+let rep=78;
+function resolve(id){
+ const a=AGENTS.find(x=>x.id===id);if(a.state!=='needs-input')return;
+ const held=ageStr(Date.now()-a.crisisSince);
+ tails[id].push(['> y (input sent by operator)','t-tok'],['✓ input delivered — resuming','t-ok']);
+ a.state='working';a.crisisSince=null;a.waitingFor=null;
+ rep+=2;document.getElementById('hud-rep').textContent=rep;
+ refreshAgentPaint(a);calmRipple(a);
+ if(selected===id){const pre=phoneMode?'sh':'mon';renderTerm(document.getElementById(pre+'-term'),a);syncWait(a,pre)}
+ toast('✓ CRISIS CLEARED in '+held+' — REP +2 (fast unblock)');
+}
+let killArm=null;
+function killSel(){
+ if(!selected)return;const a=AGENTS.find(x=>x.id===selected);
+ if(killArm!==selected){killArm=selected;
+  document.getElementById(phoneMode?'sh-kill':'mon-kill').textContent='✗ CONFIRM KILL';
+  setTimeout(()=>{killArm=null;document.querySelectorAll('#mon-kill,#sh-kill').forEach(b=>b.textContent='■ KILL')},2600);
+  return}
+ killArm=null;document.querySelectorAll('#mon-kill,#sh-kill').forEach(b=>b.textContent='■ KILL');
+ tails[a.id].push(['■ session killed by operator','t-warn']);
+ a.state='stopped';a.crisisSince=null;a.debris=true;
+ refreshAgentPaint(a);
+ const pre=phoneMode?'sh':'mon';renderTerm(document.getElementById(pre+'-term'),a);syncWait(a,pre);
+ toast('■ KILLED '+a.name+' — ✗ debris left at desk');
+}
+document.getElementById('mon-kill').addEventListener('click',killSel);
+document.getElementById('sh-kill').addEventListener('click',killSel);
+document.getElementById('mon-input').addEventListener('click',()=>selected&&resolve(selected));
+document.getElementById('sh-input').addEventListener('click',()=>selected&&resolve(selected));
+
+/* dispatch modal */
+const dscrim=document.getElementById('dispatch-scrim');
+document.getElementById('btn-dispatch').addEventListener('click',()=>dscrim.classList.add('open'));
+document.getElementById('d-cancel').addEventListener('click',()=>dscrim.classList.remove('open'));
+['d-machine','d-provider'].forEach(id=>document.getElementById(id).addEventListener('click',e=>{
+ if(e.target.dataset.v===undefined)return;
+ document.querySelectorAll('#'+id+' button').forEach(b=>b.classList.remove('on'));
+ e.target.classList.add('on');
+ if(id==='d-machine')document.getElementById('d-go').textContent='▶ DISPATCH TO '+e.target.dataset.v;
+}));
+document.getElementById('d-go').addEventListener('click',()=>{
+ dscrim.classList.remove('open');
+ const a=AGENTS.find(x=>x.id==='a7');
+ const prov=document.querySelector('#d-provider .on').dataset.v;
+ a.state='working';a.provider=prov;a.task=document.getElementById('d-task').value.slice(0,48);
+ tails.a7=[['▶ dispatched by operator — '+prov+' run starting','t-tok'],['⏺ session open on MINI','t-dim']];
+ refreshAgentPaint(a);select('a7');
+ toast('▶ DISPATCHED ['+prov+'] mini-runner @ MINI — est. $0.14');
+});
+
+/* ================= streaming loop (fake live tails) ================= */
+let poolIdx=0;
+setInterval(()=>{
+ AGENTS.filter(a=>a.state==='working').forEach(a=>{
+  const pool=a.name==='nexus-watchdog'?POOL_WATCH:POOL_WORK;
+  tails[a.id].push(pool[poolIdx%pool.length]);
+  if(tails[a.id].length>60)tails[a.id].shift();
+  if(selected===a.id){const pre=phoneMode?'sh':'mon';
+   const el=document.getElementById(pre+'-term');if(el)renderTerm(el,a)}
+  if(pinned.has(a.id)){const el=document.getElementById('dock-term-'+a.id);if(el)renderTerm(el,a)}
+ });
+ poolIdx++;
+},760);
+/* live ages + stage escalation (FIRE→ALARM crossover happens live at 4m) */
+setInterval(()=>{
+ let restage=false;
+ crises().forEach(({a,age,st})=>{
+  const el=document.querySelector('[data-age="'+a.id+'"]');if(el)el.textContent=ageStr(age);
+  const cg=document.getElementById('cri-'+a.id);
+  if(cg&&!cg.classList.contains(st))restage=true;
+  const ax=document.getElementById('age-'+a.id);if(ax)ax.textContent=ageStr(age);
+  if(selected===a.id)syncWait(a,phoneMode?'sh':'mon');
+ });
+ if(restage){rebuildCrisisGlyphs();renderQueue();toast('✱ ESCALATION — a FIRE just became an ALARM')}
+},1000);
+/* burn ticker — real money honesty */
+let cash=142.50;
+setInterval(()=>{const n=AGENTS.filter(a=>a.state==='working').length;
+ cash-=0.0005*n;document.getElementById('hud-cash').textContent='$'+cash.toFixed(2);
+ document.getElementById('hud-burn').textContent='$'+(n*0.61).toFixed(2)+'/h'},2000);
+
+/* ================= chrome: toasts, help, grayscale, viewport ================= */
+function toast(msg){const t=document.createElement('div');t.className='toast';t.textContent=msg;
+ document.getElementById('toasts').appendChild(t);setTimeout(()=>t.remove(),3700)}
+document.getElementById('btn-help').addEventListener('click',()=>document.getElementById('help-scrim').classList.add('open'));
+document.getElementById('help-close').addEventListener('click',()=>document.getElementById('help-scrim').classList.remove('open'));
+document.getElementById('btn-gray').addEventListener('click',()=>{
+ document.body.classList.toggle('gray');
+ toast(document.body.classList.contains('gray')?'◐ GRAYSCALE ON — everything still reads':'◐ grayscale off')});
+document.getElementById('btn-view').addEventListener('click',()=>{
+ phoneMode=!phoneMode;document.body.classList.toggle('phone',phoneMode);
+ closeMonitor();document.getElementById('sheet').classList.remove('open');
+ document.getElementById('viewport-note').textContent=phoneMode?'':'';
+ goTo(FIT,300);
+ toast(phoneMode?'▦ PHONE VIEWPORT — monitor · triage · dispatch · kill · tail':'▤ DESKTOP VIEWPORT — full floor');
+});
+window.addEventListener('keydown',e=>{if(e.key==='?')document.getElementById('help-scrim').classList.toggle('open')});
+
+/* ================= boot ================= */
+buildScene();setVB();renderQueue();renderRoster();renderDock();requestAnimationFrame(frame);
+// a real narrow viewport (an actual phone) gets phone layout automatically, no bezel
+if(matchMedia('(max-width:600px)').matches){phoneMode=true;
+ document.body.classList.add('phone','real');goTo(FIT,1)}
+</script>
+</body>
+</html>

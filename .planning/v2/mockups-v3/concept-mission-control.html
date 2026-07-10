@@ -1,0 +1,773 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>WAR ROOM V3 — Concept: Mission Control with Sim Garnish</title>
+<style>
+/* ============================================================
+   WAR ROOM V3 — MISSION CONTROL WITH SIM GARNISH
+   Flight-director console: dense but calm. Panels, tails and the
+   triage queue lead; the office sim is an ambient living strip.
+   Deuteranopia discipline: every signal is SHAPE + WORD first.
+   Color is reinforcement only — try the GRAYSCALE button.
+   ============================================================ */
+:root{
+  --bg:#0b0e12; --bg2:#10151c; --panel:#121821; --panel2:#0e131a;
+  --line:#232c38; --line2:#2e3947;
+  --tx:#c7d3e0; --tx-dim:#7c8a9b; --tx-faint:#54606f;
+  --amber:#e2a33b; --cyan:#5cc3d9; --vio:#a58ff2; --grn:#7fb069; --red:#d9705f;
+  --loud-bg:#e9eef4; --loud-tx:#0b0e12;
+  --mono:"SF Mono",ui-monospace,SFMono-Regular,Menlo,Consolas,monospace;
+  --r:4px;
+}
+*{box-sizing:border-box;margin:0;padding:0}
+html,body{height:100%}
+body{
+  background:#06080b; color:var(--tx); font-family:var(--mono);
+  font-size:12.5px; line-height:1.45; overflow:hidden;
+  -webkit-font-smoothing:antialiased;
+}
+body.gray .app{filter:grayscale(1)}
+button{font-family:var(--mono); cursor:pointer; background:none; border:1px solid var(--line2); color:var(--tx); border-radius:var(--r); font-size:11px; padding:3px 8px; letter-spacing:.04em}
+button:hover{border-color:var(--tx-dim); background:var(--bg2)}
+button.primary{background:var(--loud-bg); color:var(--loud-tx); border-color:var(--loud-bg); font-weight:700}
+button.danger:hover{border-color:var(--red)}
+::-webkit-scrollbar{width:8px;height:8px}
+::-webkit-scrollbar-thumb{background:var(--line2);border-radius:4px}
+::-webkit-scrollbar-track{background:transparent}
+
+/* ---- meta chrome (mockup controls, not product) ---- */
+.metabar{
+  display:flex; align-items:center; gap:10px; padding:6px 12px;
+  background:#06080b; border-bottom:1px dashed #1c2530;
+  color:var(--tx-faint); font-size:10.5px; letter-spacing:.08em;
+}
+.metabar .spacer{flex:1}
+.metabar b{color:var(--tx-dim)}
+
+/* ---- app frame ---- */
+.stage{height:calc(100% - 30px); display:flex; align-items:stretch; justify-content:center; overflow:auto}
+.app{
+  width:100%; height:100%;
+  display:grid; grid-template-rows:auto 1fr auto;
+  background:var(--bg); position:relative; overflow:hidden;
+}
+/* phone mode: framed 390px device */
+.stage.phone-frame{padding:18px 0; background:
+  repeating-linear-gradient(45deg,#07090c 0 14px,#090c10 14px 28px)}
+.stage.phone-frame .app{
+  width:390px; height:min(780px,100%); border:1px solid #2a3442;
+  border-radius:22px; box-shadow:0 0 0 6px #10151c, 0 24px 60px #000;
+}
+
+/* ============ HEADER / HUD ============ */
+header.hud{
+  display:flex; align-items:center; gap:14px; padding:8px 14px;
+  border-bottom:1px solid var(--line); background:var(--bg2);
+  flex-wrap:wrap; row-gap:6px;
+}
+.brand{font-weight:700; letter-spacing:.22em; font-size:12px; white-space:nowrap}
+.brand small{color:var(--tx-faint); letter-spacing:.14em; font-weight:400}
+.hud .grow{flex:1}
+.machines{display:flex; gap:6px}
+.machine{
+  border:1px solid var(--line2); border-radius:var(--r); padding:2px 8px;
+  font-size:10.5px; letter-spacing:.08em; color:var(--tx-dim); white-space:nowrap;
+}
+.machine b{color:var(--tx)}
+.econ{display:flex; gap:14px; font-size:11.5px; white-space:nowrap}
+.econ .k{color:var(--tx-faint); letter-spacing:.1em; font-size:9.5px; display:block}
+.econ .v{font-weight:700; font-variant-numeric:tabular-nums}
+.econ .v.cash{color:var(--grn)} .econ .v.rep{color:var(--vio)} .econ .v.burn{color:var(--amber)}
+.ticker{
+  font-size:10.5px; color:var(--tx-dim); border-left:2px solid var(--line2);
+  padding-left:10px; max-width:300px; overflow:hidden; white-space:nowrap; text-overflow:ellipsis;
+}
+.clock{color:var(--tx-dim); font-variant-numeric:tabular-nums; font-size:11px}
+
+/* ============ MAIN GRID (desktop) ============ */
+.main{
+  display:grid; grid-template-columns:308px 1fr 300px;
+  min-height:0; border-bottom:1px solid var(--line);
+}
+.col{min-height:0; display:flex; flex-direction:column; overflow:hidden}
+.col + .col{border-left:1px solid var(--line)}
+.panel-h{
+  display:flex; align-items:baseline; gap:8px; padding:8px 12px 6px;
+  font-size:10px; letter-spacing:.24em; color:var(--tx-dim);
+  border-bottom:1px solid var(--line); background:var(--panel2);
+  text-transform:uppercase; flex:none;
+}
+.panel-h .n{color:var(--tx); font-weight:700}
+.panel-h .right{margin-left:auto; letter-spacing:.05em}
+.scroll{overflow-y:auto; min-height:0; flex:1}
+
+/* ---- triage queue ---- */
+.crisis{
+  margin:8px 10px 0; border:1px solid var(--line2); border-radius:var(--r);
+  background:var(--panel); overflow:hidden;
+}
+.crisis.loud{border-color:var(--loud-bg)}
+.crisis-top{display:flex; align-items:center; gap:8px; padding:7px 10px 5px}
+.stagechip{
+  display:inline-flex; align-items:center; gap:5px; font-weight:700;
+  font-size:10.5px; letter-spacing:.1em; padding:1px 7px; border-radius:3px;
+  border:1px solid var(--line2); white-space:nowrap;
+}
+.stagechip .g{font-size:12px}
+.stagechip.smoke{color:var(--tx); border-color:var(--tx-dim)}
+.stagechip.fire{color:var(--amber); border-color:var(--amber)}
+.stagechip.alarm{background:var(--loud-bg); color:var(--loud-tx); border-color:var(--loud-bg)}
+.stagechip.debris{color:var(--red); border-color:var(--red); border-style:dashed}
+.crisis-age{margin-left:auto; font-variant-numeric:tabular-nums; font-size:11px; color:var(--tx-dim)}
+.crisis.loud .crisis-age{color:var(--tx); font-weight:700}
+.crisis-body{padding:0 10px 8px; font-size:11.5px}
+.crisis-body .who{font-weight:700}
+.crisis-body .who small{color:var(--tx-faint); font-weight:400}
+.crisis-body .wait{color:var(--tx-dim); margin-top:2px}
+.crisis-act{display:flex; gap:6px; padding:0 10px 9px}
+.qempty{padding:22px 14px; color:var(--tx-faint); text-align:center; font-size:11.5px}
+.qempty .big{font-size:20px; display:block; margin-bottom:6px}
+
+/* shift scorecard */
+.shift{border-top:1px solid var(--line); padding:8px 12px 10px; flex:none; background:var(--panel2)}
+.shift h3{font-size:9.5px; letter-spacing:.24em; color:var(--tx-faint); margin-bottom:6px}
+.shift table{width:100%; border-collapse:collapse; font-size:11px}
+.shift td{padding:1.5px 0; color:var(--tx-dim)}
+.shift td:last-child{text-align:right; color:var(--tx); font-variant-numeric:tabular-nums; font-weight:700}
+
+/* ---- tails column ---- */
+.dispatchbar{
+  display:flex; gap:8px; padding:8px 12px; border-bottom:1px solid var(--line);
+  background:var(--panel2); align-items:center; flex:none;
+}
+.dispatchbar input,.dispatchbar select{
+  background:var(--bg); border:1px solid var(--line2); color:var(--tx);
+  font-family:var(--mono); font-size:11.5px; padding:4px 8px; border-radius:var(--r);
+}
+.dispatchbar input{flex:1; min-width:0}
+.dispatch-note{font-size:9.5px; color:var(--tx-faint); padding:4px 12px 6px; border-bottom:1px solid var(--line); background:var(--panel2)}
+.tiles{display:grid; grid-template-rows:1fr 1fr; min-height:0; flex:1}
+.tile{display:flex; flex-direction:column; min-height:0; border-bottom:1px solid var(--line)}
+.tile:last-child{border-bottom:none}
+.tile-h{
+  display:flex; align-items:center; gap:8px; padding:5px 12px;
+  background:var(--panel2); border-bottom:1px solid var(--line); flex:none; font-size:11px;
+}
+.tile-h .nm{font-weight:700}
+.tile-h .mc{color:var(--tx-faint); font-size:10px; letter-spacing:.08em}
+.tile-h .live{margin-left:auto; display:flex; gap:6px; align-items:center}
+.livedot{width:6px;height:6px;border-radius:50%;background:var(--cyan);animation:blink 1.2s steps(2) infinite}
+@keyframes blink{50%{opacity:.25}}
+.tail{
+  flex:1; overflow-y:auto; padding:6px 12px 10px; font-size:11px; line-height:1.5;
+  background:var(--bg); white-space:pre-wrap; word-break:break-word;
+}
+.tail .ln{display:block}
+.tail .t-read{color:var(--tx-dim)} .tail .t-tool{color:var(--cyan)}
+.tail .t-ok{color:var(--grn)} .tail .t-err{color:var(--red)}
+.tail .t-think{color:var(--tx-faint); font-style:italic}
+.tail .t-wait{background:var(--loud-bg); color:var(--loud-tx); font-weight:700; padding:1px 4px; border-radius:2px; display:inline-block; margin:2px 0}
+.tail .t-meta{color:var(--vio)}
+
+/* ---- state chips (shared vocabulary) ---- */
+.chip{
+  display:inline-flex; align-items:center; gap:4px; font-size:10px; font-weight:700;
+  letter-spacing:.06em; padding:1px 6px; border-radius:3px; border:1px solid var(--line2);
+  white-space:nowrap;
+}
+.chip .g{font-size:11px}
+.chip.needs-input{background:var(--loud-bg); color:var(--loud-tx); border-color:var(--loud-bg); font-size:10.5px}
+.chip.working{color:var(--cyan); border-color:var(--cyan)}
+.chip.done{color:var(--grn); border-color:var(--grn)}
+.chip.failed{background:var(--loud-bg); color:#7c1f12; border-color:var(--loud-bg)}
+.chip.stopped{color:var(--tx-dim)}
+.chip.idle{color:var(--tx-faint); border-style:dashed}
+
+/* ---- roster ---- */
+.mgroup{padding-top:6px}
+.mgroup-h{
+  padding:4px 12px; font-size:9.5px; letter-spacing:.22em; color:var(--tx-faint);
+  display:flex; justify-content:space-between;
+}
+.arow{
+  display:grid; grid-template-columns:1fr auto; gap:2px 8px; padding:7px 12px;
+  border-top:1px solid var(--line); cursor:pointer;
+}
+.arow:hover{background:var(--panel)}
+.arow.sel{background:var(--panel); box-shadow:inset 2px 0 0 var(--tx)}
+.arow .nm{font-weight:700; font-size:12px}
+.arow .task{grid-column:1/-1; color:var(--tx-dim); font-size:10.5px; overflow:hidden; white-space:nowrap; text-overflow:ellipsis}
+.arow .meta{grid-column:1/-1; color:var(--tx-faint); font-size:10px; font-variant-numeric:tabular-nums}
+
+/* ============ OFFICE STRIP (ambient sim garnish) ============ */
+.office{
+  position:relative; height:132px; flex:none; background:var(--bg2);
+}
+.office canvas{display:block; width:100%; height:100%; cursor:pointer}
+.office .tag{
+  position:absolute; top:6px; left:12px; font-size:9px; letter-spacing:.26em;
+  color:var(--tx-faint); pointer-events:none;
+}
+.office .calm{
+  position:absolute; top:6px; right:12px; font-size:9.5px; letter-spacing:.1em;
+  color:var(--tx-dim); pointer-events:none; font-variant-numeric:tabular-nums;
+}
+
+/* ============ DRAWER (agent detail + tail) ============ */
+.drawer{
+  position:absolute; top:0; right:0; bottom:0; width:440px; max-width:100%;
+  background:var(--panel); border-left:1px solid var(--line2);
+  transform:translateX(102%); transition:transform .18s ease-out;
+  display:flex; flex-direction:column; z-index:30; box-shadow:-18px 0 40px rgba(0,0,0,.5);
+}
+.drawer.open{transform:none}
+.drawer-h{display:flex; align-items:center; gap:8px; padding:10px 14px; border-bottom:1px solid var(--line); flex:none}
+.drawer-h .nm{font-weight:700; font-size:13px}
+.drawer-meta{padding:8px 14px; border-bottom:1px solid var(--line); flex:none; display:grid; grid-template-columns:1fr 1fr; gap:4px 12px; font-size:11px}
+.drawer-meta .k{color:var(--tx-faint); font-size:9.5px; letter-spacing:.12em; display:block}
+.drawer-act{display:flex; gap:8px; padding:10px 14px; border-bottom:1px solid var(--line); flex:none}
+.drawer .tail{background:var(--panel2)}
+.drawer-close{margin-left:auto}
+
+/* ============ HELP OVERLAY ============ */
+.overlay{
+  position:absolute; inset:0; background:rgba(6,8,11,.82); z-index:50;
+  display:none; align-items:center; justify-content:center; padding:20px;
+}
+.overlay.open{display:flex}
+.helpcard{
+  background:var(--panel); border:1px solid var(--line2); border-radius:6px;
+  max-width:640px; width:100%; max-height:90%; overflow-y:auto; padding:18px 20px;
+}
+.helpcard h2{font-size:12px; letter-spacing:.2em; margin-bottom:10px}
+.helpcard p{font-size:11.5px; color:var(--tx-dim); margin-bottom:10px}
+.helpcard table{width:100%; border-collapse:collapse; font-size:11.5px; margin-bottom:12px}
+.helpcard th{font-size:9.5px; letter-spacing:.18em; color:var(--tx-faint); text-align:left; padding:4px 8px; border-bottom:1px solid var(--line2)}
+.helpcard td{padding:5px 8px; border-bottom:1px solid var(--line)}
+
+/* toast */
+.toast{
+  position:absolute; left:50%; transform:translateX(-50%); bottom:150px;
+  background:var(--loud-bg); color:var(--loud-tx); font-weight:700; font-size:11.5px;
+  padding:6px 14px; border-radius:4px; z-index:40; opacity:0; transition:opacity .25s;
+  pointer-events:none; letter-spacing:.04em;
+}
+.toast.show{opacity:1}
+
+/* ============ PHONE LAYOUT ============ */
+.tabbar{display:none}
+.app.m .main{grid-template-columns:1fr}
+.app.m .col{display:none; border-left:none}
+.app.m .col.tab-active{display:flex}
+.app.m header.hud{gap:8px; padding:7px 10px}
+.app.m .brand{letter-spacing:.12em; font-size:11px}
+.app.m .brand small,.app.m .ticker,.app.m .clock,.app.m .machines{display:none}
+.app.m .econ{gap:10px; font-size:10.5px; margin-left:auto}
+.app.m .office{height:72px}
+.app.m .office .tag{display:none}
+.app.m .office .calm{top:4px; right:8px; font-size:9px}
+.app.m .tiles{grid-template-rows:1fr}
+.app.m .tile.slot2{display:none}
+.app.m .tabbar{
+  display:flex; flex:none; border-top:1px solid var(--line); background:var(--bg2);
+  padding-bottom:env(safe-area-inset-bottom);
+}
+.app.m .tabbar button{
+  flex:1; border:none; border-radius:0; padding:9px 0 8px; font-size:10px;
+  letter-spacing:.1em; color:var(--tx-faint); border-top:2px solid transparent;
+}
+.app.m .tabbar button .g{display:block; font-size:14px; margin-bottom:1px}
+.app.m .tabbar button.on{color:var(--tx); border-top-color:var(--tx); background:var(--panel)}
+.app.m .tabbar button .badge{
+  display:inline-block; min-width:14px; background:var(--loud-bg); color:var(--loud-tx);
+  border-radius:7px; font-size:9px; font-weight:700; padding:0 3px; margin-left:3px;
+}
+.app.m .drawer{width:100%; top:auto; height:86%; border-top:1px solid var(--line2);
+  border-left:none; transform:translateY(103%); border-radius:14px 14px 0 0}
+.app.m .drawer.open{transform:none}
+.app.m .dispatchbar{flex-wrap:wrap}
+/* real narrow screens also collapse (labelled in metabar) */
+</style>
+</head>
+<body>
+
+<div class="metabar">
+  <b>CONCEPT MOCKUP</b> mission-control-with-sim-garnish · fake data, real vocabulary
+  <span class="spacer"></span>
+  <button id="btnView">VIEWPORT: DESKTOP ⇄ PHONE</button>
+  <button id="btnGray">GRAYSCALE CHECK</button>
+</div>
+
+<div class="stage" id="stage">
+<div class="app" id="app">
+
+  <!-- ======== HUD ======== -->
+  <header class="hud">
+    <div class="brand">WAR ROOM <small>// MISSION CONTROL</small></div>
+    <div class="machines" id="machines"></div>
+    <div class="grow"></div>
+    <div class="econ">
+      <div><span class="k">CASH</span><span class="v cash" id="cash">$142.50</span></div>
+      <div><span class="k">REPUTATION</span><span class="v rep" id="rep">1,240</span></div>
+      <div><span class="k">BURN TODAY</span><span class="v burn" id="burn">96.4k tok</span></div>
+    </div>
+    <div class="ticker" id="ticker">LEDGER · vault-fixer completed → +$1.20 · efficiency bonus (low burn) +2 REP</div>
+    <div class="clock" id="clock">06:42:07</div>
+    <button id="btnHelp">? HELP</button>
+  </header>
+
+  <!-- ======== MAIN ======== -->
+  <div class="main">
+
+    <!-- TRIAGE -->
+    <section class="col" id="col-triage">
+      <div class="panel-h">TRIAGE QUEUE <span class="n" id="triageCount">3</span><span class="right">age × severity</span></div>
+      <div class="scroll" id="triageList"></div>
+      <div class="shift">
+        <h3>SHIFT — TODAY</h3>
+        <table>
+          <tr><td>crises cleared</td><td id="shClear">4</td></tr>
+          <tr><td>mean time-to-unblock</td><td id="shMttu">2m 12s</td></tr>
+          <tr><td>clears / 10k tok burned</td><td id="shEff">1.8</td></tr>
+          <tr><td>debris acknowledged</td><td id="shDebris">1</td></tr>
+        </table>
+      </div>
+    </section>
+
+    <!-- LIVE TAILS -->
+    <section class="col" id="col-tails">
+      <div class="dispatchbar">
+        <select id="dMachine"><option>MACBOOK</option><option selected>NEXUS</option><option>MINI</option></select>
+        <input id="dPrompt" placeholder="dispatch a task — e.g. 'run vault-health and summarize flags'">
+        <button class="primary" id="btnDispatch">▶ DISPATCH</button>
+      </div>
+      <div class="dispatch-note">est. burn shown before send · efficiency &amp; completion earn — volume never does</div>
+      <div class="tiles">
+        <div class="tile slot1">
+          <div class="tile-h"><span class="g" id="t1glyph">▶</span><span class="nm" id="t1name">—</span>
+            <span class="mc" id="t1mc"></span><span id="t1chip"></span>
+            <span class="live"><span class="livedot"></span>LIVE
+              <button class="danger" data-kill="1">✗ KILL</button></span></div>
+          <div class="tail" id="tail1"></div>
+        </div>
+        <div class="tile slot2">
+          <div class="tile-h"><span class="g" id="t2glyph">▶</span><span class="nm" id="t2name">—</span>
+            <span class="mc" id="t2mc"></span><span id="t2chip"></span>
+            <span class="live"><span class="livedot"></span>LIVE
+              <button class="danger" data-kill="2">✗ KILL</button></span></div>
+          <div class="tail" id="tail2"></div>
+        </div>
+      </div>
+    </section>
+
+    <!-- ROSTER -->
+    <section class="col" id="col-roster">
+      <div class="panel-h">AGENTS <span class="n" id="agentCount">8</span><span class="right">tap → tail</span></div>
+      <div class="scroll" id="roster"></div>
+    </section>
+
+  </div>
+
+  <!-- ======== OFFICE STRIP (ambient) ======== -->
+  <div class="office" id="officeWrap">
+    <canvas id="office"></canvas>
+    <div class="tag">OFFICE — AMBIENT VIEW (CLICK A DESK)</div>
+    <div class="calm" id="calmMeter">ROOM CALM 62%</div>
+  </div>
+
+  <!-- ======== PHONE TAB BAR ======== -->
+  <nav class="tabbar" id="tabbar">
+    <button data-tab="col-triage" class="on"><span class="g">✱</span>TRIAGE<span class="badge" id="tabBadge">3</span></button>
+    <button data-tab="col-tails"><span class="g">≡</span>TAILS</button>
+    <button data-tab="col-roster"><span class="g">▶</span>AGENTS</button>
+  </nav>
+
+  <!-- ======== DRAWER ======== -->
+  <aside class="drawer" id="drawer">
+    <div class="drawer-h">
+      <span id="drGlyph">▶</span><span class="nm" id="drName">agent</span><span id="drChip"></span>
+      <button class="drawer-close" id="drClose">✕ CLOSE</button>
+    </div>
+    <div class="drawer-meta">
+      <div><span class="k">MACHINE</span><span id="drMachine">—</span></div>
+      <div><span class="k">MODEL</span><span id="drModel">—</span></div>
+      <div><span class="k">SESSION</span><span id="drDur">—</span></div>
+      <div><span class="k">TOKENS</span><span id="drTok">—</span></div>
+      <div style="grid-column:1/-1"><span class="k">TASK</span><span id="drTask">—</span></div>
+    </div>
+    <div class="drawer-act">
+      <button class="primary" id="drRespond" style="display:none">⚠ RESPOND / APPROVE</button>
+      <button id="drPin">≡ PIN TO TILE 1</button>
+      <button class="danger" id="drKill">✗ KILL</button>
+    </div>
+    <div class="tail" id="drTail"></div>
+  </aside>
+
+  <!-- ======== HELP ======== -->
+  <div class="overlay" id="helpOv">
+    <div class="helpcard">
+      <h2>? HELP — SIGNAL VOCABULARY</h2>
+      <p>Everything here is real: real Claude Code / Codex sessions, real token spend, real gates.
+         Every signal is SHAPE + WORD first — color only reinforces. This page must pass the grayscale test too.</p>
+      <table>
+        <tr><th>CHIP</th><th>MEANS</th></tr>
+        <tr><td><span class="chip needs-input"><span class="g">⚠</span>NEEDS INPUT</span></td><td>agent blocked on you — loudest signal on screen</td></tr>
+        <tr><td><span class="chip working"><span class="g">▶</span>WORKING</span></td><td>session actively producing output</td></tr>
+        <tr><td><span class="chip done"><span class="g">✓</span>DONE</span></td><td>run completed</td></tr>
+        <tr><td><span class="chip failed"><span class="g">✗</span>FAILED</span></td><td>run errored — leaves ✗ DEBRIS until acknowledged</td></tr>
+        <tr><td><span class="chip stopped"><span class="g">■</span>STOPPED</span></td><td>killed or exited</td></tr>
+        <tr><td><span class="chip idle"><span class="g">○</span>IDLE</span></td><td>session open, nothing running</td></tr>
+      </table>
+      <table>
+        <tr><th>CRISIS (ages in real time)</th><th>MEANS</th></tr>
+        <tr><td><span class="stagechip smoke"><span class="g">≋</span>SMOKE</span></td><td>blocked &lt; 90s — new, may self-resolve</td></tr>
+        <tr><td><span class="stagechip fire"><span class="g">▲</span>FIRE</span></td><td>blocked 90s–4m — needs you soon</td></tr>
+        <tr><td><span class="stagechip alarm"><span class="g">✱</span>ALARM</span></td><td>blocked &gt; 4m — top of the queue, inverted</td></tr>
+        <tr><td><span class="stagechip debris"><span class="g">✗</span>DEBRIS</span></td><td>failed run awaiting acknowledgment</td></tr>
+      </table>
+      <p>Economy: CASH and REPUTATION are earned by completions and fast unblocks (low burn per completion),
+         never by volume. Nothing on this dashboard is ever locked behind progression.</p>
+      <p style="text-align:right"><button id="helpClose" class="primary">✓ GOT IT</button></p>
+    </div>
+  </div>
+
+  <div class="toast" id="toast"></div>
+</div>
+</div>
+
+<script>
+/* =====================================================================
+   FAKE DATA PLANE — mirrors the real vocabulary:
+   agent states (needs-input/working/done/failed/stopped/idle),
+   crises aging smoke→fire→alarm (90s / 240s, per office/crisis.ts),
+   debris, economy (Cash/Reputation/ledger), machines MACBOOK/NEXUS/MINI.
+   ===================================================================== */
+const now = Date.now();
+const CHIPS = {
+  'needs-input':{g:'⚠',l:'NEEDS INPUT'}, working:{g:'▶',l:'WORKING'},
+  done:{g:'✓',l:'DONE'}, failed:{g:'✗',l:'FAILED'},
+  stopped:{g:'■',l:'STOPPED'}, idle:{g:'○',l:'IDLE'},
+};
+const STAGES = {smoke:{g:'≋',l:'SMOKE'}, fire:{g:'▲',l:'FIRE'}, alarm:{g:'✱',l:'ALARM'}};
+const FIRE_AT=90000, ALARM_AT=240000;
+
+let agents = [
+  {id:'a1',name:'twe-hardening',machine:'MACBOOK',state:'working',model:'fable-5',task:'PR #78 — gallery lazy-load + runtime verify',tok:41200,start:now-1124000},
+  {id:'a2',name:'war-room-v3',machine:'MACBOOK',state:'needs-input',model:'fable-5',task:'Phase 2 — outputChunk streaming handlers',tok:63800,start:now-2410000,blockedAt:now-212000,waiting:'permission — Bash(git push origin claude/v3-stream)'},
+  {id:'a3',name:'vault-fixer',machine:'MACBOOK',state:'done',model:'fable-5',task:'daily mechanical fixes — 6 files, PR ready',tok:8900,start:now-3600000},
+  {id:'a4',name:'amc-sourcing',machine:'NEXUS',state:'working',model:'codex [CODEX]',task:'batch 2026-07-10-01 — 33 rows to merge-ready',tok:22100,start:now-820000},
+  {id:'a5',name:'supabase-migrate',machine:'NEXUS',state:'needs-input',model:'fable-5',task:'RLS policy diff on turffinder events',tok:12400,start:now-300000,blockedAt:now-41000,waiting:'plan approval — apply_migration (2 stmts)'},
+  {id:'a6',name:'backup-verify',machine:'NEXUS',state:'failed',model:'fable-5',task:'B2 offsite dry-run',tok:4100,start:now-5400000,failedAt:now-660000,debris:true,err:'rclone exit 1 — remote not configured'},
+  {id:'a7',name:'nexus-watchdog',machine:'NEXUS',state:'idle',model:'fable-5',task:'standing order — RAID/docker/backup sweep',tok:600,start:now-7200000},
+  {id:'a8',name:'dispatch-teardown',machine:'MINI',state:'stopped',model:'fable-5',task:'ntfy-kill.sh confirmation pass',tok:2300,start:now-9000000},
+];
+let econ = {cash:142.50, rep:1240, burn:96400, cleared:4, mttuMs:132000, debrisAck:1};
+let sel=null, slot1='a2', slot2='a4', phone=false, tab='col-triage', pendingKill=null;
+
+/* ---- tail line generators ---- */
+const POOL = {
+  a1:[["t-read","⋮ Read src/app/gallery/page.tsx (214 lines)"],["t-tool","⋮ Bash npm run build — compiling…"],["t-ok","✓ Edit gallery/GalleryGrid.tsx (+22 −9) — IntersectionObserver lazy mount"],["t-think","… verifying: next start + curl /gallery before merge (runtime-verify rule)"],["t-tool","⋮ Bash curl -s localhost:3000/gallery → 200"],["t-ok","✓ 27 photos lazy-load below the fold; LCP candidate unchanged"]],
+  a2:[["t-read","⋮ Read core/asyncapi.yaml — outputChunk schema"],["t-ok","✓ Edit server/src/tailRegistry.ts (+64) — per-session ring buffer, 200 lines"],["t-tool","⋮ Bash npm test -- --run tailRegistry · 14 passed"],["t-think","… backpressure: coalesce chunks >20/s into 250ms frames"],["t-meta","≡ tailSubscribe(sessionId) wired to poller lifecycle"]],
+  a4:[["t-tool","⋮ [CODEX] fetch listings page 4/9 — 12 rows parsed"],["t-ok","✓ normalized 33 rows → batches/2026-07-10-01.json"],["t-think","… dedupe pass: 2 candidates match register slugs"],["t-tool","⋮ Bash node scripts/validate.js · exit 0"]],
+  a5:[["t-read","⋮ Read supabase/migrations/0041_events_rls.sql"],["t-think","… diffing live RLS state vs migration (never trust docs)"],["t-meta","≡ plan: 2 statements — CREATE POLICY select_own, REVOKE anon INSERT"]],
+  generic:[["t-tool","⋮ Bash git status --porcelain · clean"],["t-read","⋮ Grep 'outputChunk' — 9 hits across 4 files"],["t-ok","✓ checkpoint committed"],["t-think","… re-deriving claim from primary source"]],
+};
+let buffers={}; agents.forEach(a=>{buffers[a.id]=[];
+  const seed=(POOL[a.id]||POOL.generic);
+  for(let i=0;i<9;i++)buffers[a.id].push(seed[i%seed.length]);
+  if(a.state==='needs-input') buffers[a.id].push(["t-wait","⚠ WAITING: "+a.waiting]);
+  if(a.state==='failed') buffers[a.id].push(["t-err","✗ FAILED: "+a.err]);
+  if(a.state==='done') buffers[a.id].push(["t-ok","✓ DONE — run complete, 0 leftovers"]);
+  if(a.state==='stopped') buffers[a.id].push(["t-err","■ STOPPED by operator 06:12:40"]);
+});
+
+/* ---- helpers ---- */
+const $=id=>document.getElementById(id);
+const esc=s=>s.replace(/&/g,'&amp;').replace(/</g,'&lt;');
+function fmtAge(ms){const s=Math.floor(ms/1000);return Math.floor(s/60)+'m '+String(s%60).padStart(2,'0')+'s';}
+function fmtDur(ms){const m=Math.floor(ms/60000);return Math.floor(m/60)+'h '+String(m%60).padStart(2,'0')+'m';}
+function chipHtml(state){const c=CHIPS[state];return `<span class="chip ${state}"><span class="g">${c.g}</span>${c.l}</span>`;}
+function stageOf(a){const age=Date.now()-a.blockedAt;return age>=ALARM_AT?'alarm':age>=FIRE_AT?'fire':'smoke';}
+function toast(msg){const t=$('toast');t.textContent=msg;t.classList.add('show');clearTimeout(t._h);t._h=setTimeout(()=>t.classList.remove('show'),2600);}
+function ticker(msg){$('ticker').textContent='LEDGER · '+msg;}
+
+/* ---- crises (derived) ---- */
+function crises(){
+  const list=[];
+  agents.filter(a=>a.state==='needs-input').forEach(a=>{
+    const age=Date.now()-a.blockedAt, st=stageOf(a);
+    list.push({kind:'crisis',a,age,st,score:(st==='alarm'?3:st==='fire'?2:1)*1e12+age});
+  });
+  agents.filter(a=>a.debris).forEach(a=>{
+    list.push({kind:'debris',a,age:Date.now()-a.failedAt,st:'debris',score:0.5e12+(Date.now()-a.failedAt)});
+  });
+  return list.sort((x,y)=>y.score-x.score);
+}
+
+/* ---- render: triage ---- */
+function renderTriage(){
+  const list=crises(), el=$('triageList');
+  $('triageCount').textContent=list.length; $('tabBadge').textContent=list.length;
+  $('tabBadge').style.display=list.length?'':'none';
+  if(!list.length){el.innerHTML='<div class="qempty"><span class="big">✓</span>ALL CLEAR — the room is calm</div>';return;}
+  el.innerHTML=list.map(c=>{
+    if(c.kind==='debris') return `
+      <div class="crisis">
+        <div class="crisis-top"><span class="stagechip debris"><span class="g">✗</span>DEBRIS</span>
+          <span class="crisis-age">${fmtAge(c.age)}</span></div>
+        <div class="crisis-body"><div class="who">${c.a.name} <small>· ${c.a.machine}</small></div>
+          <div class="wait">${esc(c.a.err)}</div></div>
+        <div class="crisis-act"><button data-open="${c.a.id}">≡ OPEN TAIL</button>
+          <button data-ack="${c.a.id}">✓ ACKNOWLEDGE</button></div>
+      </div>`;
+    const s=STAGES[c.st], loud=c.st==='alarm';
+    return `
+      <div class="crisis ${loud?'loud':''}">
+        <div class="crisis-top"><span class="stagechip ${c.st}"><span class="g">${s.g}</span>${s.l}</span>
+          <span class="crisis-age">⚠ ${fmtAge(c.age)}</span></div>
+        <div class="crisis-body"><div class="who">${c.a.name} <small>· ${c.a.machine}</small></div>
+          <div class="wait">waiting: ${esc(c.a.waiting)}</div></div>
+        <div class="crisis-act"><button class="primary" data-respond="${c.a.id}">⚠ RESPOND</button>
+          <button data-open="${c.a.id}">≡ OPEN TAIL</button></div>
+      </div>`;
+  }).join('');
+}
+
+/* ---- render: roster ---- */
+function renderRoster(){
+  const el=$('roster'); $('agentCount').textContent=agents.length;
+  const byM={};agents.forEach(a=>(byM[a.machine]=byM[a.machine]||[]).push(a));
+  el.innerHTML=Object.keys(byM).map(m=>`
+    <div class="mgroup"><div class="mgroup-h"><span>■ ${m}</span><span>${byM[m].length}</span></div>
+    ${byM[m].map(a=>`
+      <div class="arow ${sel===a.id?'sel':''}" data-agent="${a.id}">
+        <span class="nm">${a.name}</span>${chipHtml(a.state)}
+        <span class="task">${esc(a.task)}</span>
+        <span class="meta">${(a.tok/1000).toFixed(1)}k tok · ${fmtDur(Date.now()-a.start)} · ${a.model}</span>
+      </div>`).join('')}</div>`).join('');
+  const live=agents.filter(a=>a.state==='working').length;
+  const blocked=agents.filter(a=>a.state==='needs-input').length;
+  $('machines').innerHTML=Object.keys(byM).map(m=>{
+    const b=byM[m].filter(a=>a.state==='needs-input').length;
+    return `<span class="machine"><b>${m}</b> ${byM[m].length}${b?' · ⚠'+b:''}</span>`}).join('');
+}
+
+/* ---- tails ---- */
+function tailHtml(id){return buffers[id].map(l=>`<span class="ln ${l[0]}">${esc(l[1])}</span>`).join('');}
+function renderTile(n,id){
+  const a=agents.find(x=>x.id===id); if(!a) return;
+  $('t'+n+'name').textContent=a.name; $('t'+n+'mc').textContent='· '+a.machine;
+  $('t'+n+'glyph').textContent=CHIPS[a.state].g; $('t'+n+'chip').innerHTML=chipHtml(a.state);
+  const el=$('tail'+n), stick=el.scrollTop+el.clientHeight>=el.scrollHeight-24;
+  el.innerHTML=tailHtml(id); if(stick) el.scrollTop=el.scrollHeight;
+}
+function renderTails(){renderTile(1,slot1);renderTile(2,slot2);
+  if(sel){const a=agents.find(x=>x.id===sel);
+    $('drTail').innerHTML=tailHtml(sel);$('drChip').innerHTML=chipHtml(a.state);
+    $('drGlyph').textContent=CHIPS[a.state].g;
+    $('drRespond').style.display=a.state==='needs-input'?'':'none';}}
+
+/* ---- drawer ---- */
+function openDrawer(id){
+  sel=id; const a=agents.find(x=>x.id===id);
+  $('drName').textContent=a.name; $('drMachine').textContent=a.machine;
+  $('drModel').textContent=a.model; $('drTok').textContent=(a.tok/1000).toFixed(1)+'k';
+  $('drDur').textContent=fmtDur(Date.now()-a.start); $('drTask').textContent=a.task;
+  $('drKill').textContent='✗ KILL'; pendingKill=null;
+  $('drawer').classList.add('open'); renderRoster(); renderTails();
+  const t=$('drTail'); t.scrollTop=t.scrollHeight;
+}
+function closeDrawer(){sel=null;$('drawer').classList.remove('open');renderRoster();}
+
+/* ---- actions ---- */
+function respond(id){
+  const a=agents.find(x=>x.id===id); if(!a||a.state!=='needs-input')return;
+  const held=Date.now()-a.blockedAt;
+  a.state='working'; delete a.blockedAt;
+  buffers[id].push(["t-ok","✓ operator approved — resuming ("+fmtAge(held)+" blocked)"]);
+  econ.rep+=5; econ.cleared++; econ.mttuMs=Math.round((econ.mttuMs*(econ.cleared-1)+held)/econ.cleared);
+  ticker(a.name+' unblocked in '+fmtAge(held)+' → +5 REP');
+  toast('✓ CALMED — '+a.name+' resumed'); calmPulse(a.id);
+  renderAll();
+}
+function ack(id){
+  const a=agents.find(x=>x.id===id); if(!a)return;
+  a.debris=false; econ.debrisAck++;
+  buffers[id].push(["t-meta","≡ debris acknowledged by operator"]);
+  ticker('debris acknowledged — '+a.name); renderAll();
+}
+function kill(id,btn){
+  const a=agents.find(x=>x.id===id); if(!a)return;
+  if(pendingKill!==id){pendingKill=id; if(btn)btn.textContent='✗ CONFIRM KILL?'; return;}
+  pendingKill=null; a.state='stopped'; delete a.blockedAt; a.debris=false;
+  buffers[id].push(["t-err","■ session killed by operator"]);
+  ticker(a.name+' killed — '+(a.tok/1000).toFixed(1)+'k tok final');
+  toast('■ STOPPED — '+a.name); if(btn)btn.textContent='✗ KILL';
+  renderAll();
+}
+let dseq=1;
+function dispatch(){
+  const p=$('dPrompt').value.trim(); if(!p){$('dPrompt').focus();return;}
+  const m=$('dMachine').value, id='d'+(dseq++);
+  agents.push({id,name:'dispatch-'+String(dseq).padStart(2,'0'),machine:m,state:'working',
+    model:'fable-5',task:p,tok:0,start:Date.now()});
+  buffers[id]=[["t-meta","≡ dispatched by operator → "+m],["t-meta","≡ est. burn ~12k tok (≈$0.19) — scored on completion, not volume"],["t-tool","⋮ session starting…"]];
+  $('dPrompt').value=''; slot2=id; ticker('dispatched to '+m+' — est. ~12k tok');
+  toast('▶ DISPATCHED → '+m); renderAll();
+}
+
+/* ---- streaming loop (fake outputChunk) ---- */
+setInterval(()=>{
+  agents.filter(a=>a.state==='working').forEach(a=>{
+    if(Math.random()<0.55){
+      const pool=POOL[a.id]||POOL.generic;
+      buffers[a.id].push(pool[Math.floor(Math.random()*pool.length)]);
+      if(buffers[a.id].length>120)buffers[a.id].shift();
+      a.tok+=Math.floor(200+Math.random()*900); econ.burn+=300;
+    }});
+  renderTails();
+},900);
+
+/* ---- clocks / aging / econ ---- */
+setInterval(()=>{
+  $('clock').textContent=new Date().toLocaleTimeString('en-GB');
+  $('cash').textContent='$'+econ.cash.toFixed(2);
+  $('rep').textContent=econ.rep.toLocaleString();
+  $('burn').textContent=(econ.burn/1000).toFixed(1)+'k tok';
+  $('shClear').textContent=econ.cleared; $('shMttu').textContent=fmtAge(econ.mttuMs);
+  $('shDebris').textContent=econ.debrisAck;
+  $('shEff').textContent=(econ.cleared/(econ.burn/10000)).toFixed(1);
+  renderTriage(); // live re-age: SMOKE→FIRE→ALARM escalates while you watch
+  const total=agents.length, calm=agents.filter(a=>a.state!=='needs-input'&&!a.debris).length;
+  $('calmMeter').textContent='ROOM CALM '+Math.round(100*calm/total)+'%';
+},1000);
+
+function renderAll(){renderTriage();renderRoster();renderTails();}
+
+/* =====================================================================
+   OFFICE STRIP — ambient sim garnish. Canvas 2D, procedural (no assets).
+   Forensics compliance, demonstrated in code:
+   - resolution = min(devicePixelRatio, 2)  ← capped, never raw DPR
+   - layout/zoom = fit-to-view from CSS size ← never derived from DPR
+   - zero asset push; paints on first frame; skeleton state impossible
+     to confuse with broken (labels always draw)
+   ===================================================================== */
+const cv=$('office'), ctx=cv.getContext('2d');
+let deskRects=[], pulses=[];
+function calmPulse(id){const d=deskRects.find(r=>r.id===id);if(d)pulses.push({x:d.x+d.w/2,y:d.y,t:Date.now()});}
+function sizeCanvas(){
+  const res=Math.min(window.devicePixelRatio||1,2);       // CAP AT 2 (forensics rule 2)
+  const w=cv.clientWidth,h=cv.clientHeight;               // layout from CSS size (rule 1)
+  cv.width=Math.round(w*res); cv.height=Math.round(h*res);
+  ctx.setTransform(res,0,0,res,0,0);
+}
+function drawOffice(){
+  const w=cv.clientWidth,h=cv.clientHeight,t=Date.now();
+  ctx.clearRect(0,0,w,h);
+  const byM={};agents.forEach(a=>(byM[a.machine]=byM[a.machine]||[]).push(a));
+  const zones=Object.keys(byM), zw=w/zones.length;
+  deskRects=[];
+  const small=h<80; // phone ribbon: same scene, tighter framing
+  zones.forEach((m,zi)=>{
+    const zx=zi*zw;
+    // zone wall
+    ctx.strokeStyle='#232c38';ctx.lineWidth=1;
+    if(zi>0){ctx.beginPath();ctx.moveTo(zx,8);ctx.lineTo(zx,h-6);ctx.stroke();}
+    ctx.fillStyle='#54606f';ctx.font='9px '+getComputedStyle(document.body).fontFamily;
+    ctx.textAlign='left';ctx.fillText('■ '+m,zx+10,h-8);
+    // floor dots
+    ctx.fillStyle='#161d26';
+    for(let fx=zx+8;fx<zx+zw-8;fx+=14)for(let fy=small?14:34;fy<h-14;fy+=14)ctx.fillRect(fx,fy,1.5,1.5);
+    // desks
+    const list=byM[m], dw=Math.min(74,(zw-24)/list.length-8);
+    list.forEach((a,i)=>{
+      const dx=zx+14+i*((zw-28)/list.length), dy=small?h*0.62:h*0.52, dh=small?9:16;
+      deskRects.push({id:a.id,x:dx,y:dy-26,w:dw,h:dh+30});
+      // desk
+      ctx.fillStyle='#1b2430';ctx.strokeStyle='#2e3947';
+      ctx.beginPath();ctx.roundRect(dx,dy,dw,dh,2);ctx.fill();ctx.stroke();
+      // worker
+      const busy=a.state==='working', bob=busy?Math.sin(t/260+i)*1.4:0;
+      ctx.fillStyle=busy?'#5cc3d9':(a.state==='needs-input'?'#e9eef4':'#54606f');
+      ctx.fillRect(dx+dw/2-3,dy-9+bob,6,7);                       // body
+      ctx.beginPath();ctx.arc(dx+dw/2,dy-12+bob,3,0,7);ctx.fill();// head
+      // state glyph + word above desk — SHAPE+WORD, never color alone.
+      // Phone ribbon: only attention states get flags (calm chips live in the
+      // panels one tap away); desktop labels every desk.
+      const c=CHIPS[a.state];let glyph=c.g,label=c.l,loud=false;
+      if(a.state==='needs-input'){const st=stageOf(a);glyph=STAGES[st].g;label=STAGES[st].l;loud=st==='alarm';
+        if(st!=='smoke'&&Math.floor(t/380)%2===0)glyph=st==='alarm'?'✱':'▲';} // flicker
+      if(a.debris){glyph='✗';label='DEBRIS';}
+      const attention=a.state==='needs-input'||a.debris||a.state==='failed';
+      if(small&&!attention){if(sel===a.id){ctx.strokeStyle='#c7d3e0';ctx.strokeRect(dx-4,dy-20,dw+8,dh+24);}return;}
+      ctx.textAlign='center';
+      const ly=dy-21-((small&&i%2)?10:0); // stagger phone-ribbon flags so neighbors don't collide
+      if(loud){ctx.fillStyle='#e9eef4';const tw=ctx.measureText(glyph+' '+label).width;
+        ctx.fillRect(dx+dw/2-tw/2-3,ly-9,tw+6,11);ctx.fillStyle='#0b0e12';}
+      else ctx.fillStyle=a.state==='needs-input'||a.debris?'#e2a33b':'#7c8a9b';
+      ctx.font=(loud?'bold ':'')+'8.5px '+getComputedStyle(document.body).fontFamily;
+      ctx.fillText(glyph+' '+label,dx+dw/2,ly);
+      if(sel===a.id){ctx.strokeStyle='#c7d3e0';ctx.strokeRect(dx-4,dy-34,dw+8,dh+40);}
+    });
+  });
+  // calm pulses (feedback loop: fixing a thing visibly calms the room)
+  pulses=pulses.filter(p=>t-p.t<1400);
+  pulses.forEach(p=>{const k=(t-p.t)/1400;
+    ctx.strokeStyle='rgba(233,238,244,'+(1-k)+')';ctx.lineWidth=1.5;
+    ctx.beginPath();ctx.arc(p.x,p.y,6+k*34,0,7);ctx.stroke();
+    ctx.fillStyle='rgba(233,238,244,'+(1-k)+')';ctx.textAlign='center';
+    ctx.font='bold 10px '+getComputedStyle(document.body).fontFamily;
+    ctx.fillText('✓',p.x,p.y-k*18);});
+  requestAnimationFrame(drawOffice);
+}
+cv.addEventListener('click',e=>{
+  const r=cv.getBoundingClientRect(),x=e.clientX-r.left,y=e.clientY-r.top;
+  const hit=deskRects.find(d=>x>=d.x-4&&x<=d.x+d.w+8&&y>=d.y-8&&y<=d.y+d.h+8);
+  if(hit)openDrawer(hit.id);
+});
+
+/* ---- events ---- */
+document.addEventListener('click',e=>{
+  const b=e.target.closest('button, .arow'); if(!b)return;
+  if(b.dataset.agent)openDrawer(b.dataset.agent);
+  if(b.dataset.respond)respond(b.dataset.respond);
+  if(b.dataset.ack)ack(b.dataset.ack);
+  if(b.dataset.open)openDrawer(b.dataset.open);
+  if(b.dataset.kill)kill(b.dataset.kill==='1'?slot1:slot2,b);
+  if(b.dataset.tab){tab=b.dataset.tab;
+    document.querySelectorAll('.tabbar button').forEach(x=>x.classList.toggle('on',x===b));
+    document.querySelectorAll('.main .col').forEach(c=>c.classList.toggle('tab-active',c.id===tab));}
+});
+$('drClose').onclick=closeDrawer;
+$('drKill').onclick=e=>{if(sel)kill(sel,e.target);};
+$('drRespond').onclick=()=>{if(sel)respond(sel);};
+$('drPin').onclick=()=>{if(sel){slot1=sel;renderTails();toast('≡ PINNED — tile 1');}};
+$('btnDispatch').onclick=dispatch;
+$('dPrompt').addEventListener('keydown',e=>{if(e.key==='Enter')dispatch();});
+$('btnHelp').onclick=()=>$('helpOv').classList.add('open');
+$('helpClose').onclick=()=>$('helpOv').classList.remove('open');
+$('btnGray').onclick=()=>document.body.classList.toggle('gray');
+
+/* ---- viewport toggle + real-narrow-screen fallback ---- */
+const mq=matchMedia('(max-width:760px)');
+function applyMode(){
+  const m=phone||mq.matches;
+  $('app').classList.toggle('m',m);
+  $('stage').classList.toggle('phone-frame',phone&&!mq.matches);
+  if(m)document.querySelectorAll('.main .col').forEach(c=>c.classList.toggle('tab-active',c.id===tab));
+  else document.querySelectorAll('.main .col').forEach(c=>c.classList.remove('tab-active'));
+  requestAnimationFrame(sizeCanvas);
+}
+$('btnView').onclick=()=>{phone=!phone;applyMode();};
+mq.addEventListener('change',applyMode);
+window.addEventListener('resize',()=>{sizeCanvas();});
+
+/* ---- boot ---- */
+document.querySelectorAll('.main .col')[0].classList.add('tab-active');
+renderAll(); applyMode(); sizeCanvas(); drawOffice();
+$('tail1').scrollTop=1e6; $('tail2').scrollTop=1e6;
+</script>
+</body>
+</html>
