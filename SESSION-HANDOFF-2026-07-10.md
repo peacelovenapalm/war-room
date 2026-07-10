@@ -80,30 +80,42 @@ instruction; no code, no deploys, no pushes.
 3. At Phase-4: test the new face on your actual iPhone — that message
    is what settles the sprint's headline claim.
 
-## 6. Kickoff prompt for the execution session
+## 6. Kickoff for the execution session
 
-Launch from a session rooted at `/Users/greg/code/war-room`, via the
-**`/loop` skill in self-paced (dynamic) mode — no interval** — so each
-iteration resumes the run losslessly and the loop ends itself on
-RUN COMPLETE. (No `/goal` command exists on this machine — `/loop` is
-the driver, same as the v1.1 overnight run.) The prompt below is
-iteration-neutral: safe to fire on every iteration, first or fiftieth.
+Launch from a session rooted at `/Users/greg/code/war-room` with the
+built-in **`/goal`** command (v2.1.139+; the CLI here is 2.1.206,
+verified) — it
+sets a session-scoped Stop-hook evaluator that keeps the session working
+turn after turn until the condition holds, then auto-clears. Setting it
+starts work immediately; the condition below doubles as the directive
+and is safe on any turn, first or fiftieth. If the session dies while
+you're away, `claude --continue` restores the goal; for fully unattended
+multi-day spans prefer the `/loop` fallback (same text, prefixed `/loop`
+instead of `/goal` — its scheduled wakeups survive a dead session).
 
 ```
-/loop ultracode. Read /Users/greg/code/war-room/SESSION-HANDOFF-2026-07-10.md
-and /Users/greg/code/war-room/.planning/v2/KICKOFF-v2.0.md in full, then
-execute KICKOFF-v2.0 under its loop protocol. Claim .planning/v2/LOOP-LOCK
-first — if a live pid holds it, exit without touching anything. If
-.planning/v2/STATE-v2.0.md does not exist you are the first iteration:
+/goal ultracode. Execute /Users/greg/code/war-room/.planning/v2/KICKOFF-v2.0.md
+end-to-end. This goal is met when ONE of these two end states is shown in
+this conversation: (A) .planning/v2/STATE-v2.0.md reads "status: RUN
+COMPLETE" — which the run protocol permits only after the session handoff
+is written, the completion Bark push is sent and logged, every item is
+settled (done or review-on-return), and the full gate (check-types, lint,
+all suites, build) has been run green as the final act with its output
+shown here; or (B) every item executable without Greg's live input is
+settled, the run is blocked on a Greg-only gate (Phase-1 design pick or
+Phase-4 real-device acceptance), and STATE-v2.0.md's log records exactly
+what awaits him — shown here. Working rules: read SESSION-HANDOFF-2026-07-10.md
+and KICKOFF-v2.0.md in full first. Claim .planning/v2/LOOP-LOCK (exit
+untouched if a live pid holds it). If STATE-v2.0.md does not exist,
 create it from the KICKOFF template, commit it, and run the launch
-preflight while Greg is present. Otherwise resume at the first item that
-is neither done nor review-on-return; if status reads RUN COMPLETE,
-verify the handoff and completion push exist, then end the loop. Phase 0
-in order — 0.1 backup push FIRST, then the state-migrating deploy +
-token rotation (0.2) while Greg is still present. Re-derive the baseline
-yourself; suite counts in the handoff are reported, not verified. The
-Phase-1 design gate and Phase-4 real-device acceptance require Greg's
-live messages — never manufacture or assume them. One agent per
-checkout. Self-pace off ~/.pixel-agents/rate-limit-snapshot.json. Bark
-push on completion.
+preflight while Greg is present; otherwise resume at the first unsettled
+item. Phase 0 in order — 0.1 backup push FIRST, then the state-migrating
+deploy + token rotation (0.2) while Greg is present. Re-derive the
+baseline yourself; suite counts in the handoff are reported, not
+verified. Never manufacture Greg's gate approvals. One agent per
+checkout. Show every gate result in conversation output (the goal
+evaluator only sees the transcript). If ~/.pixel-agents/rate-limit-snapshot.json
+shows the 5h window ≥90% used: finish the current atomic step, commit
+STATE, and state the pause in output — do not burn the cap. Or stop
+after 300 turns.
 ```
