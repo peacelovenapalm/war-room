@@ -82,16 +82,28 @@ instruction; no code, no deploys, no pushes.
 
 ## 6. Kickoff prompt for the execution session
 
-```
-ultracode. Read /Users/greg/code/war-room/SESSION-HANDOFF-2026-07-10.md
-and .planning/v2/KICKOFF-v2.0.md in full, then execute KICKOFF-v2.0.
+Launch from a session rooted at `/Users/greg/code/war-room`, via the
+**`/loop` skill in self-paced (dynamic) mode — no interval** — so each
+iteration resumes the run losslessly and the loop ends itself on
+RUN COMPLETE. (No `/goal` command exists on this machine — `/loop` is
+the driver, same as the v1.1 overnight run.) The prompt below is
+iteration-neutral: safe to fire on every iteration, first or fiftieth.
 
-You are the first iteration: create .planning/v2/STATE-v2.0.md from the
-KICKOFF's loop-protocol template and claim LOOP-LOCK before touching
-anything else. Then Phase 0 in order — 0.1 backup push FIRST, then the
-state-migrating deploy + token rotation (0.2) while Greg is still
-present. Re-derive the baseline yourself; suite counts in the handoff
-are reported, not verified. The Phase-1 design gate and Phase-4
-real-device acceptance require Greg's live messages — never manufacture
-or assume them. One agent per checkout. Bark push on completion.
+```
+/loop ultracode. Read /Users/greg/code/war-room/SESSION-HANDOFF-2026-07-10.md
+and /Users/greg/code/war-room/.planning/v2/KICKOFF-v2.0.md in full, then
+execute KICKOFF-v2.0 under its loop protocol. Claim .planning/v2/LOOP-LOCK
+first — if a live pid holds it, exit without touching anything. If
+.planning/v2/STATE-v2.0.md does not exist you are the first iteration:
+create it from the KICKOFF template, commit it, and run the launch
+preflight while Greg is present. Otherwise resume at the first item that
+is neither done nor review-on-return; if status reads RUN COMPLETE,
+verify the handoff and completion push exist, then end the loop. Phase 0
+in order — 0.1 backup push FIRST, then the state-migrating deploy +
+token rotation (0.2) while Greg is still present. Re-derive the baseline
+yourself; suite counts in the handoff are reported, not verified. The
+Phase-1 design gate and Phase-4 real-device acceptance require Greg's
+live messages — never manufacture or assume them. One agent per
+checkout. Self-pace off ~/.pixel-agents/rate-limit-snapshot.json. Bark
+push on completion.
 ```

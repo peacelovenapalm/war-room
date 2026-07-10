@@ -342,7 +342,14 @@ subscriber never blocks award paths (assert via test).
 
 ## Loop protocol (the run MUST be resumable)
 
-Identical to KICKOFF-v1.1's protocol with the ledger renamed:
+**Driver:** the `/loop` skill in self-paced dynamic mode (no interval),
+launched with the iteration-neutral prompt in
+`SESSION-HANDOFF-2026-07-10.md` §6 — v1.1 precedent; no `/goal` command
+exists on this machine. Every iteration must be able to die at any point
+(rate limit, crash, context exhaustion) and the next must resume
+losslessly from the ledger. RUN COMPLETE ends the loop.
+
+Otherwise identical to KICKOFF-v1.1's protocol with the ledger renamed:
 `.planning/v2/STATE-v2.0.md` is the single source of run truth (same
 template: status, Items table with settled-state rules, gates, Log).
 LOOP-LOCK claim/takeover/delete rules unchanged. Commit STATE updates
