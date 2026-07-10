@@ -72,6 +72,26 @@ describe('PixelAgentsServer', () => {
     expect(body.pid).toBe(process.pid);
   });
 
+  // 2b. Version endpoint returns the baked-in deploy identity
+  it('version endpoint returns sha and builtAt from env, with unknown fallback', async () => {
+    vi.stubEnv('GIT_SHA', 'abc1234def');
+    vi.stubEnv('BUILT_AT', '2026-07-10T00:00:00Z');
+    try {
+      const config = await server.start();
+      const res = await fetch(`http://127.0.0.1:${config.port}/api/version`);
+      expect(res.status).toBe(200);
+      expect(await res.json()).toEqual({ sha: 'abc1234def', builtAt: '2026-07-10T00:00:00Z' });
+    } finally {
+      vi.unstubAllEnvs();
+    }
+    // Fallback path: without the env vars a fresh server reports 'unknown'.
+    server.stop();
+    server = new PixelAgentsServer();
+    const config = await server.start();
+    const res = await fetch(`http://127.0.0.1:${config.port}/api/version`);
+    expect(await res.json()).toEqual({ sha: 'unknown', builtAt: 'unknown' });
+  });
+
   // 3. Hook endpoint requires auth
   it('hook endpoint returns 401 without auth', async () => {
     const config = await server.start();

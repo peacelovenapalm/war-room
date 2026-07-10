@@ -235,6 +235,13 @@ function registerHealthRoute(app: FastifyInstance): void {
     uptime: Math.floor((Date.now() - startTime) / 1000),
     pid: process.pid,
   }));
+  // GET /api/version — deploy identity, unauthenticated like /api/health.
+  // GIT_SHA/BUILT_AT are baked in by the deploy runbook as Docker build args
+  // (the rsync'd build context has no .git); 'unknown' outside the container.
+  app.get('/api/version', async () => ({
+    sha: process.env.GIT_SHA || 'unknown',
+    builtAt: process.env.BUILT_AT || 'unknown',
+  }));
 }
 
 // ── Briefing (post-v0) ─────────────────────────────────────────
