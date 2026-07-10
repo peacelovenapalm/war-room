@@ -43,6 +43,7 @@ export function connectToServer(options: ConnectOptions): ServerConnection {
     socket = new WebSocket(url);
 
     socket.onopen = () => {
+      if (disposed) return; // dispose() may race a still-CONNECTING socket's late 'open'
       reconnectAttempts = 0;
       options.onStatus('live');
       // The server replies to webviewReady with the full current state
