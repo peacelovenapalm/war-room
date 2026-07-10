@@ -5,7 +5,9 @@ import {
   appendChunk,
   dropStream,
   EMPTY_TAILS,
+  enforceStreamCap,
   MAX_TAIL_ENTRIES,
+  MAX_TAIL_STREAMS,
   pausedCount,
   setPaused,
   tailKey,
@@ -103,5 +105,52 @@ describe('dropStream', () => {
     const dropped = dropStream(tails, KEY);
     expect(dropped.has(KEY)).toBe(false);
     expect(dropStream(dropped, KEY)).toBe(dropped);
+  });
+});
+
+describe('enforceStreamCap (LRU backstop across streams)', () => {
+  // Regression (panel finding, tailStore.ts:103): MAX_TAIL_ENTRIES bounds
+  // each stream, but the map of STREAMS grew with every distinct agent id
+  // ever seen in the session. The cap evicts the least-recently-touched
+  // unprotected stream; live subscriptions (protected keys) never evict.
+  function seed(count: number): TailMap {
+    let tails: TailMap = EMPTY_TAILS;
+    for (let i = 0; i < count; i++) {
+      tails = appendChunk(tails, chunk(0, 'x\n', { id: String(i) }), i /* touchedAt */);
+    }
+    return tails;
+  }
+
+  it('evicts the least-recently-touched streams over the cap', () => {
+    const tails = seed(6);
+    const capped = enforceStreamCap(tails, 4, new Set());
+    expect(capped.size).toBe(4);
+    expect(capped.has(tailKey('agent', '0'))).toBe(false);
+    expect(capped.has(tailKey('agent', '1'))).toBe(false);
+    expect(capped.has(tailKey('agent', '5'))).toBe(true);
+  });
+
+  it('a re-touched old stream survives over a stale newer one', () => {
+    let tails = seed(4);
+    tails = appendChunk(tails, chunk(1, 'y\n', { id: '0' }), 100);
+    const capped = enforceStreamCap(tails, 3, new Set());
+    expect(capped.has(tailKey('agent', '0'))).toBe(true); // touched at 100
+    expect(capped.has(tailKey('agent', '1'))).toBe(false); // stalest
+  });
+
+  it('never evicts protected (still-subscribed) streams', () => {
+    const tails = seed(5);
+    const protectedKeys = new Set([tailKey('agent', '0'), tailKey('agent', '1')]);
+    const capped = enforceStreamCap(tails, 3, protectedKeys);
+    expect(capped.has(tailKey('agent', '0'))).toBe(true);
+    expect(capped.has(tailKey('agent', '1'))).toBe(true);
+    expect(capped.has(tailKey('agent', '2'))).toBe(false);
+    expect(capped.size).toBe(3);
+  });
+
+  it('same-reference when at or under the cap', () => {
+    const tails = seed(3);
+    expect(enforceStreamCap(tails, 3, new Set())).toBe(tails);
+    expect(enforceStreamCap(tails, MAX_TAIL_STREAMS, new Set())).toBe(tails);
   });
 });

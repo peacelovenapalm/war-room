@@ -88,7 +88,16 @@ import { buildRealSheet, type RealSheetKind, tallyAgents, wingCounts } from './s
 import { parseLaunchTarget } from './state/launch';
 import { pinAgent, unpinAgent } from './state/pinDock';
 import { reduceSettings, type SettingsSnapshot } from './state/settings';
-import { appendChunk, EMPTY_TAILS, setPaused, tailKey, type TailMap } from './state/tailStore';
+import {
+  appendChunk,
+  dropStream,
+  EMPTY_TAILS,
+  enforceStreamCap,
+  MAX_TAIL_STREAMS,
+  setPaused,
+  tailKey,
+  type TailMap,
+} from './state/tailStore';
 import { installTestHooksIfE2E } from './testHooks';
 
 /** Board/HUD age tick — visible aging without RAF churn (v1 convention). */
@@ -466,6 +475,17 @@ export default function App() {
     setCrisis(next);
   }, []);
 
+  /** Tail-map writes go through here — tailsRef is the ONE source of truth
+   *  (the WS chunk handler reduces off it), setTails mirrors it for
+   *  rendering. Every writer (chunk append, pause toggle, stream drop)
+   *  must use this, or the next incoming chunk silently reverts the
+   *  divergent copy. */
+  const applyTails = useCallback((next: TailMap) => {
+    if (next === tailsRef.current) return;
+    tailsRef.current = next;
+    setTails(next);
+  }, []);
+
   // Live server plane (core/ generated message types) + tail manager. The
   // crisis state machine reduces HERE (and on the age tick below) — agents
   // are reduced outside render, so the ref is the source of truth.
@@ -481,10 +501,18 @@ export default function App() {
         }
         setEconomy((previous) => reduceEconomy(previous, message));
         if (message.type === 'outputChunk') {
-          const nextTails = appendChunk(tailsRef.current, message);
-          if (nextTails !== tailsRef.current) {
-            tailsRef.current = nextTails;
-            setTails(nextTails);
+          const appended = appendChunk(tailsRef.current, message, at);
+          if (appended !== tailsRef.current) {
+            // LRU backstop over the stream MAP (panel finding,
+            // tailStore.ts:103) — still-subscribed streams are protected;
+            // the primary eviction is TailManager's onDropped below.
+            applyTails(
+              enforceStreamCap(
+                appended,
+                MAX_TAIL_STREAMS,
+                new Set(managerRef.current?.activeKeys() ?? []),
+              ),
+            );
             // FLOOR FEED (phone-only, GAME-DESIGN-V3 §3.2 item 4) — a merged
             // agent-labeled log, fed only on a GENUINE new chunk (the same
             // dedupe tailStore just did, via the reference check above).
@@ -521,13 +549,19 @@ export default function App() {
       },
     });
     connectionRef.current = connection;
-    managerRef.current = new TailManager(connection);
+    // Last-release eviction (panel finding, tailStore.ts:103): when no
+    // surface holds a stream any more (drawer closed, unpinned, agent left
+    // the floor-feed roster), its buffered chunks are dropped — a later
+    // re-acquire repopulates from the server's ring replay.
+    managerRef.current = new TailManager(connection, (key) => {
+      applyTails(dropStream(tailsRef.current, key));
+    });
     return () => {
       connectionRef.current = null;
       managerRef.current = null;
       connection.dispose();
     };
-  }, [applyCrisis]);
+  }, [applyCrisis, applyTails]);
 
   /** send() for panels that write to the real server (CALL modal, Settings
    *  toggles) — queued client-side until the WS is live (connection.ts's

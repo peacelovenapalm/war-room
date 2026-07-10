@@ -25,9 +25,16 @@ interface TailRef {
 export class TailManager {
   private readonly refs = new Map<string, TailRef>();
   private readonly transport: TailTransport;
+  private readonly onDropped: ((key: string) => void) | undefined;
 
-  constructor(transport: TailTransport) {
+  /** `onDropped` fires when the LAST surface releases a stream — the owner
+   *  evicts that stream's buffered client state (tailStore.dropStream).
+   *  Without this hook the tail map grew one entry per agent id ever seen
+   *  (panel finding, tailStore.ts:103); a later re-acquire repopulates from
+   *  the server's ring replay, so dropping loses nothing durable. */
+  constructor(transport: TailTransport, onDropped?: (key: string) => void) {
     this.transport = transport;
+    this.onDropped = onDropped;
   }
 
   /** Returns the stream key. First acquire subscribes on the wire. */
@@ -43,7 +50,8 @@ export class TailManager {
     return key;
   }
 
-  /** Last release unsubscribes on the wire. Returns true when it did. */
+  /** Last release unsubscribes on the wire (and reports the drop). Returns
+   *  true when it did. */
   release(source: OutputSourceValue, id: string): boolean {
     const key = tailKey(source, id);
     const ref = this.refs.get(key);
@@ -52,6 +60,7 @@ export class TailManager {
     if (ref.count > 0) return false;
     this.refs.delete(key);
     this.transport.send({ type: 'tailUnsubscribe', source, id });
+    this.onDropped?.(key);
     return true;
   }
 

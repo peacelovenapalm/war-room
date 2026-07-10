@@ -21,6 +21,13 @@ import type {
 
 export const MAX_TAIL_ENTRIES = 500;
 
+/** Cross-stream backstop (panel finding, tailStore.ts:103): agent ids are
+ *  server-assigned monotonically and never reused, so over a long session
+ *  the map of STREAMS itself would grow unbounded. The primary eviction is
+ *  TailManager's last-release onDropped hook; this LRU cap catches any
+ *  stream that slips past it (still-subscribed streams are protected). */
+export const MAX_TAIL_STREAMS = 64;
+
 export interface TailEntry {
   seq: number;
   stream: OutputStreamValue;
@@ -35,6 +42,8 @@ export interface TailStreamState {
   paused: boolean;
   /** Chunks that arrived while paused (flushed, in order, on resume). */
   buffer: readonly TailEntry[];
+  /** Epoch ms of the last appended chunk — enforceStreamCap's LRU key. */
+  touchedAt: number;
 }
 
 export const EMPTY_TAIL_STREAM: TailStreamState = {
@@ -43,6 +52,7 @@ export const EMPTY_TAIL_STREAM: TailStreamState = {
   truncated: false,
   paused: false,
   buffer: [],
+  touchedAt: 0,
 };
 
 /** streamKey('agent', '3') → 'agent:3' — matches the server's routing key. */
@@ -59,7 +69,7 @@ function capped(entries: readonly TailEntry[]): readonly TailEntry[] {
 }
 
 /** Append one wire chunk. Same-reference return on duplicates (replay). */
-export function appendChunk(tails: TailMap, chunk: OutputChunk): TailMap {
+export function appendChunk(tails: TailMap, chunk: OutputChunk, now = Date.now()): TailMap {
   const key = tailKey(chunk.source, chunk.id);
   const state = tails.get(key) ?? EMPTY_TAIL_STREAM;
   if (chunk.seq <= state.lastSeq) return tails;
@@ -70,12 +80,14 @@ export function appendChunk(tails: TailMap, chunk: OutputChunk): TailMap {
         lastSeq: chunk.seq,
         truncated: state.truncated || chunk.truncated,
         buffer: capped([...state.buffer, entry]),
+        touchedAt: now,
       }
     : {
         ...state,
         lastSeq: chunk.seq,
         truncated: state.truncated || chunk.truncated,
         entries: capped([...state.entries, entry]),
+        touchedAt: now,
       };
   const nextTails = new Map(tails);
   nextTails.set(key, next);
@@ -104,5 +116,28 @@ export function dropStream(tails: TailMap, key: string): TailMap {
   if (!tails.has(key)) return tails;
   const next = new Map(tails);
   next.delete(key);
+  return next;
+}
+
+/**
+ * LRU backstop across streams (see MAX_TAIL_STREAMS): while over `cap`,
+ * evict the least-recently-touched stream NOT in `protectedKeys` (live
+ * subscriptions — evicting those would blank an open drawer/pin/feed).
+ * Same-reference return when nothing needs evicting.
+ */
+export function enforceStreamCap(
+  tails: TailMap,
+  cap: number,
+  protectedKeys: ReadonlySet<string>,
+): TailMap {
+  if (tails.size <= cap) return tails;
+  const evictable = [...tails.entries()]
+    .filter(([key]) => !protectedKeys.has(key))
+    .sort(([, a], [, b]) => a.touchedAt - b.touchedAt);
+  let toEvict = tails.size - cap;
+  if (toEvict > evictable.length) toEvict = evictable.length;
+  if (toEvict === 0) return tails;
+  const next = new Map(tails);
+  for (let i = 0; i < toEvict; i++) next.delete(evictable[i][0]);
   return next;
 }

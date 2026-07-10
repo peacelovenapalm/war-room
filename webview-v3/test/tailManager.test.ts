@@ -5,12 +5,16 @@ import { TailManager } from '../src/net/tailManager';
 
 function harness() {
   const sent: ClientMessage[] = [];
-  const manager = new TailManager({
-    send: (message) => {
-      sent.push(message);
+  const dropped: string[] = [];
+  const manager = new TailManager(
+    {
+      send: (message) => {
+        sent.push(message);
+      },
     },
-  });
-  return { sent, manager };
+    (key) => dropped.push(key),
+  );
+  return { sent, dropped, manager };
 }
 
 describe('TailManager (refcounted subscriptions)', () => {
@@ -39,6 +43,23 @@ describe('TailManager (refcounted subscriptions)', () => {
     const { sent, manager } = harness();
     expect(manager.release('agent', '9')).toBe(false);
     expect(sent).toEqual([]);
+  });
+
+  it('EVICTION: onDropped fires exactly on the LAST release, never before', () => {
+    // Regression (panel finding, tailStore.ts:103): dropStream existed but
+    // nothing ever called it — the client tail map grew one entry per agent
+    // id ever seen. The manager now reports the moment the last surface
+    // lets go of a stream so the owner can evict its buffered chunks.
+    const { dropped, manager } = harness();
+    manager.acquire('agent', '3');
+    manager.acquire('agent', '3');
+    manager.release('agent', '3');
+    expect(dropped).toEqual([]);
+    manager.release('agent', '3');
+    expect(dropped).toEqual(['agent:3']);
+    // Unknown key: no wire message, no drop.
+    manager.release('agent', '9');
+    expect(dropped).toEqual(['agent:3']);
   });
 
   it('resubscribes every active stream when the socket comes back LIVE', () => {
