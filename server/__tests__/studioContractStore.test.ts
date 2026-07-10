@@ -58,6 +58,28 @@ describe('StudioContractStore', () => {
     expect(store.getAll()).toHaveLength(1);
   });
 
+  it('does not re-mint (and re-pay) a recently completed contract for the same recurring todo text', () => {
+    const store = new StudioContractStore(filePath);
+    const minted = store.mintFromTodo(TODO, 40, 999_999, 100);
+    if (!minted.ok) throw new Error('mint failed');
+    store.accept(minted.contract.id, 200);
+    store.complete(minted.contract.id, 300);
+    expect(store.getById(minted.contract.id)?.status).toBe('completed');
+
+    // The same normalized todo text reappears in a later daily file (a
+    // recurring maintenance item, or a farm attempt) shortly after payout.
+    const remint = store.mintFromTodo(TODO, 40, 999_999, 1_000);
+    expect(remint.ok && remint.contract.id).toBe(minted.contract.id);
+    expect(remint.ok && remint.contract.status).toBe('completed');
+    expect(store.getAll()).toHaveLength(1); // no second contract minted
+
+    // Well past the cooldown, the same text is a legitimate fresh mint.
+    const FAR_FUTURE = 1_000 + 8 * 86_400_000;
+    const later = store.mintFromTodo(TODO, 40, 999_999 + FAR_FUTURE, FAR_FUTURE);
+    expect(later.ok && later.contract.id).not.toBe(minted.contract.id);
+    expect(store.getAll()).toHaveLength(2);
+  });
+
   it('rejects negative rewards (bonus-only) and blank source text', () => {
     const store = new StudioContractStore(filePath);
     expect(store.mintFromTodo(TODO, -5, 999_999)).toEqual({ ok: false, reason: 'negative-reward' });

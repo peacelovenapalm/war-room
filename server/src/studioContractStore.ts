@@ -57,6 +57,21 @@ const OPEN_STATUSES: ReadonlySet<StudioContract['status']> = new Set([
   'progressing',
 ]);
 
+const DAY_MS = 86_400_000;
+/** Re-mint cooldown for a terminal (completed/expired) contract's source
+ *  text — mirrors studioContractIngest.ts's MIN_WINDOW_DAYS (the shortest
+ *  quiet-expiry window this plane ever grants). Without this, a todo whose
+ *  normalized text recurs (e.g. it disappears from tomorrow's compiled
+ *  list, auto-completes+pays, then reappears) can mint-and-pay repeatedly
+ *  with zero cap — the OPEN-only dedup below only prevents a DOUBLE mint
+ *  of the same still-open contract, not a farmable re-mint of one that
+ *  already paid out. */
+const REMINT_COOLDOWN_MS = 7 * DAY_MS;
+
+function terminalAt(contract: StudioContract): number | undefined {
+  return contract.completedAt ?? contract.expiredAt;
+}
+
 export class StudioContractStore {
   private data: StudioContractData | null = null;
   private readonly persistence: V3JsonPersistence<StudioContractData>;
@@ -114,6 +129,16 @@ export class StudioContractStore {
       (c) => OPEN_STATUSES.has(c.status) && sourceKey(c.sourceTodo) === key,
     );
     if (existing) return { ok: true, contract: existing };
+
+    // Terminal-cooldown dedup: a contract for this exact normalized text
+    // that already completed/expired recently is returned as-is (no new
+    // mint, no re-broadcast, no re-payout) rather than farmable forever.
+    const recentTerminal = Object.values(data.contracts).find((c) => {
+      if (OPEN_STATUSES.has(c.status) || sourceKey(c.sourceTodo) !== key) return false;
+      const at = terminalAt(c);
+      return at !== undefined && now - at < REMINT_COOLDOWN_MS;
+    });
+    if (recentTerminal) return { ok: true, contract: recentTerminal };
 
     const contract: StudioContract = {
       id: randomUUID(),
