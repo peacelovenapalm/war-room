@@ -6,8 +6,9 @@
  * (mint→complete→re-mint-attempt-within-7-days→rejected), gate mint/
  * gate-flipped completion, the manual-claim 4th-of-the-day rejection,
  * dispatch-result completion via an explicit contractId (never string
- * matching), priority expiry (-1 Rep, Cash untouched) vs silent backlog
- * expiry, self-certifying daily/weekly mint, and the VITEST-guard test
+ * matching), QUIET expiry on both priority and backlog (no Rep penalty —
+ * KICKOFF-v3.1 hard rule 3, bonus-only now that this plane is player-
+ * facing), self-certifying daily/weekly mint, and the VITEST-guard test
  * cloned from economyStore.test.ts's pattern.
  */
 
@@ -26,7 +27,6 @@ import {
   CONTRACT_GATE_CASH,
   CONTRACT_GATE_REP,
   CONTRACT_PRIORITY_CASH,
-  CONTRACT_PRIORITY_EXPIRY_REP_PENALTY,
   CONTRACT_PRIORITY_REP,
   CONTRACT_WEEKLY_CASH,
   CONTRACT_WEEKLY_REP,
@@ -91,7 +91,6 @@ describe('contract payout constants', () => {
     expect(CONTRACT_DAILY_CASH).toBe(20);
     expect(CONTRACT_WEEKLY_CASH).toBe(100);
     expect(CONTRACT_WEEKLY_REP).toBe(5);
-    expect(CONTRACT_PRIORITY_EXPIRY_REP_PENALTY).toBe(1);
     expect(MAX_MANUAL_CLAIMS_PER_DAY).toBe(3);
   });
 });
@@ -120,7 +119,11 @@ describe('ContractStore priority contracts', () => {
     expect(store.getAll().filter((c) => c.source === 'priority')).toHaveLength(1);
   });
 
-  it('expires past its deadline with a -1 Rep penalty, Cash untouched', () => {
+  it('expires QUIETLY past its deadline — no Rep penalty, no Cash movement (hard rule 3)', () => {
+    // Panel finding (contractStore.ts:464): this plane is what the v3
+    // ContractsPanel surfaces, so docking REP for not attending to a todo
+    // is exactly the loss-aversion-around-attention pattern hard rule 3
+    // forbids. Expiry is now a status flip only — bonus-only economy.
     let repDelta = 0;
     let cashDelta = 0;
     const store = new ContractStore(statePath, {
@@ -132,7 +135,7 @@ describe('ContractStore priority contracts', () => {
     store.reconcile(briefingWithTodo(['Ship the thing']), DAY1 + 3 * ONE_DAY_MS);
     const contract = store.getAll().find((c) => c.source === 'priority')!;
     expect(contract.status).toBe('expired');
-    expect(repDelta).toBe(-CONTRACT_PRIORITY_EXPIRY_REP_PENALTY);
+    expect(repDelta).toBe(0);
     expect(cashDelta).toBe(0);
   });
 });

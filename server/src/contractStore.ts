@@ -75,7 +75,10 @@ export const CONTRACT_GATE_REP = 10;
 export const CONTRACT_DAILY_CASH = 20;
 export const CONTRACT_WEEKLY_CASH = 100;
 export const CONTRACT_WEEKLY_REP = 5;
-export const CONTRACT_PRIORITY_EXPIRY_REP_PENALTY = 1;
+// CONTRACT_PRIORITY_EXPIRY_REP_PENALTY removed (KICKOFF-v3.1 hard rule 3):
+// the v3 face surfaces THIS plane, and docking REP for an unattended todo
+// is loss-aversion-around-attention — expiry is a quiet status flip only.
+// Historical 'contract-priority-expired' ledger receipts remain untouched.
 export const MAX_MANUAL_CLAIMS_PER_DAY = 3;
 
 /** Purely flavor — payout is flat regardless of title (self-certifying).
@@ -448,10 +451,13 @@ export class ContractStore {
 
   // ── Expiration ────────────────────────────────────────────────────
 
-  /** Priority expiry costs -1 Rep (Cash never touched); backlog expiry is
-   *  silent (re-mints next reconcile since dedupe only checks open +
-   *  completed-in-lookback, never expired). Gate contracts have no deadline
-   *  and never expire. Returns the count swept. */
+  /** QUIET expiry for every source (KICKOFF-v3.1 hard rule 3 — this plane
+   *  is player-facing via the v3 ContractsPanel, and a REP dock for not
+   *  attending to a todo is the loss-aversion pattern the rule forbids):
+   *  a status flip only, no economy movement, no notification hook.
+   *  Backlog re-mints next reconcile (dedupe only checks open +
+   *  completed-in-lookback, never expired). Gate contracts have no
+   *  deadline and never expire. Returns the count swept. */
   sweepExpired(now: number = Date.now()): number {
     const data = this.ensureLoaded();
     let count = 0;
@@ -460,12 +466,6 @@ export class ContractStore {
       if (now < contract.deadlineAt) continue;
       contract.status = 'expired';
       contract.expiredAt = now;
-      if (contract.source === 'priority') {
-        this.awardReputation(-CONTRACT_PRIORITY_EXPIRY_REP_PENALTY, {
-          label: 'contract-priority-expired',
-          sourceEventRefs: [`contract:${contract.id}`],
-        });
-      }
       count++;
     }
     return count;
