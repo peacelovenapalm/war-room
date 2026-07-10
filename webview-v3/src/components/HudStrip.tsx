@@ -21,6 +21,10 @@ export interface HudStripProps {
   economy: EconomySnapshot | null;
   grayscale: boolean;
   view: ViewMode;
+  /** Lifted STOP ALL state — shared with AutomationPanel's instance so the
+   *  two can never disagree (state/stopAll.ts). */
+  automationStopped: boolean;
+  onAutomationStoppedChange: (stopped: boolean) => void;
   onToggleGrayscale: () => void;
   onToggleView: () => void;
   /** One-tap-real (hard rule 5): every chip decomposes into verbatim telemetry. */
@@ -45,6 +49,8 @@ export function HudStrip({
   economy,
   grayscale,
   view,
+  automationStopped,
+  onAutomationStoppedChange,
   onToggleGrayscale,
   onToggleView,
   onOpenReal,
@@ -121,8 +127,9 @@ export function HudStrip({
           unattended-run safety net) — the HUD sits above every modal's
           backdrop (z-index) so this stays clickable even with a panel
           open. AutomationPanel repeats the SAME control for convenience
-          while that panel is open; both hit the one real server endpoint. */}
-      <StopAllControl />
+          while that panel is open; both render the ONE lifted stop state
+          and hit the one real server endpoint. */}
+      <StopAllControl stopped={automationStopped} onStoppedChange={onAutomationStoppedChange} />
       <button type="button" data-testid="hud-open-call" onClick={onOpenCall}>
         ☎ CALL
       </button>

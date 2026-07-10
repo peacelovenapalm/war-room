@@ -30,6 +30,10 @@ export interface AutomationPanelProps {
   chainRuns: ChainRunClient[];
   chainRunReceivedAt: Record<string, number>;
   now: number;
+  /** Lifted STOP ALL state — the SAME source the HUD instance renders
+   *  (state/stopAll.ts), so the two controls can never disagree. */
+  automationStopped: boolean;
+  onAutomationStoppedChange: (stopped: boolean) => void;
 }
 
 function emptyStep(): ChainStepDefInput {
@@ -460,12 +464,14 @@ export function AutomationPanel({
   chainRuns,
   chainRunReceivedAt,
   now,
+  automationStopped,
+  onAutomationStoppedChange,
 }: AutomationPanelProps) {
   return (
     <Modal isOpen={isOpen} onClose={onClose} title="AUTOMATION" testId="automation-panel" wide>
       <div className="automation-panel">
         <div className="automation-panel__stopall">
-          <StopAllControl />
+          <StopAllControl stopped={automationStopped} onStoppedChange={onAutomationStoppedChange} />
         </div>
         <ChainsSection
           isOpen={isOpen}

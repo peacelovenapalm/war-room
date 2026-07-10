@@ -88,6 +88,7 @@ import { buildRealSheet, type RealSheetKind, tallyAgents, wingCounts } from './s
 import { parseLaunchTarget } from './state/launch';
 import { pinAgent, unpinAgent } from './state/pinDock';
 import { reduceSettings, type SettingsSnapshot } from './state/settings';
+import { reduceAutomationStopped, stoppedFromOrders } from './state/stopAll';
 import {
   appendChunk,
   dropStream,
@@ -227,6 +228,10 @@ export default function App() {
   const [chainRuns, setChainRuns] = useState<ChainRunClient[]>([]);
   const [chainRunReceivedAt, setChainRunReceivedAt] = useState<Record<string, number>>({});
   const [budget, setBudget] = useState<BudgetSnapshotClient | null>(null);
+  /** STOP ALL — ONE lifted source of truth for both StopAllControl mounts
+   *  (HUD + AutomationPanel), hydrated from the server below and latched
+   *  by the WS automationStopped broadcast (state/stopAll.ts). */
+  const [automationStopped, setAutomationStopped] = useState(false);
   const [diagnostics, setDiagnostics] = useState<DiagnosticsRow[]>([]);
   const [callPrefill, setCallPrefill] = useState<CallModalPrefill | null>(null);
   const [viewingResult, setViewingResult] = useState<DispatchEntry | null>(null);
@@ -527,6 +532,7 @@ export default function App() {
         // Stage-3 panel ports — same "verbatim mirror" reducer convention.
         setSettings((previous) => reduceSettings(previous, message));
         setBudget((previous) => reduceBudget(previous, message));
+        setAutomationStopped((previous) => reduceAutomationStopped(previous, message));
         if (message.type === 'dispatchUpdate') {
           setDispatchEntries((previous) => {
             const next = reduceDispatchEntries(previous, message, at);
@@ -568,6 +574,28 @@ export default function App() {
    *  own behavior), never a no-op when momentarily offline. */
   const send = useCallback((message: ClientMessage) => {
     connectionRef.current?.send(message);
+  }, []);
+
+  // STOP ALL hydration (panel finding, StopAllControl.tsx:12): a fresh page
+  // must reflect a halt issued earlier or from another client.
+  // stoppedByKillSwitch on any standing order is the server's persisted
+  // record of a halt awaiting RESUME. A fetch failure (or a chain-only halt
+  // — state/stopAll.ts header) hydrates not-stopped: showing STOP ALL when
+  // already stopped is a harmless idempotent re-halt, the safe direction.
+  useEffect(() => {
+    let cancelled = false;
+    void fetch('/api/standing-orders')
+      .then(async (res) => (res.ok ? ((await res.json()) as unknown) : []))
+      .then((orders) => {
+        if (cancelled || !Array.isArray(orders)) return;
+        if (stoppedFromOrders(orders as { stoppedByKillSwitch?: boolean }[])) {
+          setAutomationStopped(true);
+        }
+      })
+      .catch(() => undefined);
+    return () => {
+      cancelled = true;
+    };
   }, []);
 
   // Age tick — board ages, poll TTLs (fires go out when a poll expires),
@@ -839,6 +867,8 @@ export default function App() {
         economy={economy}
         grayscale={grayscale}
         view={view}
+        automationStopped={automationStopped}
+        onAutomationStoppedChange={setAutomationStopped}
         onToggleGrayscale={() => {
           setGrayscale((value) => !value);
         }}
@@ -978,6 +1008,8 @@ export default function App() {
         chainRuns={chainRuns}
         chainRunReceivedAt={chainRunReceivedAt}
         now={now}
+        automationStopped={automationStopped}
+        onAutomationStoppedChange={setAutomationStopped}
       />
       <ContractsPanel
         isOpen={openPanel === 'contracts'}

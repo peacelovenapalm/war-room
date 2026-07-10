@@ -110,7 +110,7 @@ async function getFreePort(): Promise<number> {
   });
 }
 
-async function serveV3Dist(): Promise<StaticHost> {
+async function serveV3Dist(options: { stopAllFails?: boolean } = {}): Promise<StaticHost> {
   if (!fs.existsSync(path.join(V3_DIST, 'index.html'))) {
     throw new Error(`webview-v3 not built at ${V3_DIST}. Run 'npm run build:webview-v3' first.`);
   }
@@ -119,6 +119,13 @@ async function serveV3Dist(): Promise<StaticHost> {
     const requestPath = decodeURIComponent((req.url ?? '/').split('?')[0]);
 
     if (requestPath === '/api/automation/stop-all' && req.method === 'POST') {
+      if (options.stopAllFails) {
+        // The panel finding's exact scenario: an auth/validation failure —
+        // parseable JSON, but neither res.ok nor body.ok.
+        res.writeHead(403, { 'Content-Type': 'application/json' });
+        res.end(JSON.stringify({ ok: false, haltedOrders: 0, haltedRuns: 0 }));
+        return;
+      }
       res.writeHead(200, { 'Content-Type': 'application/json' });
       res.end(JSON.stringify({ ok: true, haltedOrders: 0, haltedRuns: 0 }));
       return;
@@ -303,10 +310,16 @@ test.describe('stage-3 panel ports (desktop chrome model)', () => {
       await expect(automationPanel).toBeVisible();
       await automationPanel.getByTestId('stop-all-control').click();
       await expect(automationPanel.getByTestId('resume-control')).toHaveText('▶ RESUME');
+      // ONE lifted stop state (panel finding, StopAllControl.tsx:12): the
+      // HUD's always-visible instance flips WITH the panel's — a second
+      // operator glancing at the HUD can never read "not stopped" while
+      // the panel says RESUME.
+      await expect(page.locator('.hud').getByTestId('resume-control')).toBeVisible();
       await automationPanel.getByTestId('resume-control').click();
       await expect(automationPanel.getByTestId('resume-control')).toHaveText('⚠ CONFIRM RESUME');
       await automationPanel.getByTestId('resume-control').click();
       await expect(automationPanel.getByTestId('stop-all-control')).toBeVisible();
+      await expect(page.locator('.hud').getByTestId('stop-all-control')).toBeVisible();
       await page.getByTestId('modal-close').click();
 
       // STOP ALL in the HUD stays clickable while a panel is open (hard
@@ -344,6 +357,33 @@ test.describe('stage-3 panel ports (desktop chrome model)', () => {
 
       await page.getByTestId('hotspot-shift').click();
       await expect(page.getByTestId('shift-panel')).toBeVisible();
+    } finally {
+      await context.close();
+      await host.close();
+    }
+  });
+
+  test('STOP ALL failure is honest: explicit ✗ FAILED, switch stays armed (hard rule 8)', async ({
+    browser,
+  }) => {
+    // Panel finding (StopAllControl.tsx:20): a 403/{ok:false} response used
+    // to flip the UI to "stopped" while automation kept running unattended.
+    const host = await serveV3Dist({ stopAllFails: true });
+    const context = await browser.newContext({ viewport: VIEWPORT });
+    try {
+      const page = await context.newPage();
+      await page.goto(`${host.url}/`);
+      await expect(page.getByTestId('hud-connection')).toHaveText('● LIVE', { timeout: 20_000 });
+
+      const hud = page.locator('.hud');
+      await hud.getByTestId('stop-all-control').click();
+
+      // Shape + label failure state (colorblind rule), never a silent flip.
+      await expect(hud.getByTestId('stop-all-failed')).toBeVisible();
+      await expect(hud.getByTestId('stop-all-failed')).toContainText('✗ STOP ALL FAILED');
+      // Still armed: no RESUME anywhere — the halt was never confirmed.
+      await expect(hud.getByTestId('stop-all-control')).toBeVisible();
+      await expect(page.getByTestId('resume-control')).toHaveCount(0);
     } finally {
       await context.close();
       await host.close();
