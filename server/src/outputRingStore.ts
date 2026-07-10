@@ -61,7 +61,10 @@ interface RingEntry {
   streams: Map<OutputStreamName, StreamState>;
 }
 
-function key(source: OutputSource, id: string): string {
+/** Composite (source, id) key - shared with the WS tail-subscription
+ *  registry (clientMessageHandler/httpServer) so both sides always agree on
+ *  what one stream owner is. */
+export function outputStreamKey(source: OutputSource, id: string): string {
   // NUL (\u0000) can't appear in either component (UUIDs / session ids).
   return `${source}\u0000${id}`;
 }
@@ -97,7 +100,7 @@ export class OutputRingStore {
     stream: OutputStreamName,
     chunk: string,
   ): OutputChunkBroadcast {
-    const k = key(source, id);
+    const k = outputStreamKey(source, id);
     let entry = this.entries.get(k);
     if (!entry) {
       entry = { chunks: [], streams: new Map() };
@@ -142,7 +145,7 @@ export class OutputRingStore {
    * with `truncated: true`.
    */
   replay(source: OutputSource, id: string): OutputChunkBroadcast[] {
-    const entry = this.entries.get(key(source, id));
+    const entry = this.entries.get(outputStreamKey(source, id));
     if (!entry) return [];
     const needsMark = new Set<OutputStreamName>();
     for (const [stream, state] of entry.streams) {
@@ -160,7 +163,7 @@ export class OutputRingStore {
   /** Drop everything retained for (source, id) — called by lifecycle sites
    *  when the owner reaches a terminal status (killed/exited/failed). */
   evict(source: OutputSource, id: string): void {
-    this.entries.delete(key(source, id));
+    this.entries.delete(outputStreamKey(source, id));
   }
 
   /** Evict the oldest chunks of `stream` until it fits its byte budget.

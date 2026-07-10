@@ -33,6 +33,7 @@ import {
 import { addRoom, buyFurniture, expandOffice, getOfficeLayout, sell } from './officeLayoutStore.js';
 import type { RoomType } from './officeLayoutTypes.js';
 import { RoomType as RoomTypeValues } from './officeLayoutTypes.js';
+import { outputRingStore, outputStreamKey } from './outputRingStore.js';
 import { applyPollStates, parsePollBody, startPollStateSweep } from './pollStateHandler.js';
 import { progression } from './progressionStore.js';
 import { shiftStats } from './shiftStats.js';
@@ -232,6 +233,19 @@ export async function createHttpServer(options: HttpServerOptions): Promise<Http
   // reliable signal for this now.
   const unsubscribeEmployeeBark = employeeStore.onChange(createEmployeeQuitNotifier());
   app.addHook('onClose', () => unsubscribeEmployeeBark());
+
+  // Output ring eviction on dispatch terminal status (KICKOFF-v2.0 Phase 2
+  // slice 2.2's "lifecycle sites call evict()"): buffered output telemetry
+  // is ephemeral — once a dispatch reaches ANY terminal status its retained
+  // chunks are dropped (the durable record stays resultTail / the run log).
+  // Subscribed once at process startup, same discipline as the Bark
+  // subscriptions above. Telemetry-only: this never touches the dispatch
+  // record or the runner's containment.
+  const unsubscribeOutputEvict = dispatchStore.onUpdate((broadcast) => {
+    if (broadcast.status === 'ringing' || broadcast.status === 'answered') return;
+    outputRingStore.evict('dispatch', broadcast.id);
+  });
+  app.addHook('onClose', () => unsubscribeOutputEvict());
 
   // ── Listen ──────────────────────────────────────────────────
 
@@ -1239,6 +1253,24 @@ function registerWebSocketRoute(
     });
     safeSend(socket, { type: 'budgetUpdate', ...budgetStore.getSnapshot() });
 
+    // Live output tail (KICKOFF-v2.0 Phase 2 — streaming plane).
+    // SUBSCRIPTION-GATED, deliberately unlike every broadcast plane above:
+    // outputChunk messages go ONLY to sockets that sent a matching
+    // tailSubscribe (handleClientMessage mutates this Set and replays the
+    // ring buffer to this socket alone). Delivery is fire-and-forget — the
+    // try/catch here (plus the store's own per-listener guard) means a
+    // slow/dead subscriber can never block or throw into the producing
+    // append path (the backpressure hard requirement).
+    const tailSubscriptions = new Set<string>();
+    const unsubscribeOutputChunks = outputRingStore.onChunk((chunk) => {
+      if (!tailSubscriptions.has(outputStreamKey(chunk.source, chunk.id))) return;
+      try {
+        safeSend(socket, chunk as unknown as Record<string, unknown>);
+      } catch {
+        // Fire-and-forget: a broken socket must never break the producer.
+      }
+    });
+
     // Handle incoming client messages
     socket.on('message', (data: Buffer | string) => {
       try {
@@ -1252,6 +1284,7 @@ function registerWebSocketRoute(
           cache: options.assetCache ?? null,
           onSetHooksEnabled: options.onSetHooksEnabled,
           machineLabel: options.machineLabel,
+          tailSubscriptions,
         });
       } catch {
         // Malformed JSON, ignore
@@ -1270,6 +1303,10 @@ function registerWebSocketRoute(
       unsubscribeChainRuns();
       unsubscribeStandingOrders();
       unsubscribeBudget();
+      // Socket close implicitly unsubscribes every tail (protocol contract
+      // on TailUnsubscribe) — drop the registry with the fan-out listener.
+      tailSubscriptions.clear();
+      unsubscribeOutputChunks();
     });
   });
 }

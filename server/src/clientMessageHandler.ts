@@ -4,6 +4,8 @@ import type { LoadedAssets, LoadedCharacterSprites, LoadedPetSprites } from './a
 import { readConfig, writeConfig } from './configPersistence.js';
 import { dispatchStore } from './dispatchStore.js';
 import { readLayoutFromFile, writeLayoutToFile } from './layoutPersistence.js';
+import type { OutputSource } from './outputRingStore.js';
+import { outputRingStore, outputStreamKey } from './outputRingStore.js';
 import { claudeProvider } from './providers/index.js';
 
 type WsSend = (message: Record<string, unknown>) => void;
@@ -29,6 +31,23 @@ export interface ClientMessageContext {
   onSetHooksEnabled?: SetHooksEnabledSideEffect;
   /** TEXT label of the local machine; default machine identity for local agents. */
   machineLabel?: string;
+  /** THIS connection's live tail subscriptions (KICKOFF-v2.0 Phase 2 —
+   *  streaming plane), keyed by outputStreamKey(source, id). Owned by
+   *  registerWebSocketRoute (one Set per socket, dropped with the socket);
+   *  outputChunk fan-out delivers only to sockets whose Set holds the key. */
+  tailSubscriptions?: Set<string>;
+}
+
+/** Narrow an incoming tailSubscribe/tailUnsubscribe payload. Invalid
+ *  source/id are silently ignored (same posture as every other malformed
+ *  client message in this file). */
+function parseTailTarget(
+  msg: Record<string, unknown>,
+): { source: OutputSource; id: string } | undefined {
+  const source = msg.source === 'agent' || msg.source === 'dispatch' ? msg.source : undefined;
+  const id = typeof msg.id === 'string' && msg.id !== '' ? msg.id : undefined;
+  if (!source || !id) return undefined;
+  return { source, id };
 }
 
 // ── Setting key constants (mirror adapters/vscode/constants.ts) ──
@@ -128,6 +147,30 @@ export function handleClientMessage(
         contractId: typeof msg.contractId === 'string' ? msg.contractId : undefined,
         employeeId: typeof msg.employeeId === 'string' ? msg.employeeId : undefined,
       });
+      break;
+    }
+
+    // Live output tail (KICKOFF-v2.0 Phase 2 — streaming plane). TELEMETRY
+    // routing only: subscribing registers THIS socket for a (source, id)
+    // stream and immediately replays the ring buffer's retained chunks to
+    // this socket alone — it never starts, stops, or steers the underlying
+    // run (runner-decides containment unchanged). New chunks are fanned out
+    // by registerWebSocketRoute's per-socket onChunk subscription, gated on
+    // the same Set mutated here.
+    case 'tailSubscribe': {
+      const target = parseTailTarget(msg);
+      if (!target || !ctx.tailSubscriptions) break;
+      ctx.tailSubscriptions.add(outputStreamKey(target.source, target.id));
+      for (const chunk of outputRingStore.replay(target.source, target.id)) {
+        send(chunk as unknown as Record<string, unknown>);
+      }
+      break;
+    }
+
+    case 'tailUnsubscribe': {
+      const target = parseTailTarget(msg);
+      if (!target || !ctx.tailSubscriptions) break;
+      ctx.tailSubscriptions.delete(outputStreamKey(target.source, target.id));
       break;
     }
 
