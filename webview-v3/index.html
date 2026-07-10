@@ -1,0 +1,21 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <!-- user-scalable=no: the iso world gets its own pinch-to-zoom camera
+         (clamped fit-to-view, KICKOFF-v3.1 mobile decisions) bound to the
+         same 2-finger gesture as native Safari page-zoom — running both at
+         once double-zooms and fights the camera clamping. Same deliberate
+         choice as webview-ui/index.html. -->
+    <meta
+      name="viewport"
+      content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover"
+    />
+    <meta name="theme-color" content="#20242c" />
+    <title>War Room V3</title>
+  </head>
+  <body>
+    <div id="root"></div>
+    <script type="module" src="/src/main.tsx"></script>
+  </body>
+</html>

@@ -1,0 +1,1206 @@
+/* webview-v3 base styles. Layout/colors for the DOM chrome live in CSS
+   (the eslint no-inline-colors rule covers TS/TSX; canvas colors live in
+   src/constants.ts). Color is REINFORCEMENT only — every signal is carried
+   by shape + text and must survive the GRAYSCALE filter below. */
+
+* {
+  box-sizing: border-box;
+}
+
+html,
+body,
+#root {
+  margin: 0;
+  padding: 0;
+  width: 100%;
+  height: 100%;
+  overflow: hidden;
+  background: #20242c;
+  color: #f2f4f8;
+  font-family: ui-monospace, Menlo, Consolas, monospace;
+}
+
+.app {
+  display: flex;
+  flex-direction: column;
+  width: 100%;
+  height: 100%;
+  position: relative;
+}
+
+/* GRAYSCALE toggle target: the whole app, canvas included. Signals must
+   stay readable here — shape + text labels are the primary channel. */
+.app.grayscale {
+  filter: grayscale(1);
+}
+
+/* ── HUD strip ─────────────────────────────────────────────── */
+
+.hud {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 6px 10px;
+  font-size: 12px;
+  line-height: 1;
+  background: #14171d;
+  border-bottom: 1px solid #2c3240;
+  flex: 0 0 auto;
+  white-space: nowrap;
+  overflow-x: auto;
+  /* Stays above every modal backdrop (hard rule 8: STOP ALL always
+     visible, never buried behind a panel). */
+  position: relative;
+  z-index: 60;
+}
+
+.hud .brand {
+  font-weight: 700;
+  letter-spacing: 0.08em;
+}
+
+.hud .chip {
+  padding: 4px 6px;
+  border: 1px solid #2c3240;
+  background: #1b1f27;
+  color: inherit;
+  font: inherit;
+  line-height: 1;
+}
+
+.hud .chip--tap {
+  cursor: pointer;
+}
+
+.hud .chip--warn {
+  border-color: #8a94a8;
+  font-weight: 700;
+}
+
+.hud__spacer {
+  margin-left: auto;
+}
+
+.hud button:not(.chip) {
+  padding: 6px 8px;
+  font: inherit;
+  color: inherit;
+  background: #1b1f27;
+  border: 1px solid #3a4150;
+  cursor: pointer;
+  min-height: 28px;
+}
+
+.hud button[disabled] {
+  opacity: 0.45;
+  cursor: not-allowed;
+}
+
+.hud button[aria-pressed='true'] {
+  background: #3a4150;
+}
+
+/* ── World + chip layer ────────────────────────────────────── */
+
+.surfaces {
+  position: relative;
+  flex: 1 1 auto;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+}
+
+.world {
+  position: relative;
+  flex: 1 1 auto;
+  min-height: 0;
+}
+
+.world canvas {
+  position: absolute;
+  inset: 0;
+  display: block;
+  /* Pinch/pan owns this element's gestures (engine/gesture.ts) — without
+     this the browser's native pinch-zoom-page / scroll intercepts touches
+     before our pointer handlers see them. */
+  touch-action: none;
+}
+
+.surfaces[data-view='board'] .world {
+  display: none;
+}
+
+.chip-layer {
+  position: absolute;
+  inset: 0;
+  overflow: hidden;
+  pointer-events: none;
+}
+
+.desk-chip {
+  position: absolute;
+  transform: translateX(-50%);
+  pointer-events: auto;
+  padding: 4px 6px;
+  font: inherit;
+  font-size: 11px;
+  line-height: 1;
+  color: #f2f4f8;
+  background: #14171dee;
+  border: 1px solid #3a4150;
+  white-space: nowrap;
+  cursor: pointer;
+}
+
+.desk-chip--loud {
+  color: #14171d;
+  background: #f2f4f8;
+  border-color: #f2f4f8;
+  font-weight: 700;
+}
+
+/* ── Triage board ──────────────────────────────────────────── */
+
+.triage-board {
+  display: flex;
+  flex-direction: column;
+  min-height: 0;
+  background: #171b22f2;
+  border: 1px solid #3a4150;
+  font-size: 12px;
+}
+
+/* Desktop floor view: the board is the office whiteboard, pinned top-left
+   over the world. */
+@media (min-width: 701px) {
+  .surfaces[data-view='floor'] .triage-board {
+    position: absolute;
+    top: 10px;
+    left: 10px;
+    width: 420px;
+    max-height: 70%;
+  }
+}
+
+.surfaces[data-view='board'] .triage-board {
+  position: static;
+  flex: 1 1 auto;
+  width: auto;
+  max-height: none;
+}
+
+.triage-board__header {
+  padding: 8px 10px;
+  font-weight: 700;
+  letter-spacing: 0.06em;
+  border-bottom: 1px solid #2c3240;
+}
+
+.triage-board__clear {
+  padding: 14px 10px;
+}
+
+.triage-board__rows {
+  overflow-y: auto;
+  min-height: 0;
+}
+
+.triage-row {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  padding: 8px 10px;
+  border-bottom: 1px solid #232936;
+}
+
+.triage-row--loud {
+  background: #f2f4f8;
+  color: #14171d;
+}
+
+.triage-row__facts {
+  display: flex;
+  align-items: baseline;
+  gap: 10px;
+}
+
+.triage-row__stage {
+  font-weight: 700;
+  flex: 0 0 auto;
+}
+
+.triage-row__identity {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  flex: 1 1 auto;
+}
+
+.triage-row__age {
+  font-variant-numeric: tabular-nums;
+  flex: 0 0 auto;
+}
+
+.triage-row__detail {
+  display: flex;
+  gap: 10px;
+  opacity: 0.9;
+}
+
+.triage-row--loud .triage-row__detail {
+  opacity: 1;
+}
+
+.triage-row__cause {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  flex: 1 1 auto;
+}
+
+.triage-row__forecast {
+  flex: 0 0 auto;
+  font-variant-numeric: tabular-nums;
+}
+
+.triage-row__verbs {
+  display: flex;
+  gap: 8px;
+}
+
+.triage-row__notice {
+  padding: 6px 8px;
+  border: 1px dashed #8a94a8;
+  font-size: 11px;
+}
+
+/* ── Shared verb buttons ───────────────────────────────────── */
+
+.verb {
+  padding: 6px 10px;
+  font: inherit;
+  font-size: 12px;
+  line-height: 1;
+  color: inherit;
+  background: #1b1f27;
+  border: 1px solid #3a4150;
+  cursor: pointer;
+}
+
+.triage-row--loud .verb {
+  background: #e6e9ef;
+  color: #14171d;
+  border-color: #14171d;
+}
+
+.verb[disabled] {
+  opacity: 0.45;
+  cursor: not-allowed;
+}
+
+.verb--gateless {
+  border-style: dashed;
+  opacity: 0.75;
+}
+
+.verb--undo,
+.verb--confirm {
+  font-weight: 700;
+}
+
+/* ── Tail sheet ────────────────────────────────────────────── */
+
+.tail-sheet {
+  display: flex;
+  flex-direction: column;
+  /* Never collapses below a readable log, even in the 64% phone sheet. */
+  min-height: 140px;
+  flex: 1 1 140px;
+  border-top: 1px solid #2c3240;
+}
+
+.tail-sheet__bar {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 6px 8px;
+  font-size: 11px;
+}
+
+.tail-sheet__title {
+  font-weight: 700;
+  letter-spacing: 0.06em;
+}
+
+.tail-sheet__paused-count {
+  padding: 2px 6px;
+  border: 1px solid #8a94a8;
+  font-weight: 700;
+}
+
+.tail-sheet__bar-spacer {
+  margin-left: auto;
+}
+
+.tail-sheet__log {
+  flex: 1 1 auto;
+  min-height: 80px;
+  overflow-y: auto;
+  padding: 6px 8px;
+  background: #101318;
+  font-size: 11px;
+  line-height: 1.45;
+  white-space: pre-wrap;
+  word-break: break-word;
+  user-select: text;
+}
+
+.tail-sheet__chunk--stderr {
+  font-weight: 700;
+}
+
+.tail-sheet__truncated,
+.tail-sheet__empty {
+  opacity: 0.7;
+}
+
+/* ── Floor feed (phone-only merged tail strip, GAME-DESIGN-V3 §3.2 #4) ─ */
+
+/* Hidden by default (desktop, and phone BOARD view) — only the phone FLOOR
+   view media rule below turns it on, matching the pin dock's own pattern
+   of "one breakpoint, one view mode" gating. */
+.floor-feed {
+  display: none;
+}
+
+.floor-feed__log {
+  flex: 1 1 auto;
+  min-height: 0;
+  overflow-y: auto;
+  padding: 6px 8px;
+  background: #101318;
+  border-top: 1px solid #2c3240;
+  font-size: 11px;
+  line-height: 1.45;
+  white-space: pre-wrap;
+  word-break: break-word;
+  user-select: text;
+}
+
+.floor-feed__label {
+  font-weight: 700;
+}
+
+.floor-feed__empty {
+  opacity: 0.7;
+}
+
+/* ── Pin dock (desktop-only strip) ─────────────────────────── */
+
+.pin-dock {
+  flex: 0 0 auto;
+  border-top: 1px solid #2c3240;
+  background: #14171d;
+  font-size: 11px;
+}
+
+.pin-dock__notice {
+  padding: 6px 10px;
+  border-bottom: 1px dashed #8a94a8;
+  font-weight: 700;
+}
+
+.pin-dock__slots {
+  display: flex;
+  gap: 1px;
+}
+
+.pin-slot {
+  flex: 1 1 0;
+  min-width: 0;
+  border-right: 1px solid #232936;
+  padding: 6px 8px;
+}
+
+.pin-slot__head {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.pin-slot__promote {
+  flex: 1 1 auto;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  text-align: left;
+  font: inherit;
+  color: inherit;
+  background: none;
+  border: none;
+  cursor: pointer;
+  padding: 4px 0;
+}
+
+.pin-slot__tail {
+  margin-top: 4px;
+  max-height: 40px;
+  overflow: hidden;
+  white-space: pre-wrap;
+  word-break: break-word;
+  opacity: 0.85;
+}
+
+@media (max-width: 700px) {
+  .pin-dock {
+    display: none;
+  }
+}
+
+/* ── Agent drawer ──────────────────────────────────────────── */
+
+.drawer {
+  position: absolute;
+  top: 0;
+  right: 0;
+  bottom: 0;
+  width: min(440px, 92vw);
+  display: flex;
+  flex-direction: column;
+  background: #171b22;
+  border-left: 1px solid #3a4150;
+  font-size: 12px;
+  z-index: 20;
+}
+
+.drawer__head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  padding: 8px 10px;
+  border-bottom: 1px solid #2c3240;
+}
+
+.drawer__title {
+  font-weight: 700;
+  letter-spacing: 0.05em;
+}
+
+.drawer__facts {
+  padding: 4px 10px;
+  /* Facts yield to the tail when space is tight (phone bottom sheet) —
+     the LIVE TAIL always keeps its minimum share below. */
+  overflow-y: auto;
+  flex: 0 1 auto;
+  min-height: 0;
+}
+
+.drawer-row {
+  display: flex;
+  justify-content: space-between;
+  align-items: baseline;
+  gap: 12px;
+  padding: 5px 0;
+  border-bottom: 1px solid #232936;
+}
+
+.drawer-row__label {
+  flex: 0 0 auto;
+  font-weight: 700;
+  opacity: 0.75;
+}
+
+.drawer-row__value {
+  text-align: right;
+  word-break: break-all;
+  user-select: text;
+}
+
+.drawer__warn {
+  padding: 6px 10px;
+  font-weight: 700;
+}
+
+.drawer__gone {
+  padding: 14px 10px;
+}
+
+.drawer__verbs {
+  display: flex;
+  justify-content: flex-end;
+  gap: 8px;
+  padding: 8px 10px;
+}
+
+/* ── One-tap-real sheet ────────────────────────────────────── */
+
+.real-sheet {
+  position: absolute;
+  top: 48px;
+  left: 50%;
+  transform: translateX(-50%);
+  width: min(680px, 94vw);
+  max-height: 70%;
+  display: flex;
+  flex-direction: column;
+  background: #101318;
+  border: 1px solid #8a94a8;
+  font-size: 11px;
+  z-index: 30;
+}
+
+.real-sheet__head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  padding: 8px 10px;
+  border-bottom: 1px solid #2c3240;
+}
+
+.real-sheet__title {
+  font-weight: 700;
+  letter-spacing: 0.05em;
+}
+
+.real-sheet__lines {
+  overflow-y: auto;
+  padding: 8px 10px;
+  user-select: text;
+}
+
+.real-sheet__line {
+  padding: 2px 0;
+  white-space: pre-wrap;
+  word-break: break-word;
+}
+
+/* ── Phone layout (≤700px real breakpoint) ─────────────────── */
+
+@media (max-width: 700px) {
+  /* HUD wraps instead of scrolling sideways: GRAYSCALE and the view toggle
+     must stay VISIBLE on phone (the hidden-on-phone pattern was explicitly
+     rejected in the V3 design panel — hard rule 1 adjacency). */
+  .hud {
+    flex-wrap: wrap;
+    overflow-x: visible;
+    row-gap: 6px;
+  }
+
+  /* Office strip: the whole floor at a glance; triage below carries the
+     verbs; FLOOR FEED fills the rest. Strip + board are both above the fold
+     (crisis-first cold open, GAME-DESIGN-V3 §3.2 items 2-4). */
+  .surfaces[data-view='floor'] .world {
+    flex: 0 0 280px;
+  }
+
+  .surfaces[data-view='floor'] .triage-board {
+    position: static;
+    flex: 0 1 auto;
+    max-height: 42%;
+    width: auto;
+    border-left: none;
+    border-right: none;
+  }
+
+  .surfaces[data-view='floor'] .floor-feed {
+    display: flex;
+    flex: 1 1 auto;
+    min-height: 0;
+  }
+
+  /* One-hand touch grammar: every row/verb ≥44px. */
+  .triage-row {
+    min-height: 44px;
+  }
+
+  .verb {
+    min-height: 44px;
+    min-width: 44px;
+  }
+
+  .desk-chip {
+    min-height: 32px;
+  }
+
+  /* Drawer becomes a bottom sheet (64% height). */
+  .drawer {
+    top: auto;
+    left: 0;
+    right: 0;
+    bottom: 0;
+    width: auto;
+    height: 64%;
+    border-left: none;
+    border-top: 1px solid #8a94a8;
+  }
+}
+
+/* ── STOP ALL (embedded in the HUD, also repeated in AutomationPanel) ─ */
+
+.stop-all {
+  display: inline-flex;
+}
+
+/* ── Generic modal chrome (stage-3 panel ports) ────────────────────── */
+
+.modal-backdrop {
+  position: fixed;
+  inset: 0;
+  background: rgba(10, 12, 16, 0.6);
+  z-index: 45;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.modal {
+  display: flex;
+  flex-direction: column;
+  width: min(480px, 92vw);
+  max-height: 82vh;
+  background: #171b22;
+  border: 1px solid #3a4150;
+  font-size: 12px;
+  z-index: 46;
+}
+
+.modal--wide {
+  width: min(720px, 94vw);
+}
+
+.modal__head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  padding: 8px 10px;
+  border-bottom: 1px solid #2c3240;
+  flex: 0 0 auto;
+}
+
+.modal__title {
+  font-weight: 700;
+  letter-spacing: 0.05em;
+}
+
+.modal__body {
+  overflow-y: auto;
+  padding: 10px 12px;
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+.modal__intro {
+  opacity: 0.85;
+  margin: 0;
+}
+
+.modal__warn {
+  padding: 6px 8px;
+  border: 1px dashed #8a94a8;
+  font-weight: 700;
+}
+
+.modal__muted {
+  opacity: 0.7;
+}
+
+.modal__footnote {
+  opacity: 0.6;
+  font-size: 11px;
+  margin: 4px 0 0;
+}
+
+.modal__actions {
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 8px;
+  padding-top: 4px;
+}
+
+.modal__budget-chip {
+  margin-right: auto;
+  opacity: 0.75;
+  font-size: 11px;
+  white-space: nowrap;
+}
+
+/* Form controls inside any modal share one look. */
+.modal input[type='text'],
+.modal input[type='number'],
+.modal select,
+.modal textarea {
+  font: inherit;
+  color: inherit;
+  background: #101318;
+  border: 1px solid #3a4150;
+  padding: 6px 8px;
+}
+
+.modal textarea {
+  min-height: 72px;
+  resize: vertical;
+}
+
+.field {
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+}
+
+.field__label {
+  font-weight: 700;
+  font-size: 11px;
+  opacity: 0.8;
+}
+
+.field__hint {
+  font-size: 11px;
+  opacity: 0.65;
+}
+
+.field__hint--warn {
+  opacity: 1;
+  font-weight: 700;
+}
+
+@media (max-width: 700px) {
+  .modal-backdrop {
+    align-items: flex-end;
+  }
+
+  .modal {
+    width: 100%;
+    max-height: 88vh;
+  }
+}
+
+/* ── HELP modal ─────────────────────────────────────────────────────── */
+
+.help-category {
+  border-bottom: 1px solid #232936;
+  padding-bottom: 8px;
+}
+
+.help-category__toggle {
+  width: 100%;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  font: inherit;
+  font-weight: 700;
+  color: inherit;
+  background: none;
+  border: none;
+  cursor: pointer;
+  padding: 6px 0;
+  min-height: 32px;
+}
+
+.help-category__count {
+  font-weight: 400;
+  opacity: 0.6;
+  font-size: 11px;
+}
+
+.help-category__body {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  padding-top: 4px;
+}
+
+.help-section__title {
+  font-size: 12px;
+  font-weight: 700;
+  margin: 0 0 4px;
+}
+
+.help-section__intro {
+  opacity: 0.7;
+  margin: 0 0 6px;
+}
+
+.help-section__entries {
+  display: flex;
+  flex-direction: column;
+  gap: 5px;
+}
+
+.help-entry {
+  display: flex;
+  gap: 10px;
+  align-items: baseline;
+}
+
+.help-entry__label {
+  flex: 0 0 auto;
+  min-width: 150px;
+  font-weight: 700;
+}
+
+.help-entry__text {
+  opacity: 0.85;
+}
+
+/* ── Settings modal ─────────────────────────────────────────────────── */
+
+.settings-list {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.settings-row {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 7px 0;
+  border-bottom: 1px solid #232936;
+  cursor: pointer;
+}
+
+.settings-row__state {
+  margin-left: auto;
+  opacity: 0.7;
+}
+
+.settings-dirs {
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+  padding-top: 8px;
+}
+
+.settings-dirs__label {
+  font-weight: 700;
+  font-size: 11px;
+  opacity: 0.7;
+}
+
+.settings-dirs__item {
+  opacity: 0.8;
+}
+
+/* ── Debug view ─────────────────────────────────────────────────────── */
+
+.debug-table-wrap {
+  overflow-x: auto;
+}
+
+.debug-table {
+  border-collapse: collapse;
+  width: 100%;
+  font-size: 11px;
+}
+
+.debug-table th,
+.debug-table td {
+  border: 1px solid #232936;
+  padding: 4px 6px;
+  text-align: left;
+  white-space: nowrap;
+}
+
+.debug-table th {
+  background: #1b1f27;
+  font-weight: 700;
+}
+
+/* ── Dispatch tray (bottom-left, always-visible strip) ────────────── */
+
+.dispatch-tray {
+  position: absolute;
+  left: 10px;
+  bottom: 10px;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  z-index: 15;
+  max-width: min(360px, 80vw);
+}
+
+.dispatch-chip {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 5px 8px;
+  background: #171b22f2;
+  border: 1px solid #3a4150;
+  font-size: 11px;
+}
+
+.dispatch-chip--clickable {
+  cursor: pointer;
+}
+
+.dispatch-chip--warn {
+  border-style: dashed;
+}
+
+.dispatch-chip__dismiss {
+  margin-left: auto;
+  background: none;
+  border: none;
+  color: inherit;
+  cursor: pointer;
+  opacity: 0.7;
+  flex: 0 0 auto;
+}
+
+.dispatch-result {
+  white-space: pre-wrap;
+  word-break: break-word;
+  font-size: 11px;
+  user-select: text;
+  margin: 0;
+}
+
+/* ── Panel dock (compact-dock half of the desktop chrome model) ───── */
+
+.panel-dock {
+  position: absolute;
+  right: 10px;
+  bottom: 10px;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  z-index: 15;
+}
+
+.panel-dock__item {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 5px 8px;
+  background: #171b22f2;
+  border: 1px solid #3a4150;
+  color: inherit;
+  font: inherit;
+  font-size: 11px;
+  cursor: pointer;
+  min-height: 28px;
+}
+
+.panel-dock__glyph {
+  flex: 0 0 auto;
+  width: 1.2em;
+  text-align: center;
+}
+
+@media (max-width: 700px) {
+  /* In-flow on phone (last row of the .app flex column), never an overlay:
+     the absolute bottom-right dock obscured the FLOOR FEED's newest lines
+     (stage-5 finding). One horizontally scrollable row, and the text labels
+     STAY — glyph-only buttons failed the shape+label audit (▤/▦/▥ are
+     indistinguishable shapes; hard rule 1). */
+  .panel-dock {
+    position: static;
+    flex: 0 0 auto;
+    flex-direction: row;
+    overflow-x: auto;
+    padding: 4px 10px;
+    border-top: 1px solid #3a4150;
+  }
+
+  .panel-dock__item {
+    flex: 0 0 auto;
+    min-height: 44px;
+    min-width: 44px;
+  }
+
+  .dispatch-tray {
+    max-width: calc(100vw - 20px);
+  }
+}
+
+/* ── World prop hotspots ("room is interface" half) — desktop only,  ─
+   no free camera play on phone so this affordance doesn't apply there
+   (matches the pin dock's own desktop-only rule). */
+
+.prop-hotspots {
+  position: absolute;
+  inset: 0;
+  overflow: hidden;
+  pointer-events: none;
+}
+
+.prop-hotspot {
+  position: absolute;
+  transform: translate(-50%, -50%);
+  pointer-events: auto;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 2px;
+  padding: 4px 6px;
+  background: #171b22cc;
+  border: 1px solid #3a4150;
+  color: inherit;
+  font: inherit;
+  font-size: 10px;
+  cursor: pointer;
+  line-height: 1;
+}
+
+.prop-hotspot__glyph {
+  font-size: 14px;
+}
+
+@media (max-width: 700px) {
+  .prop-hotspots {
+    display: none;
+  }
+}
+
+/* ── Automation panel (chains + standing orders) ───────────────────── */
+
+.automation-panel {
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+}
+
+.automation-panel__stopall {
+  display: flex;
+  justify-content: flex-end;
+}
+
+.automation-section {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.automation-list {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.automation-card {
+  display: flex;
+  flex-direction: column;
+  gap: 5px;
+  padding: 6px 8px;
+  background: #101318;
+  border: 1px solid #2c3240;
+}
+
+.automation-card--row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+}
+
+.automation-form {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  padding-top: 6px;
+  border-top: 1px solid #232936;
+}
+
+/* ── Briefing panel ─────────────────────────────────────────────────── */
+
+.briefing-section {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.briefing-section__title {
+  margin: 0;
+  font-size: 12px;
+  font-weight: 700;
+  letter-spacing: 0.04em;
+}
+
+.briefing-todo-list {
+  list-style: decimal;
+  padding-left: 18px;
+  margin: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 5px;
+}
+
+.briefing-todo-list__item {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+}
+
+.briefing-gates {
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+}
+
+.briefing-gate-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  padding: 3px 0;
+  border-bottom: 1px solid #232936;
+}
+
+/* ── Shift panel ────────────────────────────────────────────────────── */
+
+.shift-rows {
+  display: flex;
+  flex-direction: column;
+}
+
+.shift-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  padding: 4px 0;
+  border-bottom: 1px solid #232936;
+}
+
+.shift-row__value {
+  font-variant-numeric: tabular-nums;
+  text-align: right;
+}
+
+.shift-efficiency {
+  padding-top: 4px;
+}
+
+.shift-yesterday {
+  padding-top: 8px;
+  border-top: 1px solid #232936;
+}
+
+.shift-yesterday__head {
+  font-size: 11px;
+  font-weight: 700;
+  opacity: 0.7;
+  margin-bottom: 3px;
+}
+
+/* ── Signal chip (contracts, real/sim distinction) ─────────────────── */
+
+.signal-chip {
+  padding: 2px 6px;
+  border: 1px solid #3a4150;
+  font-size: 11px;
+  white-space: nowrap;
+}
+
+.signal-chip--sim {
+  border-style: dashed;
+  opacity: 0.75;
+}
