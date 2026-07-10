@@ -5,7 +5,7 @@
  * occupant renders the occupant block + name/status label (shape + text).
  */
 
-import type { TilePoint } from './iso';
+import { type TilePoint, tileToWorld } from './iso';
 
 export const DEFAULT_COLS = 14;
 export const DEFAULT_ROWS = 10;
@@ -14,11 +14,15 @@ export const DEFAULT_MAX_ELEVATION = 0;
 export type PropKind = 'desk' | 'plant' | 'coffee' | 'door';
 
 export interface Occupant {
+  /** Real server agent id — chip click opens this agent's drawer. */
+  agentId: number;
   name: string;
   /** e.g. '▶' — shape half of the status signal. */
   statusGlyph: string;
-  /** e.g. 'ACTIVE' — text half of the status signal. */
+  /** e.g. 'WORKING' — text half of the status signal. */
   statusWord: string;
+  /** Loud states (NEEDS INPUT / FAILED) render inverted chips. */
+  loud: boolean;
 }
 
 export interface WorldProp {
@@ -65,4 +69,42 @@ export function buildProps(occupants: readonly Occupant[]): WorldProp[] {
     occupant: occupants[index],
   }));
   return [...desks, ...STATIC_PROPS];
+}
+
+/** World-px lift from a desk's tile center to its chip anchor (above the
+ *  desk box + occupant block; the DOM chip layer hangs labels here). */
+export const CHIP_ANCHOR_LIFT = 44;
+
+export interface DeskAnchor {
+  agentId: number;
+  occupant: Occupant;
+  /** Chip anchor in WORLD px (tile center lifted by CHIP_ANCHOR_LIFT). */
+  worldX: number;
+  worldY: number;
+  /** Desk tile center in WORLD px (camera walk target). */
+  deskWorldX: number;
+  deskWorldY: number;
+}
+
+/**
+ * Occupied desks with their chip/camera anchors — the single source for
+ * both the DOM chip layer and the ▸ DESK camera walk, so labels and walks
+ * always agree on where an agent sits.
+ */
+export function occupiedDeskAnchors(occupants: readonly Occupant[]): DeskAnchor[] {
+  const anchors: DeskAnchor[] = [];
+  occupants.forEach((occupant, index) => {
+    const slot = DESK_SLOTS[index];
+    if (!slot) return;
+    const { worldX, worldY } = tileToWorld(slot.tileX, slot.tileY);
+    anchors.push({
+      agentId: occupant.agentId,
+      occupant,
+      worldX,
+      worldY: worldY - CHIP_ANCHOR_LIFT,
+      deskWorldX: worldX,
+      deskWorldY: worldY,
+    });
+  });
+  return anchors;
 }

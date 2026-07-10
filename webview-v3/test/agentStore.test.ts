@@ -1,7 +1,9 @@
 import { describe, expect, it } from 'vitest';
 
 import type { ServerMessage } from '../../core/src/messages.js';
-import { EMPTY_AGENTS, reduceAgents, toOccupants } from '../src/net/agentStore';
+import { agentIdentity, EMPTY_AGENTS, reduceAgents, toOccupants } from '../src/net/agentStore';
+
+const NOW = 1_000_000;
 
 const EXISTING: ServerMessage = {
   type: 'existingAgents',
@@ -11,100 +13,172 @@ const EXISTING: ServerMessage = {
   externalAgents: {},
   machines: { '1': 'MACBOOK', '2': 'NEXUS' },
   providers: { '1': 'claude', '2': 'codex' },
+  sessionIds: { '1': 'sess-1' },
+  cwds: { '1': '/Users/greg/code/turffinder' },
+  pids: { '1': 4242 },
 };
 
 describe('agent reducer (core generated types)', () => {
   it('rebuilds the roster from existingAgents with WAITING as the honest default', () => {
-    const agents = reduceAgents(EMPTY_AGENTS, EXISTING);
+    const agents = reduceAgents(EMPTY_AGENTS, EXISTING, NOW);
     expect(agents.size).toBe(2);
     expect(agents.get(1)).toEqual({
       id: 1,
       name: 'turffinder',
       machine: 'MACBOOK',
       provider: 'claude',
+      sessionId: 'sess-1',
+      cwd: '/Users/greg/code/turffinder',
+      pid: 4242,
       status: 'waiting',
       awaitingInput: false,
+      toolPermission: false,
+      inputTokens: 0,
+      outputTokens: 0,
     });
     expect(agents.get(2)?.name).toBe('war-room');
+    expect(agents.get(2)?.sessionId).toBeUndefined();
   });
 
-  it('adds on agentCreated with folderName fallback', () => {
-    const created = reduceAgents(EMPTY_AGENTS, { type: 'agentCreated', id: 7 });
+  it('adds on agentCreated with folderName fallback + identity facts', () => {
+    const created = reduceAgents(EMPTY_AGENTS, { type: 'agentCreated', id: 7 }, NOW);
     expect(created.get(7)?.name).toBe('AGENT 7');
-    const named = reduceAgents(created, {
-      type: 'agentCreated',
-      id: 8,
-      folderName: 'brain2-vault',
-      machine: 'NEXUS',
-    });
+    const named = reduceAgents(
+      created,
+      {
+        type: 'agentCreated',
+        id: 8,
+        folderName: 'brain2-vault',
+        machine: 'NEXUS',
+        sessionId: 'sess-8',
+        cwd: '/data/brain2',
+        pid: 99,
+      },
+      NOW,
+    );
     expect(named.get(8)?.name).toBe('brain2-vault');
+    expect(named.get(8)?.sessionId).toBe('sess-8');
+    expect(named.get(8)?.cwd).toBe('/data/brain2');
+    expect(named.get(8)?.pid).toBe(99);
     expect(named.size).toBe(2);
   });
 
   it('updates status/awaitingInput on agentStatus and removes on agentClosed', () => {
-    let agents = reduceAgents(EMPTY_AGENTS, EXISTING);
-    agents = reduceAgents(agents, { type: 'agentStatus', id: 1, status: 'active' });
+    let agents = reduceAgents(EMPTY_AGENTS, EXISTING, NOW);
+    agents = reduceAgents(agents, { type: 'agentStatus', id: 1, status: 'active' }, NOW);
     expect(agents.get(1)?.status).toBe('active');
-    agents = reduceAgents(agents, {
-      type: 'agentStatus',
-      id: 2,
-      status: 'waiting',
-      awaitingInput: true,
-    });
+    agents = reduceAgents(
+      agents,
+      { type: 'agentStatus', id: 2, status: 'waiting', awaitingInput: true },
+      NOW,
+    );
     expect(agents.get(2)?.awaitingInput).toBe(true);
-    agents = reduceAgents(agents, { type: 'agentClosed', id: 1 });
+    agents = reduceAgents(agents, { type: 'agentClosed', id: 1 }, NOW);
     expect(agents.has(1)).toBe(false);
     expect(agents.size).toBe(1);
   });
 
+  it('anchors agentPollState.since to the server ageMs, and clears on undefined state', () => {
+    let agents = reduceAgents(EMPTY_AGENTS, EXISTING, NOW);
+    agents = reduceAgents(
+      agents,
+      {
+        type: 'agentPollState',
+        id: 1,
+        state: 'blocked',
+        waitingFor: 'Approve? (y/n)',
+        ageMs: 30_000,
+      },
+      NOW,
+    );
+    expect(agents.get(1)?.poll).toEqual({
+      state: 'blocked',
+      waitingFor: 'Approve? (y/n)',
+      since: NOW - 30_000,
+      receivedAt: NOW,
+      stale: false,
+    });
+    agents = reduceAgents(agents, { type: 'agentPollState', id: 1 }, NOW + 1_000);
+    expect(agents.get(1)?.poll).toBeUndefined();
+  });
+
+  it('tracks token usage, pid updates, and the tool-permission window', () => {
+    let agents = reduceAgents(EMPTY_AGENTS, EXISTING, NOW);
+    agents = reduceAgents(
+      agents,
+      { type: 'agentTokenUsage', id: 2, inputTokens: 12_345, outputTokens: 678 },
+      NOW,
+    );
+    expect(agents.get(2)?.inputTokens).toBe(12_345);
+    expect(agents.get(2)?.outputTokens).toBe(678);
+    agents = reduceAgents(agents, { type: 'agentPidUpdate', id: 2, pid: 555 }, NOW);
+    expect(agents.get(2)?.pid).toBe(555);
+    agents = reduceAgents(agents, { type: 'agentToolPermission', id: 2 }, NOW);
+    expect(agents.get(2)?.toolPermission).toBe(true);
+    agents = reduceAgents(agents, { type: 'agentToolPermissionClear', id: 2 }, NOW);
+    expect(agents.get(2)?.toolPermission).toBe(false);
+  });
+
   it('returns the SAME reference for irrelevant or unknown-id messages', () => {
-    const agents = reduceAgents(EMPTY_AGENTS, EXISTING);
-    expect(reduceAgents(agents, { type: 'agentSelected', id: 1 })).toBe(agents);
-    expect(reduceAgents(agents, { type: 'agentStatus', id: 99, status: 'active' })).toBe(agents);
-    expect(reduceAgents(agents, { type: 'agentClosed', id: 99 })).toBe(agents);
+    const agents = reduceAgents(EMPTY_AGENTS, EXISTING, NOW);
+    expect(reduceAgents(agents, { type: 'agentSelected', id: 1 }, NOW)).toBe(agents);
+    expect(reduceAgents(agents, { type: 'agentStatus', id: 99, status: 'active' }, NOW)).toBe(
+      agents,
+    );
+    expect(reduceAgents(agents, { type: 'agentClosed', id: 99 }, NOW)).toBe(agents);
+    expect(reduceAgents(agents, { type: 'agentToolPermissionClear', id: 1 }, NOW)).toBe(agents);
   });
 
   it('never mutates the previous map (React state contract)', () => {
-    const agents = reduceAgents(EMPTY_AGENTS, EXISTING);
-    reduceAgents(agents, { type: 'agentStatus', id: 1, status: 'active' });
+    const agents = reduceAgents(EMPTY_AGENTS, EXISTING, NOW);
+    reduceAgents(agents, { type: 'agentStatus', id: 1, status: 'active' }, NOW);
     expect(agents.get(1)?.status).toBe('waiting');
-    reduceAgents(agents, { type: 'agentClosed', id: 1 });
+    reduceAgents(agents, { type: 'agentClosed', id: 1 }, NOW);
     expect(agents.has(1)).toBe(true);
   });
 
+  describe('agentIdentity', () => {
+    it('formats "#id [MACHINE] name" with a LOCAL fallback', () => {
+      const agents = reduceAgents(EMPTY_AGENTS, EXISTING, NOW);
+      expect(agentIdentity(agents.get(1)!)).toBe('#1 [MACBOOK] turffinder');
+      expect(agentIdentity({ id: 9, machine: undefined, name: 'x' })).toBe('#9 [LOCAL] x');
+    });
+  });
+
   describe('toOccupants', () => {
-    it('orders by ascending id and encodes status as glyph + word', () => {
-      let agents = reduceAgents(EMPTY_AGENTS, EXISTING);
-      agents = reduceAgents(agents, { type: 'agentStatus', id: 2, status: 'active' });
-      const occupants = toOccupants(agents);
+    it('orders by ascending id and encodes status via the shared chip vocabulary', () => {
+      let agents = reduceAgents(EMPTY_AGENTS, EXISTING, NOW);
+      agents = reduceAgents(agents, { type: 'agentStatus', id: 2, status: 'active' }, NOW);
+      const occupants = toOccupants(agents, NOW);
       expect(occupants).toEqual([
-        { name: 'turffinder', statusGlyph: '⏸', statusWord: 'WAITING' },
-        { name: 'war-room', statusGlyph: '▶', statusWord: 'ACTIVE' },
+        { agentId: 1, name: 'turffinder', statusGlyph: '⏸', statusWord: 'WAITING', loud: false },
+        { agentId: 2, name: 'war-room', statusGlyph: '▶', statusWord: 'WORKING', loud: false },
       ]);
     });
 
-    it('awaitingInput wins over base status (✋ INPUT)', () => {
-      let agents = reduceAgents(EMPTY_AGENTS, EXISTING);
-      agents = reduceAgents(agents, {
-        type: 'agentStatus',
-        id: 1,
-        status: 'active',
-        awaitingInput: true,
-      });
-      expect(toOccupants(agents)[0]).toEqual({
+    it('awaitingInput wins over base status (⚠ NEEDS INPUT, loud)', () => {
+      let agents = reduceAgents(EMPTY_AGENTS, EXISTING, NOW);
+      agents = reduceAgents(
+        agents,
+        { type: 'agentStatus', id: 1, status: 'active', awaitingInput: true },
+        NOW,
+      );
+      expect(toOccupants(agents, NOW)[0]).toEqual({
+        agentId: 1,
         name: 'turffinder',
-        statusGlyph: '✋',
-        statusWord: 'INPUT',
+        statusGlyph: '⚠',
+        statusWord: 'NEEDS INPUT',
+        loud: true,
       });
     });
 
     it('truncates long names with an ellipsis', () => {
-      const agents = reduceAgents(EMPTY_AGENTS, {
-        type: 'agentCreated',
-        id: 1,
-        folderName: 'a-very-long-workspace-folder-name',
-      });
-      const [occupant] = toOccupants(agents);
+      const agents = reduceAgents(
+        EMPTY_AGENTS,
+        { type: 'agentCreated', id: 1, folderName: 'a-very-long-workspace-folder-name' },
+        NOW,
+      );
+      const [occupant] = toOccupants(agents, NOW);
       expect(occupant.name.length).toBeLessThanOrEqual(14);
       expect(occupant.name.endsWith('…')).toBe(true);
     });
