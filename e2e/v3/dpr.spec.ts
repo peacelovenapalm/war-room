@@ -5,6 +5,7 @@ import path from 'node:path';
 
 import { type Browser, expect, test } from '@playwright/test';
 import { PNG } from 'pngjs';
+import { WebSocketServer } from 'ws';
 
 /**
  * PERMANENT DPR-3 regression e2e — KICKOFF-v3.1 Milestone 1 ("DPR done
@@ -22,10 +23,30 @@ import { PNG } from 'pngjs';
  *      fails this immediately.
  *
  * Modeled on .planning/v2/forensics/mobile-forensics.spec.ts (host-spawn +
- * dense-grid canvas sampler), but standalone-static: webview-v3 paints its
- * placeholder world with no server (skeleton-first hard rule), so no
- * dist/cli.js host is needed here.
+ * dense-grid canvas sampler). Instead of spawning dist/cli.js (which serves
+ * the frozen webview-ui, not webview-v3), the static host carries a
+ * scripted mock `/ws` speaking the real core/asyncapi.yaml protocol —
+ * the same mock-not-real-Claude pattern the existing e2e suite uses. It
+ * replies to webviewReady with existingAgents + agentCreated + agentStatus
+ * so real-agent desk occupancy is asserted, not just the empty floor.
  */
+
+/** Scripted server messages (shapes from core/src/messages.ts). */
+const MOCK_SERVER_SCRIPT: object[] = [
+  {
+    type: 'existingAgents',
+    agents: [1, 2],
+    agentMeta: {},
+    folderNames: { '1': 'war-room', '2': 'turffinder' },
+    externalAgents: {},
+    machines: { '1': 'MACBOOK', '2': 'MACBOOK' },
+    providers: { '1': 'claude', '2': 'claude' },
+  },
+  { type: 'agentCreated', id: 3, folderName: 'brain2-vault', machine: 'NEXUS' },
+  { type: 'agentStatus', id: 1, status: 'active' },
+  { type: 'agentStatus', id: 3, status: 'waiting', awaitingInput: true },
+];
+const MOCK_AGENT_COUNT = 3;
 
 declare global {
   interface Window {
@@ -89,6 +110,10 @@ async function serveV3Dist(): Promise<StaticHost> {
   }
   const port = await getFreePort();
   const server = http.createServer((req, res) => {
+    if (req.url === '/api/health') {
+      res.writeHead(200, { 'Content-Type': 'application/json' }).end('{"ok":true}');
+      return;
+    }
     const requestPath = decodeURIComponent((req.url ?? '/').split('?')[0]);
     const relative = requestPath === '/' ? 'index.html' : requestPath.replace(/^\/+/, '');
     const resolved = path.normalize(path.join(V3_DIST, relative));
@@ -107,6 +132,23 @@ async function serveV3Dist(): Promise<StaticHost> {
       res.end(data);
     });
   });
+  // Mock server plane on the same origin the app dials (`/ws`): replies to
+  // webviewReady with the scripted real-protocol messages above.
+  const wss = new WebSocketServer({ server, path: '/ws' });
+  wss.on('connection', (socket) => {
+    socket.on('message', (data: Buffer) => {
+      try {
+        const message = JSON.parse(data.toString()) as { type?: string };
+        if (message.type === 'webviewReady') {
+          for (const serverMessage of MOCK_SERVER_SCRIPT) {
+            socket.send(JSON.stringify(serverMessage));
+          }
+        }
+      } catch {
+        // Ignore non-JSON frames.
+      }
+    });
+  });
   await new Promise<void>((resolve) => {
     server.listen(port, '127.0.0.1', resolve);
   });
@@ -114,9 +156,12 @@ async function serveV3Dist(): Promise<StaticHost> {
     url: `http://127.0.0.1:${String(port)}`,
     close: () =>
       new Promise<void>((resolve, reject) => {
-        server.close((error) => {
-          if (error) reject(error);
-          else resolve();
+        for (const client of wss.clients) client.terminate();
+        wss.close(() => {
+          server.close((error) => {
+            if (error) reject(error);
+            else resolve();
+          });
         });
       }),
   };
@@ -183,6 +228,16 @@ async function runAtDsf(
       timeout: 20_000,
     })
     .toBeGreaterThanOrEqual(1);
+
+  // Live agents over the mock WS: webviewReady -> existingAgents(2) +
+  // agentCreated(1) must land as 3 occupied placeholder desks.
+  await expect
+    .poll(() => page.evaluate(() => window.__warRoomV3TestHooks?.getAgentCount() ?? 0), {
+      timeout: 20_000,
+    })
+    .toBe(MOCK_AGENT_COUNT);
+  await expect(page.getByTestId('hud-connection')).toHaveText('● LIVE');
+  await expect(page.getByTestId('hud-agents')).toHaveText(`◉ AGENTS ${String(MOCK_AGENT_COUNT)}`);
 
   const metrics = await page.evaluate(() => {
     const element = document.querySelector('[data-testid="iso-canvas"]');
@@ -261,6 +316,11 @@ test('DPR-3 WebKit 390x664: non-blank iso canvas, capped resolution, DSF-1 frami
 
     // 4. Canvas fills the viewport width (fit-to-view had a real area to work with).
     expect(dsf3.cssWidth).toBeGreaterThanOrEqual(VIEWPORT.width - 2);
+
+    // 5. Real agents occupied desks in both contexts (asserted per-run via
+    //    the poll above; re-checked here so the report shows the counts).
+    expect(dsf3.agentCount).toBe(MOCK_AGENT_COUNT);
+    expect(dsf1.agentCount).toBe(MOCK_AGENT_COUNT);
   } finally {
     await host.close();
   }

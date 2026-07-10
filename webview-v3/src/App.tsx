@@ -1,22 +1,25 @@
-import { useCallback, useEffect, useRef, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 
 import { fitToView } from './engine/camera';
 import { mapWorldBounds } from './engine/iso';
 import { renderWorld } from './engine/renderer';
 import { getCanvasResolution } from './engine/resolution';
-import {
-  buildProps,
-  DEFAULT_COLS,
-  DEFAULT_MAX_ELEVATION,
-  DEFAULT_ROWS,
-  type Occupant,
-} from './engine/world';
+import { buildProps, DEFAULT_COLS, DEFAULT_MAX_ELEVATION, DEFAULT_ROWS } from './engine/world';
+import { type AgentMap, EMPTY_AGENTS, reduceAgents, toOccupants } from './net/agentStore';
+import { type ConnectionStatus, connectToServer } from './net/connection';
 import { installTestHooksIfE2E } from './testHooks';
+
+const CONNECTION_CHIP: Record<ConnectionStatus, string> = {
+  connecting: '◌ CONNECTING',
+  live: '● LIVE',
+  offline: '✕ OFFLINE',
+};
 
 /**
  * Stage-1 iso foundation face: HUD strip (DOM) over the placeholder iso
  * floor (canvas). Skeleton-first: the world paints immediately from
- * procedural placeholders — no asset or server required for first paint.
+ * procedural placeholders — no asset or server required for first paint;
+ * the live WS then fills desks with real agents as messages arrive.
  */
 export default function App() {
   const containerRef = useRef<HTMLDivElement | null>(null);
@@ -26,7 +29,9 @@ export default function App() {
   const lastCameraRef = useRef<ReturnType<typeof fitToView> | null>(null);
 
   const [grayscale, setGrayscale] = useState(false);
-  const [occupants] = useState<readonly Occupant[]>([]);
+  const [connectionStatus, setConnectionStatus] = useState<ConnectionStatus>('connecting');
+  const [agents, setAgents] = useState<AgentMap>(EMPTY_AGENTS);
+  const occupants = useMemo(() => toOccupants(agents), [agents]);
   const occupantsRef = useRef(occupants);
 
   const draw = useCallback(() => {
@@ -82,6 +87,19 @@ export default function App() {
     draw();
   }, [draw, occupants]);
 
+  // Live agents over the real server WS (core/ generated message types).
+  useEffect(() => {
+    const connection = connectToServer({
+      onMessage: (message) => {
+        setAgents((previous) => reduceAgents(previous, message));
+      },
+      onStatus: setConnectionStatus,
+    });
+    return () => {
+      connection.dispose();
+    };
+  }, []);
+
   useEffect(() => {
     installTestHooksIfE2E({
       getRenderCount: () => renderCountRef.current,
@@ -95,6 +113,9 @@ export default function App() {
     <div className={grayscale ? 'app grayscale' : 'app'}>
       <header className="hud">
         <span className="brand">WAR ROOM · V3</span>
+        <span className="chip" data-testid="hud-connection">
+          {CONNECTION_CHIP[connectionStatus]}
+        </span>
         <span className="chip" data-testid="hud-agents">
           ◉ AGENTS {occupants.length}
         </span>
