@@ -29,3 +29,11 @@ draw chair first, then person, same tile, rotation facing the desk.
 `imagegen/*` assets are plain rectangular art (posters/textures as
 wall/floor fills, portraits keyed by dossier id) — no tile anchor math
 applies to them.
+
+**QA:** `tools/asset-pipeline/viewer.html` loads every file in this
+directory and renders it (anchor-on-diamond check for every prop
+rotation, a cross-manifest composite room, playing character
+animations, an imagegen grid). `npm run validate` (in
+`tools/asset-pipeline/`) schema-validates all three manifests here
+against the KICKOFF-v3.1 contract, independent of `pack.py`. See
+`tools/asset-pipeline/README.md` → "Stage 4 — QA harness".

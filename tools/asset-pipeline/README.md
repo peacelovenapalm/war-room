@@ -155,7 +155,32 @@ verbatim in every other prompt for consistency), 6 wall posters/signage
 vocabulary chart, WAR ROOM logo board), 4 seamless-ish textures (wood
 floor, carpet, brick, corkboard).
 
-## Not yet built
+## Stage 4 — QA harness
 
-HTML sheet-viewer QA harness (screenshot + anchor/alignment check +
-manifest schema validation) — out of Stage 3 scope, still open.
+Zero-dependency HTML viewer + two Node scripts, scoped entirely to this
+directory (its own `package.json`, not part of the root workspaces
+array — WS-B must not touch anything outside `tools/asset-pipeline/`
+and `webview-v3-assets/`).
+
+```sh
+cd tools/asset-pipeline
+npm install              # once — installs playwright (JS driver only;
+                          # reuses the machine's existing cached Chromium
+                          # build under ~/Library/Caches/ms-playwright,
+                          # no browser re-download if versions align)
+npm run validate          # schema-validate every staged manifest
+npm run screenshot         # DPR-1 + DPR-3 captures of viewer.html
+# or, via make:
+make qa                    # validate + screenshots
+```
+
+| File | Role |
+| --- | --- |
+| `viewer.html` | Zero-dependency (no build step, no CDN) HTML+canvas harness. Fetches all 3 manifests + all 5 spritesheets + 22 imagegen PNGs straight from `../../webview-v3-assets/` and re-implements the documented drawing rule `screenOf(tile) − anchor` independently of any game engine code, so it validates the manifest contract itself rather than trusting a consumer. Renders: **(A)** every prop × rotation on its own diamond-guide tile (the anchor dot must land on the prop's visual base), **(B)** a bonus composite room built from every prop + every character outfit + both cats via painter's-algorithm depth sort (catches cross-sprite scale/z issues isolated per-prop tiles can't), **(C)** every character animation actually cycling frames at its manifest `fps`, **(D)** the imagegen assets in a captioned grid. Self-reports pass/fail via `window.__viewerDone` / `window.__viewerFailCount` (text-labelled PASS/FAIL, never color-only, per the vault's colorblind-safe rule) so headless capture can assert on it. |
+| `validate-manifest.mjs` | Independent Node (zero deps) schema gate — the consumer-side counterpart to `pack.py`'s Python/Pillow validation gate. Checks `version`/`sheets`/`sheetSizes`/`tilePx`/`renderScale`/`sprites[]` shape, that declared `sheetSizes` matches the actual PNG's IHDR dimensions (catches a stale sheet next to a regenerated manifest, or vice versa), anchor-inside-frame, `rotations`/`frames` key parity, per-frame rect-inside-sheet + a full pairwise overlap check, and that each frame's absolute `anchor` equals `frame origin + relative anchor`. Also validates `imagegen/manifest.json`'s flat schema + per-file budget. Run via `npm run validate` / `make validate`. |
+| `screenshot-viewer.mjs` | Serves the repo root over plain HTTP (so `viewer.html`'s relative `fetch()`/`Image` src resolve — `fetch` on `file://` is CORS-blocked in Chromium), loads it in Playwright Chromium at `deviceScaleFactor` 1 and 3, asserts zero console/page errors and `__viewerFailCount === 0`, then saves full-page PNGs to `.planning/v3/screenshots/assets/viewer-dpr{1,3}.png`. Canvases size their backing store to `window.devicePixelRatio` explicitly (not just CSS pixels), so the DPR-3 capture is genuinely higher-fidelity, not a blurry upscale of the DPR-1 raster — verified by diffing a native-resolution crop of the same on-screen region at both DPRs. |
+
+Result as of the Stage 4 run: **0 manifest schema failures, 0 viewer
+QA failures, 0 console errors at either DPR** — the alignment/anchor
+math has been correct since Stage 1/2 pack.py output; Stage 4 found no
+defects to fix.
