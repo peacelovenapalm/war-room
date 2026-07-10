@@ -5,6 +5,7 @@ import type { AgentEvent, HookProvider } from '../../core/src/provider.js';
 import type { AgentStateStore } from './agentStateStore.js';
 import { buffsForDesk, globalBuffs } from './buildingBuffs.js';
 import { SESSION_END_GRACE_MS } from './constants.js';
+import { dossierDerivation } from './dossierDerivation.js';
 import { economyStore } from './economyStore.js';
 import { employeeStore, XP_TURN } from './employeeStore.js';
 import { getOfficeLayout } from './officeLayoutStore.js';
@@ -754,6 +755,17 @@ export class HookEventHandler {
       // and exclusion as above — Cash + the once/day streak-touch bonus,
       // plus the Server Room global Cash bonus computed above.
       economyStore.recordTurnCompleted(undefined, cashBonusPct);
+      // Dossiers (v3 WS-C stage 2): the same real Stop event feeds the
+      // staff-lineage telemetry (turn count, night-hour fraction, output-
+      // token burn) — added alongside, not instead of; dossierDerivation
+      // derives its own per-turn token delta from the cumulative total,
+      // the same pattern employeeStore uses above.
+      dossierDerivation.recordTurn(
+        agent.machine,
+        agent.projectDir,
+        agent.folderName ?? path.basename(agent.projectDir),
+        agent.outputTokens,
+      );
     }
     this.markAgentWaiting(agent, agentId, awaitingInput);
   }
