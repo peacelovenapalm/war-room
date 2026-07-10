@@ -151,3 +151,43 @@ at all — kill's containment is these two independent mechanisms instead;
 full audit trail on both ends (server: dispatch/pid-kill audit log; runner:
 its own append-only audit log, `kill-signal-sent`/`pid-killed`/
 `pid-kill-denied`/etc.).
+
+## Amendment #2 (2026-07-10) — output streaming is TELEMETRY
+
+KICKOFF-v2.0 Phase 2 added live output streaming: an in-memory ring buffer
+(`server/src/outputRingStore.ts`, per-(source,id) streams, byte-budgeted,
+NEVER persisted — the PidKillRecord ephemerality precedent), a
+subscription-gated WS fan-out (`tailSubscribe`/`tailUnsubscribe` +
+`outputChunk`, delivered ONLY to subscribed sockets), a local JSONL
+transcript tap (`server/src/transcriptOutputTap.ts` riding fileWatcher's
+existing 500ms poll), a runner-side coalescing forwarder
+(`bin/lib/output-forwarder.mjs` → Bearer-authed
+`POST /api/dispatch/:id/output`, ~1s/~8KB flush, fire-and-forget against a
+dead server), and a DESIGN-ONLY per-machine remote transcript tailer
+(`.planning/v2/REMOTE-TAILER-DESIGN.md`).
+
+**Threat-model delta: none to containment.** Streaming is telemetry, full
+stop — chunks are output ABOUT runs, never commands INTO them:
+
+- **Runner-decides containment is unchanged.** The streaming plane never
+  spawns, signals, steers, or approves anything. Both kill containment
+  guarantees (registry-only dispatch kill, verification-gated pid kill),
+  the allowlist, STOP ALL, the standing-order first-fire confirm, and the
+  budget fail-safe are untouched and not reachable from any streaming code
+  path.
+- **Output never rides the poll response.** Runner→server output travels
+  as its own Bearer-authed POSTs, same trust tier as status/decision
+  reporting. The server-side route is liveness-gated (non-terminal
+  dispatches only) so a straggler POST can never resurrect an evicted ring
+  entry.
+- **The ONLY new imperative is the (designed, unbuilt) optional
+  tail-on/off** for the remote tailer — it rides the poll response's
+  existing drained-array pattern with the same at-most-once semantics as
+  `stop[]`, and it can only start or stop READING a transcript file inside
+  the tailer's own locally-enforced roots allowlist. It can never touch a
+  process, and the server cannot override the tailer's local refusal —
+  point 2 of this document applies to it verbatim.
+- **Ephemerality:** ring entries are evicted on terminal dispatch status
+  and on agent removal; a server restart loses buffered chunks by design.
+  The durable records remain the per-run log / resultTail and the
+  transcript files themselves.
