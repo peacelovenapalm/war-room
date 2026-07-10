@@ -575,6 +575,14 @@ export class DispatchStore {
         record.resultTail = input.resultTail.slice(-DISPATCH_RESULT_TAIL_MAX_CHARS);
       }
     } else {
+      if (record.status !== 'answered') {
+        // Duplicate/redelivered 'exited' report (retry wrapper, WS replay)
+        // for a record already terminal by any path — never re-commit or
+        // re-broadcast (would re-pile a dismissed rework crate and
+        // double-count dossier exit telemetry downstream).
+        this.audit('exit-already-terminal', record);
+        return { ok: true };
+      }
       record.status = 'exited';
       if (input.exitCode !== undefined) record.exitCode = input.exitCode;
       if (typeof input.resultTail === 'string') {

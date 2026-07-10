@@ -355,6 +355,34 @@ describe('DispatchStore.reportStatus', () => {
     expect(recent.find((r) => r.id === enq.record.id)?.resultTail).toBe('CODEX DISPATCH OK\n');
   });
 
+  it('a duplicate "exited" report for an already-terminal record is audit-only — never re-commits or re-broadcasts', () => {
+    const s = new DispatchStore(statePath, auditPath);
+    const enq = s.enqueue({
+      action: 'dispatch',
+      machine: 'MACBOOK',
+      provider: 'claude',
+      cwd: '/x',
+      prompt: 'p',
+    });
+    if (!enq.ok) throw new Error('unreachable');
+    s.decide(enq.record.id, 'accept', {});
+    const seen: string[] = [];
+    s.onUpdate((b) => seen.push(b.status));
+    s.reportStatus(enq.record.id, { event: 'exited', exitCode: 0, resultTail: 'first exit' });
+    expect(seen).toEqual(['exited']);
+    // A redelivered/duplicate POST for the same id (retry wrapper, WS
+    // replay) must not re-commit — a distinct second exitCode/resultTail
+    // must NOT overwrite the original terminal record, and no second
+    // broadcast should fire (that would re-pile a dismissed rework crate
+    // and double-count dossier telemetry downstream).
+    s.reportStatus(enq.record.id, { event: 'exited', exitCode: 1, resultTail: 'second exit' });
+    expect(seen).toEqual(['exited']); // no second broadcast
+    const recent = s.getRecent();
+    const record = recent.find((r) => r.id === enq.record.id);
+    expect(record?.exitCode).toBe(0);
+    expect(record?.resultTail).toBe('first exit');
+  });
+
   it('caps resultTail server-side regardless of what the runner sends', () => {
     const s = new DispatchStore(statePath, auditPath);
     const enq = s.enqueue({
