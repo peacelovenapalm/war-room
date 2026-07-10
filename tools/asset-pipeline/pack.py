@@ -22,9 +22,16 @@ Manifest schema (KICKOFF-v3.1 WS-B item 1):
   - attach  {name: {ROT: [[x,y] * 4]}}  frame-relative quads (e.g. the
             desk monitor screen face, for the DOM tail overlay)
 
+ANIMATED sprites (characters): when the raw meta lists MULTIPLE files
+per rotation, frames.ROT becomes an ARRAY of {x, y, anchor} in
+animation order and the sprite carries "fps" (0/absent = static).
+Union-trim spans all rotations AND all animation frames, so size and
+the frame-relative anchor stay uniform across the whole sprite — walk
+frames never jitter against the tile.
+
 Sprites are packed into deterministic atlas GROUPS (structure /
-furniture) so each PNG stays under the ~1MB budget and regeneration
-diffs stay local to one sheet.
+furniture / staff / pets) so each PNG stays under the ~1MB budget and
+regeneration diffs stay local to one sheet.
 """
 
 import argparse
@@ -38,17 +45,44 @@ ALPHA_TRIM = 8      # ignore shadow-catcher wash below this alpha
 PAD = 2             # px between packed frames (1x)
 SHEET_MAX_W = 2048
 
+# Soft-shadow alpha is denoised Cycles gradient — residual noise there
+# kills PNG filtering. Quantize alpha below the wash ceiling to 8/255
+# steps (~3% opacity — invisible in an already-soft gradient) and zero
+# RGB under fully transparent pixels: ~25% smaller sheets, no visible
+# change.
+SHADOW_QUANT_BELOW = 64
+SHADOW_QUANT_STEP = 8
+_ALPHA_LUT = [(i // SHADOW_QUANT_STEP) * SHADOW_QUANT_STEP
+              if i < SHADOW_QUANT_BELOW else i for i in range(256)]
+
+
+def compress_alpha(im):
+    a = im.getchannel("A").point(_ALPHA_LUT)
+    mask = a.point(lambda p: 255 if p else 0)
+    clean = Image.new("RGBA", im.size, (0, 0, 0, 0))
+    clean.paste(im, mask=mask)
+    clean.putalpha(a)
+    return clean
+
 # deterministic atlas grouping — keeps each PNG under the ~1MB budget
 GROUPS = {
     "structure": ("floor_tile", "floor_tile_b", "floor_tile_c",
                   "wall_straight", "wall_corner", "wall_window"),
 }
+# staff split into outfit pairs — one full-quality staff atlas lands
+# ~1.4MB, over the ~1MB-per-PNG budget
+PREFIX_GROUPS = (("cat", "pets"),
+                 ("worker_teal", "staff_a"), ("worker_rust", "staff_a"),
+                 ("worker_slate", "staff_b"), ("worker_moss", "staff_b"))
 DEFAULT_GROUP = "furniture"
 
 
 def group_of(prop):
     for g, names in GROUPS.items():
         if prop in names:
+            return g
+    for prefix, g in PREFIX_GROUPS:
+        if prop.startswith(prefix):
             return g
     return DEFAULT_GROUP
 
@@ -114,10 +148,15 @@ def main():
     sprites = []
     frames_by_group = {}
     for prop, entry in sorted(meta["props"].items()):
-        imgs = {r: Image.open(os.path.join(args.raw, entry["frames"][r]))
-                for r in rotations}
-        cw, ch = next(iter(imgs.values())).size
-        box = union_bbox(imgs.values())
+        # frames per rotation: single filename (props) or list (animated)
+        animated = any(isinstance(entry["frames"][r], list)
+                       for r in rotations)
+        seq = {r: (entry["frames"][r] if animated else [entry["frames"][r]])
+               for r in rotations}
+        imgs = {r: [Image.open(os.path.join(args.raw, f)) for f in files]
+                for r, files in seq.items()}
+        cw, ch = imgs[rotations[0]][0].size
+        box = union_bbox([im for lst in imgs.values() for im in lst])
         # grow the box so the floor-contact anchor is always INSIDE the
         # frame (edge-hugging props like walls otherwise trim past it)
         box = (min(box[0], int(anchor2x[0]) - 2),
@@ -139,6 +178,8 @@ def main():
             "group": group_of(prop),
             "frames": {},
         }
+        if entry.get("fps"):
+            sprite["fps"] = entry["fps"]
         # attach quads -> frame-relative 1x coords
         if entry.get("attach"):
             sprite["attach"] = {
@@ -151,10 +192,14 @@ def main():
                 for aname, per_rot in entry["attach"].items()
             }
         for r in rotations:
-            im = imgs[r].crop(box).resize((w1, h1), Image.LANCZOS)
-            fr = {"prop": prop, "rot": r, "img": im, "w": w1, "h": h1}
-            frames_by_group.setdefault(sprite["group"], []).append(fr)
-            sprite["frames"][r] = fr  # placeholder, positions filled below
+            placed = []
+            for im_src in imgs[r]:
+                im = compress_alpha(
+                    im_src.crop(box).resize((w1, h1), Image.LANCZOS))
+                fr = {"prop": prop, "rot": r, "img": im, "w": w1, "h": h1}
+                frames_by_group.setdefault(sprite["group"], []).append(fr)
+                placed.append(fr)  # placeholders, positions filled below
+            sprite["frames"][r] = placed if animated else placed[0]
         sprites.append(sprite)
 
     os.makedirs(args.stage, exist_ok=True)
@@ -173,14 +218,19 @@ def main():
         sheet_sizes.append([sheet_w, sheet_h])
         sheet_images[group] = sheet
 
+    def _emit(fr, ax, ay):
+        return {
+            "x": fr["x"], "y": fr["y"],
+            "anchor": [round(fr["x"] + ax, 1), round(fr["y"] + ay, 1)],
+        }
+
     for sprite in sprites:
         ax, ay = sprite["anchor"]
         sprite["sheet"] = group_index[sprite.pop("group")]
         for r, fr in list(sprite["frames"].items()):
-            sprite["frames"][r] = {
-                "x": fr["x"], "y": fr["y"],
-                "anchor": [round(fr["x"] + ax, 1), round(fr["y"] + ay, 1)],
-            }
+            sprite["frames"][r] = ([_emit(f, ax, ay) for f in fr]
+                                   if isinstance(fr, list)
+                                   else _emit(fr, ax, ay))
 
     manifest = {
         "version": 1,
@@ -203,8 +253,10 @@ def main():
               f"({size_kb:.0f} KB, {n} sprites)")
         if size_kb > 1024:
             errors.append(f"{sheet_file} {size_kb:.0f} KB exceeds ~1MB budget")
-    print(f"[pack] {len(sprites)} sprites, "
-          f"{sum(len(s['frames']) for s in sprites)} frames total")
+    n_frames = sum(
+        len(fr) if isinstance(fr, list) else 1
+        for s in sprites for fr in s["frames"].values())
+    print(f"[pack] {len(sprites)} sprites, {n_frames} frames total")
     if errors:
         for e in errors:
             print(f"[pack] FAIL {e}", file=sys.stderr)
@@ -228,21 +280,25 @@ def validate(manifest, sheet_images, group_index):
         if set(s["rotations"]) != set(s["frames"]):
             errors.append(f"{s['name']}: rotations/frames mismatch")
         for r, fr in s["frames"].items():
-            if fr["x"] + w > sw or fr["y"] + h > sh:
-                errors.append(f"{s['name']}/{r}: frame exceeds sheet")
-            rects.append((si, s["name"], r, fr["x"], fr["y"], w, h))
-            # frame must contain actual pixels
-            crop = sheet.crop((fr["x"], fr["y"], fr["x"] + w, fr["y"] + h))
-            if crop.getchannel("A").getbbox() is None:
-                errors.append(f"{s['name']}/{r}: frame is empty")
+            fr_list = fr if isinstance(fr, list) else [fr]
+            for fi, f in enumerate(fr_list):
+                tag = f"{s['name']}/{r}.{fi}" if len(fr_list) > 1 \
+                    else f"{s['name']}/{r}"
+                if f["x"] + w > sw or f["y"] + h > sh:
+                    errors.append(f"{tag}: frame exceeds sheet")
+                rects.append((si, tag, f["x"], f["y"], w, h))
+                # frame must contain actual pixels
+                crop = sheet.crop((f["x"], f["y"], f["x"] + w, f["y"] + h))
+                if crop.getchannel("A").getbbox() is None:
+                    errors.append(f"{tag}: frame is empty")
     for i in range(len(rects)):
         for j in range(i + 1, len(rects)):
-            s1, n1, r1, x1, y1, w1, h1 = rects[i]
-            s2, n2, r2, x2, y2, w2, h2 = rects[j]
+            s1, t1, x1, y1, w1, h1 = rects[i]
+            s2, t2, x2, y2, w2, h2 = rects[j]
             if s1 != s2:
                 continue
             if x1 < x2 + w2 and x2 < x1 + w1 and y1 < y2 + h2 and y2 < y1 + h1:
-                errors.append(f"overlap: {n1}/{r1} vs {n2}/{r2}")
+                errors.append(f"overlap: {t1} vs {t2}")
     return errors
 
 
