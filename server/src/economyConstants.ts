@@ -30,6 +30,14 @@ export const CASH_STREAK_DAY_TOUCH = 10;
  *  Nonzero exits pay 0, never negative. */
 export const CASH_PER_DISPATCH_EXIT_0 = 5;
 export const DISPATCH_CASH_DAILY_CAP = 50;
+/** v3 Living Studio wall contract (KICKOFF-v3.1 §1 "Aging contracts"):
+ *  paid ONLY when the contract's real vault todo disappears from the
+ *  compiled daily list (the observed done signal — studioContractIngest.ts).
+ *  Bonus-only: no penalty exists anywhere on the contract path (quiet
+ *  expiry pays and costs nothing). Sized between a crisis resolution (10)
+ *  and a LEAN shift grade (100) — a closed real todo outranks a single
+ *  unblock but never dwarfs a graded day. */
+export const STUDIO_CONTRACT_REWARD_CASH = 25;
 
 // ── Reputation sources ────────────────────────────────────────────────
 export const REP_SHIFT_GRADE: Record<NonNullable<ShiftReport['efficiency']>, number> = {
