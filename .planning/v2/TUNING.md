@@ -842,3 +842,15 @@ or ControlTooltip-aware locators) in the 4 specs and re-run the standalone
 grep. Candidate for a Phase-4 capacity rider or the next maintenance
 window. Until then, local full-gate sweeps should treat the 4 as
 known-stale, and CI (if re-enabled for the fork) will flag them.
+
+## [KICKOFF v4 G-1] Revisit: answering HAND-STARTED terminal sessions (2026-07-11)
+
+Greg approved REMOTE-ANSWER-DESIGN.md as designed (runner-owned tmux only;
+hand-started sessions DESK-only BY CONSTRUCTION) but wants the constraint
+revisited later, not treated as permanent doctrine. Research directions
+when picked up: Claude Code gaining a first-party answer/steer API for
+running sessions (watch release notes — that would be the clean path); a
+user-initiated "adopt into tmux" flow (Greg himself re-parents a session he
+started, e.g. relaunching via a war-room wrapper alias so ALL his sessions
+are born managed); never pty injection (rejected class, stands). No build
+work until a real mechanism exists — this is a watch-item, not a task.
