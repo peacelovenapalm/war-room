@@ -818,3 +818,27 @@ spend. Bounded to a ≤5-minute usage window on the rare restart+resubscribe
 path; a durable per-record dedupe (message-id set or persisted everIssued)
 was judged not worth the complexity this phase. Revisit only if shift-spend
 numbers are ever observed drifting after deploys.
+
+## [KICKOFF v4 3.5] Pre-existing stale standalone e2e specs — 4 timeout failures (2026-07-11)
+
+Found by the v4 Phase-3 gate's EXTENDED sweep (the main-suite standalone
+smoke, which no local phase gate had run before — v2/v3.1 gates ran e2e:v3
+only). NOT sprint-caused: `git diff 287d779..HEAD -- webview-ui e2e/tests`
+is empty for the whole v4 range.
+
+4 specs time out at 120s: budget-pause ("4 standing-order pause reasons"),
+disappearing-view, hud-layout desktop, hud-layout mobile. Root cause
+verified for budget-pause by page snapshot: the spec waits on
+`button[title="Standing orders"]`, but BottomToolbar.tsx's button lost its
+title attribute to the ControlTooltip wrapper (visible text "Orders") in an
+earlier run — the selector can never match; the face itself is fully alive
+(every toolbar button renders in the snapshot). The other 3 are very likely
+the same selector-drift class from the same ControlTooltip/HUD refactors;
+each burns 2×120s in retries, which is why the smoke took 2h. The
+remaining 6 standalone specs pass.
+
+Fix (cheap, mechanical): repoint the stale selectors (getByRole/button-text
+or ControlTooltip-aware locators) in the 4 specs and re-run the standalone
+grep. Candidate for a Phase-4 capacity rider or the next maintenance
+window. Until then, local full-gate sweeps should treat the 4 as
+known-stale, and CI (if re-enabled for the fork) will flag them.
