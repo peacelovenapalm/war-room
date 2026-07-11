@@ -21,6 +21,47 @@ const EMPTY_EXEMPT_TOOLS: ReadonlySet<string> = new Set();
  *  adopt-from-start) and excluded from the shift report's token spend. */
 const SHIFT_TOKEN_REPLAY_CUTOFF_MS = 5 * 60_000;
 
+/**
+ * Apply one assistant record's token usage to the agent's running totals and
+ * broadcast the update. Shared between the local JSONL tap
+ * (processTranscriptLine below) and the remote ingest route
+ * (POST /api/agents/output, httpServer.ts) so there is exactly one place
+ * that accumulates agent.inputTokens/outputTokens — never two competing
+ * implementations.
+ *
+ * `countForShift` decides whether this record's tokens count toward today's
+ * shift spend (shiftStats.recordTokens). The local caller only counts
+ * records stamped within SHIFT_TOKEN_REPLAY_CUTOFF_MS of now (resume /
+ * adopt-from-start rewinds the file offset and re-streams historical usage
+ * records; counting those would double the day's spend). The remote route
+ * has no such local timestamp signal to replay-guard with — that protection
+ * is protocol-level in S2 (fromStart issued at most once per agent) — so
+ * its caller always passes true.
+ */
+export function applyTokenUsage(
+  agentId: number,
+  agent: AgentState,
+  usage: { input_tokens?: number; output_tokens?: number },
+  agents: AgentStateStore,
+  countForShift: boolean,
+): void {
+  if (typeof usage.input_tokens === 'number') {
+    agent.inputTokens += usage.input_tokens;
+  }
+  if (typeof usage.output_tokens === 'number') {
+    agent.outputTokens += usage.output_tokens;
+  }
+  if (countForShift) {
+    shiftStats.recordTokens(usage.input_tokens ?? 0, usage.output_tokens ?? 0);
+  }
+  agents.broadcast({
+    type: 'agentTokenUsage',
+    id: agentId,
+    inputTokens: agent.inputTokens,
+    outputTokens: agent.outputTokens,
+  });
+}
+
 /** Hook provider: supplies formatToolStatus + team.extractTeamMetadataFromRecord.
  *  Registered once at startup via setHookProvider(). Functions below assume it's set. */
 let hookProvider: HookProvider | null = null;
@@ -90,30 +131,17 @@ export function processTranscriptLine(
 
     // -- Token usage extraction from assistant records --
     const usage = record.message?.usage as
-      | { input_tokens?: number; output_tokens?: number }
-      | undefined;
+      { input_tokens?: number; output_tokens?: number } | undefined;
     if (usage) {
-      if (typeof usage.input_tokens === 'number') {
-        agent.inputTokens += usage.input_tokens;
-      }
-      if (typeof usage.output_tokens === 'number') {
-        agent.outputTokens += usage.output_tokens;
-      }
       // Shift report (v1 mechanic #2): accumulate today's real token spend.
       // Replay guard (review finding): /resume and adopt-from-start REWIND the
       // file offset and re-stream historical usage records — counting those
       // would double the day's "money spent". Only count records stamped
       // within the last few minutes (live records arrive within seconds).
       const recordTs = Date.parse((record as { timestamp?: string }).timestamp ?? '');
-      if (Number.isFinite(recordTs) && Date.now() - recordTs < SHIFT_TOKEN_REPLAY_CUTOFF_MS) {
-        shiftStats.recordTokens(usage.input_tokens ?? 0, usage.output_tokens ?? 0);
-      }
-      agents.broadcast({
-        type: 'agentTokenUsage',
-        id: agentId,
-        inputTokens: agent.inputTokens,
-        outputTokens: agent.outputTokens,
-      });
+      const countForShift =
+        Number.isFinite(recordTs) && Date.now() - recordTs < SHIFT_TOKEN_REPLAY_CUTOFF_MS;
+      applyTokenUsage(agentId, agent, usage, agents, countForShift);
     }
 
     // Resilient content extraction: support both record.message.content and record.content

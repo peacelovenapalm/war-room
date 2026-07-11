@@ -47,6 +47,17 @@ export {
 } from '../../core/src/constants.js';
 
 export const HOOK_EVENT_BUFFER_MS = 5_000;
+
+// ── Remote agent output ingest (T1 remote live-tail, S1) ────
+/** POST /api/agents/output body caps (mirrors the poll route's ingest-cap
+ *  style): a batch larger than this, or a line longer than this, is an
+ *  unusable body shape (400), not a resolution question. */
+export const MAX_AGENT_OUTPUT_LINES_PER_POST = 200;
+export const MAX_AGENT_OUTPUT_LINE_BYTES = 16_384;
+/** Defensive cap on the remote transcript-path retention map (registerHookRoute) —
+ *  bounds a runaway/malicious remote's ability to grow server memory via
+ *  distinct (machine, sessionId) pairs. Oldest entry evicted first. */
+export const MAX_REMOTE_TRANSCRIPT_PATHS = 500;
 /** Grace period after SessionEnd(reason=clear/resume) before triggering onSessionEnd.
  *  /clear and /resume fire SessionEnd then SessionStart within ms. This timeout is a
  *  safety net: if SessionStart never arrives (e.g. the CLI crashes mid-transition),

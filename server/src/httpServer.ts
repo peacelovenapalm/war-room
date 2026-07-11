@@ -15,7 +15,13 @@ import { chainOrchestrator } from './chainOrchestrator.js';
 import { chainMaxSteps, type ChainStepDef, chainStore } from './chainStore.js';
 import type { AssetCache, SetHooksEnabledSideEffect } from './clientMessageHandler.js';
 import { handleClientMessage } from './clientMessageHandler.js';
-import { HOOK_API_PREFIX, MAX_HOOK_BODY_SIZE } from './constants.js';
+import {
+  HOOK_API_PREFIX,
+  MAX_AGENT_OUTPUT_LINE_BYTES,
+  MAX_AGENT_OUTPUT_LINES_PER_POST,
+  MAX_HOOK_BODY_SIZE,
+  MAX_REMOTE_TRANSCRIPT_PATHS,
+} from './constants.js';
 import { contractStore } from './contractStore.js';
 import { renderDigest } from './digest.js';
 import { dispatchStore } from './dispatchStore.js';
@@ -50,6 +56,8 @@ import type { StandingOrderSchedule } from './standingOrderStore.js';
 import { standingOrderStore } from './standingOrderStore.js';
 import { STUDIO_CONTRACT_SWEEP_INTERVAL_MS, studioContractIngest } from './studioContractIngest.js';
 import { studioContractStore } from './studioContractStore.js';
+import { renderTranscriptLine } from './transcriptOutputTap.js';
+import { applyTokenUsage } from './transcriptParser.js';
 import type { AgentState } from './types.js';
 import { v3StoreEnabled } from './v3Flags.js';
 import { worldEventStore } from './worldEventStore.js';
@@ -142,6 +150,7 @@ export async function createHttpServer(options: HttpServerOptions): Promise<Http
   registerBriefingRoute(app);
   registerHookRoute(app, options);
   registerPollRoute(app, options);
+  registerAgentOutputRoute(app, options);
   registerDispatchRoutes(app, options);
   registerAgentKillRoutes(app, options);
   registerEmployeeRoutes(app);
@@ -336,6 +345,15 @@ export async function createHttpServer(options: HttpServerOptions): Promise<Http
   options.store?.on('agentRemoved', onAgentRemovedEvict);
   app.addHook('onClose', () => options.store?.off('agentRemoved', onAgentRemovedEvict));
 
+  // Remote transcript-path retention's twin eviction (T1 remote live-tail
+  // plane, S1): same 'agentRemoved' choke point, same ephemerality
+  // rationale — the retention entry can never outlive its agent.
+  const onAgentRemovedEvictTranscriptPath = (id: number) => evictRemoteTranscriptPath(id);
+  options.store?.on('agentRemoved', onAgentRemovedEvictTranscriptPath);
+  app.addHook('onClose', () =>
+    options.store?.off('agentRemoved', onAgentRemovedEvictTranscriptPath),
+  );
+
   // ── Listen ──────────────────────────────────────────────────
 
   await app.listen({ host: options.host ?? '127.0.0.1', port: options.port ?? 0 });
@@ -389,6 +407,83 @@ function registerBriefingRoute(app: FastifyInstance): void {
 
 // ── Hook Events ────────────────────────────────────────────────
 
+/**
+ * Remote transcript-path retention (T1 remote live-tail plane, S1 of
+ * .planning/v2/REMOTE-TAILER-DESIGN.md). registerHookRoute strips
+ * transcript_path from remote hook events so this process never watches a
+ * file on another machine, but S2's tail-instruction builder needs the path
+ * to tell the remote tailer what to read. Retained here as an OPAQUE
+ * string only — nothing in this process ever opens a path stored in this
+ * map; it is remote-machine data passed through, not consumed.
+ *
+ * Keyed by (machine, sessionId) — the same identity TailInstruction will
+ * carry. Bounded defensively at MAX_REMOTE_TRANSCRIPT_PATHS (oldest-first
+ * eviction) so a runaway/malicious remote can't grow this unboundedly.
+ * Real lifecycle cleanup rides the store's 'agentRemoved' choke point via
+ * the agentId reverse index below (linked once the hook-created/-matched
+ * agent is known — see the linkRemoteTranscriptPathToAgent call site).
+ */
+const remoteTranscriptPaths = new Map<string, string>();
+const remoteTranscriptPathAgentKeys = new Map<number, string>();
+
+function remoteTranscriptPathKey(machine: string, sessionId: string): string {
+  return `${machine} ${sessionId}`;
+}
+
+function retainRemoteTranscriptPath(
+  machine: string,
+  sessionId: string,
+  transcriptPath: string,
+): void {
+  const key = remoteTranscriptPathKey(machine, sessionId);
+  remoteTranscriptPaths.set(key, transcriptPath);
+  if (remoteTranscriptPaths.size > MAX_REMOTE_TRANSCRIPT_PATHS) {
+    const oldest = remoteTranscriptPaths.keys().next().value;
+    if (oldest !== undefined) remoteTranscriptPaths.delete(oldest);
+  }
+}
+
+function linkRemoteTranscriptPathToAgent(
+  agentId: number,
+  machine: string,
+  sessionId: string,
+): void {
+  remoteTranscriptPathAgentKeys.set(agentId, remoteTranscriptPathKey(machine, sessionId));
+}
+
+/** Called from the 'agentRemoved' choke point (createHttpServer) — the
+ *  transcript-path retention entry can never outlive its agent. */
+function evictRemoteTranscriptPath(agentId: number): void {
+  const key = remoteTranscriptPathAgentKeys.get(agentId);
+  if (key !== undefined) {
+    remoteTranscriptPaths.delete(key);
+    remoteTranscriptPathAgentKeys.delete(agentId);
+  }
+}
+
+/** Test/S2 accessor — S2's tail-instruction builder resolves this exact
+ *  (machine, sessionId) → transcriptPath lookup. */
+export function getRemoteTranscriptPath(machine: string, sessionId: string): string | undefined {
+  return remoteTranscriptPaths.get(remoteTranscriptPathKey(machine, sessionId));
+}
+
+/** Find the live agent matching a remote machine's (machine, sessionId)
+ *  pair — the resolution rule shared by the hook route's transcript-path
+ *  linking and POST /api/agents/output. O(n) over the live agent set (small
+ *  and bounded by real concurrent sessions; no separate index is worth the
+ *  upkeep at this scale). */
+function resolveRemoteAgent(
+  store: AgentStateStore | undefined,
+  machine: string,
+  sessionId: string,
+): { id: number; agent: AgentState } | undefined {
+  if (!store) return undefined;
+  for (const [id, agent] of store.entries()) {
+    if (agent.machine === machine && agent.sessionId === sessionId) return { id, agent };
+  }
+  return undefined;
+}
+
 function registerHookRoute(app: FastifyInstance, options: HttpServerOptions): void {
   app.post<{
     Params: { providerId: string };
@@ -414,11 +509,19 @@ function registerHookRoute(app: FastifyInstance, options: HttpServerOptions): vo
       // Machine identity: remote machines tag their hook events with an
       // X-Machine header (installed by the hooks runbook). A label that
       // differs from this server's own label marks the event as REMOTE:
-      //   - strip transcript_path (it points at a file on the remote machine;
-      //     watching it here would fail) so adoption takes the hooks-only path
+      //   - retain transcript_path in remoteTranscriptPaths (S2 will need it
+      //     to build tail instructions), THEN strip it from the event (it
+      //     points at a file on the remote machine; watching it here would
+      //     fail) so adoption takes the hooks-only path
       //   - carry the label through on __machine for agent tagging
       const machine = sanitizeMachineLabel(request.headers['x-machine']);
       if (machine && machine !== options.machineLabel) {
+        const sessionId = typeof event.session_id === 'string' ? event.session_id : undefined;
+        const transcriptPath =
+          typeof event.transcript_path === 'string' ? event.transcript_path : undefined;
+        if (sessionId && transcriptPath) {
+          retainRemoteTranscriptPath(machine, sessionId, transcriptPath);
+        }
         delete event.transcript_path;
         event.__machine = machine;
       }
@@ -434,6 +537,15 @@ function registerHookRoute(app: FastifyInstance, options: HttpServerOptions): vo
 
       if (event.session_id && event.hook_event_name) {
         options.onHookEvent?.(providerId, event);
+        // Link the retention entry to its agent's numeric id (once the
+        // handler above has created/matched it) so the 'agentRemoved' choke
+        // point can evict it — see evictRemoteTranscriptPath.
+        if (machine && machine !== options.machineLabel) {
+          const resolved = resolveRemoteAgent(options.store, machine, event.session_id as string);
+          if (resolved) {
+            linkRemoteTranscriptPathToAgent(resolved.id, machine, event.session_id as string);
+          }
+        }
       }
 
       reply.send('ok');
@@ -504,6 +616,114 @@ function registerPollRoute(app: FastifyInstance, options: HttpServerOptions): vo
         );
       }
       reply.send(result);
+    },
+  );
+}
+
+// ── Remote agent output ingest (T1 remote live-tail, S1) ────────
+
+/** Validated POST /api/agents/output body. */
+interface AgentOutputBody {
+  sessionId: string;
+  lines: string[];
+}
+
+/** Validate a POST /api/agents/output body. Returns null when the body
+ *  shape is unusable (→ 400) — a defensively-capped batch (too many lines,
+ *  a too-long line) is unusable shape too, not a resolution question. */
+function parseAgentOutputBody(body: unknown): AgentOutputBody | null {
+  if (body === null || typeof body !== 'object') return null;
+  const b = body as Record<string, unknown>;
+  const sessionId = typeof b.sessionId === 'string' && b.sessionId !== '' ? b.sessionId : undefined;
+  if (!sessionId) return null;
+  const rawLines = b.lines;
+  if (
+    !Array.isArray(rawLines) ||
+    rawLines.length === 0 ||
+    rawLines.length > MAX_AGENT_OUTPUT_LINES_PER_POST
+  ) {
+    return null;
+  }
+  const lines: string[] = [];
+  for (const line of rawLines) {
+    if (typeof line !== 'string' || Buffer.byteLength(line, 'utf8') > MAX_AGENT_OUTPUT_LINE_BYTES) {
+      return null;
+    }
+    lines.push(line);
+  }
+  return { sessionId, lines };
+}
+
+/**
+ * POST /api/agents/output — the S2 tailer's ingest route (S1 builds the
+ * route now; S2 wires bin/transcript-tailer.mjs to it). Bearer + X-Machine
+ * authed, same tier as /api/agents/poll. Body: { sessionId, lines: raw
+ * assistant JSONL lines }. Per REMOTE-TAILER-DESIGN.md: resolution
+ * (machine, sessionId) → live agent is a 2xx DECISION
+ * ({ok:false, reason:'unknown-session'}) never a 4xx — the tailer treats a
+ * deny as tail-off for that session. 400 is reserved for unusable body
+ * shape (missing/invalid fields, cap violations); a missing/invalid
+ * X-Machine header can't resolve anything either, so it is the same kind
+ * of 2xx deny, not a 400.
+ *
+ * Each resolved line is rendered through renderTranscriptLine — the ONE
+ * rendering implementation, shared with the local tap (transcriptOutputTap.ts)
+ * — and appended into the SAME ring shape ({source:'agent', id, stream:
+ * 'transcript'}) the local tap uses, so the existing tailSubscribe/WS
+ * fan-out and replay path work unchanged for remote sessions too.
+ *
+ * Liveness gate: resolveRemoteAgent only returns a currently-live agent, and
+ * this handler has no await between resolution and the append loop, so a
+ * straggler POST for an agent removed mid-request can't resurrect a ring
+ * entry — the same guarantee /api/dispatch/:id/output gives by re-checking
+ * dispatchStore status right before appending.
+ */
+function registerAgentOutputRoute(app: FastifyInstance, options: HttpServerOptions): void {
+  app.post<{ Body: Record<string, unknown> }>(
+    '/api/agents/output',
+    { preHandler: bearerAuth(options.token) },
+    async (request, reply) => {
+      const machine = sanitizeMachineLabel(request.headers['x-machine']);
+      if (!machine) {
+        reply.send({ ok: false, reason: 'missing-machine' });
+        return;
+      }
+      const parsed = parseAgentOutputBody(request.body);
+      if (!parsed) {
+        reply.code(400).send({ error: 'expected body { sessionId: string, lines: string[] }' });
+        return;
+      }
+      const resolved = resolveRemoteAgent(options.store, machine, parsed.sessionId);
+      if (!resolved) {
+        reply.send({ ok: false, reason: 'unknown-session' });
+        return;
+      }
+      const { id: agentId, agent } = resolved;
+      for (const line of parsed.lines) {
+        const rendered = renderTranscriptLine(line);
+        if (rendered !== undefined) {
+          outputRingStore.append('agent', String(agentId), 'transcript', `${rendered}\n`);
+        }
+        // Token usage: best-effort, never route-fatal — a malformed line
+        // already fell out of renderTranscriptLine above; usage extraction
+        // gets its own try so one bad line can't drop the rest of the batch.
+        try {
+          const record = JSON.parse(line) as Record<string, unknown>;
+          const message = record.message as Record<string, unknown> | undefined;
+          const usage = message?.usage as
+            { input_tokens?: number; output_tokens?: number } | undefined;
+          if (usage && typeof usage === 'object') {
+            // Contract: replayed-historical-usage protection for this route
+            // is protocol-level in S2 (fromStart issued at most once per
+            // agent) — unlike the local tap's timestamp replay-cutoff guard,
+            // S1 counts every usage record it receives.
+            applyTokenUsage(agentId, agent, usage, options.store, true);
+          }
+        } catch {
+          // Swallow: telemetry only, matches renderTranscriptLine/tapTranscriptLine's posture.
+        }
+      }
+      reply.send({ ok: true });
     },
   );
 }
