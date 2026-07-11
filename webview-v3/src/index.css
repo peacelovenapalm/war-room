@@ -534,6 +534,74 @@ body,
   padding: 8px 10px;
 }
 
+/* ── T2/T4 remote-answer plane ─────────────────────────────── */
+
+.drawer__answer {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  padding: 8px 10px;
+  border-top: 1px solid #2c3240;
+  border-bottom: 1px solid #2c3240;
+}
+
+.drawer__answer-head {
+  font-weight: 700;
+  letter-spacing: 0.05em;
+  opacity: 0.8;
+}
+
+.answer-options {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+
+.answer-text {
+  font: inherit;
+  color: inherit;
+  background: #101318;
+  border: 1px solid #3a4150;
+  padding: 6px 8px;
+  min-height: 60px;
+  resize: vertical;
+}
+
+.answer-confirm-text {
+  background: #101318;
+  border: 1px dashed #8a94a8;
+  padding: 8px;
+  white-space: pre-wrap;
+  user-select: text;
+}
+
+.answer-receipts {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  margin-top: 4px;
+}
+
+.answer-receipt-row {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  padding: 4px 0;
+  border-bottom: 1px solid #232936;
+  font-size: 11px;
+}
+
+.answer-receipt-row__status {
+  font-weight: 700;
+}
+
+.answer-receipt-row__text {
+  opacity: 0.85;
+  white-space: pre-wrap;
+  word-break: break-word;
+  user-select: text;
+}
+
 /* ── One-tap-real sheet ────────────────────────────────────── */
 
 .real-sheet {

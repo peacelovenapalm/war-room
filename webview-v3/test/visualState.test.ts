@@ -20,6 +20,7 @@ function record(overrides: Partial<AgentRecord> = {}): AgentRecord {
     toolPermission: false,
     inputTokens: 0,
     outputTokens: 0,
+    managed: false,
     ...overrides,
   };
 }

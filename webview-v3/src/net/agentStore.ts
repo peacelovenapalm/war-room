@@ -45,6 +45,12 @@ export interface AgentRecord {
   poll?: AgentPollSnapshot;
   inputTokens: number;
   outputTokens: number;
+  /** T2/T4 remote-answer plane: true only when the runner has advertised
+   *  this agent's session as one it launched + owns (a runner-owned tmux
+   *  session it can safely type into). The board's ONLY license to render
+   *  the ANSWER verb — false is the honest default for every other agent,
+   *  including pre-existing sessions the runner merely observes. */
+  managed: boolean;
 }
 
 export type AgentMap = ReadonlyMap<number, AgentRecord>;
@@ -64,6 +70,7 @@ function baseRecord(id: number, name: string): AgentRecord {
     toolPermission: false,
     inputTokens: 0,
     outputTokens: 0,
+    managed: false,
   };
 }
 
@@ -104,6 +111,7 @@ export function reduceAgents(agents: AgentMap, message: ServerMessage, now = Dat
           sessionId: message.sessionIds?.[key],
           cwd: message.cwds?.[key],
           pid: message.pids?.[key],
+          managed: message.managed?.[key] ?? false,
         });
       }
       return next;
@@ -186,6 +194,13 @@ export function reduceAgents(agents: AgentMap, message: ServerMessage, now = Dat
       if (!existing || !existing.toolPermission) return agents;
       const next = new Map(agents);
       next.set(message.id, { ...existing, toolPermission: false });
+      return next;
+    }
+    case 'agentManagedUpdate': {
+      const existing = agents.get(message.id);
+      if (!existing || existing.managed === message.managed) return agents;
+      const next = new Map(agents);
+      next.set(message.id, { ...existing, managed: message.managed });
       return next;
     }
     default:

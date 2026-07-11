@@ -1,6 +1,17 @@
 import { useEffect, useState } from 'react';
 
 import type { AgentMap } from '../net/agentStore';
+import {
+  ANSWER_POLL_INTERVAL_MS,
+  ANSWER_RESULT_TIMEOUT_MS,
+  ANSWER_TEXT_MAX_CHARS,
+  type AnswerReceipt,
+  answerStatusLabel,
+  fetchAnswerReceipts,
+  parseAnswerOptions,
+  pollAnswerOutcome,
+  requestAnswer,
+} from '../net/answerFacts';
 import { buildCopyIdLine, canKillAgent, type DispatchMachine } from '../net/dispatchFacts';
 import {
   KILL_POLL_INTERVAL_MS,
@@ -17,8 +28,16 @@ import { TailSheet } from './TailSheet';
 
 /** Refresh cadence for the live-runner check while the drawer is open. */
 const MACHINES_REFRESH_MS = 10_000;
+/** Refresh cadence for the answer receipts list while the drawer is open. */
+const ANSWERS_REFRESH_MS = 5_000;
 
 type KillPhase = 'idle' | 'confirm' | 'pending' | 'killed' | 'denied';
+
+/** ANSWER composer phases — 'compose' (free-text + one-tap options),
+ *  'confirm' (verbatim-prompt discipline: show the exact text before it's
+ *  ever sent), then the real delivery outcome. No fake states: 'sending'
+ *  renders "DELIVERING…" only once the POST is actually in flight. */
+type AnswerPhase = 'compose' | 'confirm' | 'sending' | 'delivered' | 'denied';
 
 export interface AgentDrawerProps {
   agentId: number;
@@ -65,6 +84,13 @@ export function AgentDrawer({
   const [killPhase, setKillPhase] = useState<KillPhase>('idle');
   const [killReason, setKillReason] = useState<string | undefined>(undefined);
   const [killRequestId, setKillRequestId] = useState<string | null>(null);
+
+  // T2/T4 remote-answer plane — composer local state.
+  const [answerPhase, setAnswerPhase] = useState<AnswerPhase>('compose');
+  const [answerText, setAnswerText] = useState('');
+  const [answerReason, setAnswerReason] = useState<string | undefined>(undefined);
+  const [answerRequestId, setAnswerRequestId] = useState<string | null>(null);
+  const [receipts, setReceipts] = useState<AnswerReceipt[]>([]);
 
   useEffect(() => {
     let cancelled = false;
@@ -115,6 +141,60 @@ export function AgentDrawer({
   }, [killPhase, killRequestId]);
 
   const record = agents.get(agentId);
+  const managed = record?.managed ?? false;
+  const machine = record?.machine;
+
+  // T2/T4 remote-answer plane — poll the delivery outcome (same "no WS
+  // broadcast for this ephemeral lifecycle" tolerance as KILL).
+  useEffect(() => {
+    if (answerPhase !== 'sending' || answerRequestId === null) return;
+    let cancelled = false;
+    const startedAt = Date.now();
+    const interval = setInterval(() => {
+      void pollAnswerOutcome(answerRequestId).then((body) => {
+        if (cancelled) return;
+        if (body?.status === 'delivered') {
+          setAnswerPhase('delivered');
+        } else if (body?.status === 'denied') {
+          setAnswerPhase('denied');
+          setAnswerReason(body.reason);
+        } else if (Date.now() - startedAt > ANSWER_RESULT_TIMEOUT_MS) {
+          setAnswerPhase('denied');
+          setAnswerReason('no response from runner');
+        }
+      });
+    }, ANSWER_POLL_INTERVAL_MS);
+    return () => {
+      cancelled = true;
+      clearInterval(interval);
+    };
+  }, [answerPhase, answerRequestId]);
+
+  // T2/T4 remote-answer plane — receipts (one-tap-real: the VERBATIM text
+  // IS the receipt). Machine-level scope: the drawer never learns its own
+  // managedSessionRef (the answer POST response only echoes the request
+  // id), so this is the honest fallback the design calls out rather than a
+  // false narrower filter.
+  useEffect(() => {
+    // Not fetched when non-managed/no machine — the render only shows the
+    // receipts section when `managed` is true, so stale state here never
+    // surfaces (avoids a synchronous setState-in-effect on every
+    // non-managed agent's mount, which would cascade renders for nothing).
+    if (!managed || !machine) return;
+    let cancelled = false;
+    const load = () => {
+      void fetchAnswerReceipts(machine).then((data) => {
+        if (!cancelled) setReceipts(data);
+      });
+    };
+    load();
+    const interval = setInterval(load, ANSWERS_REFRESH_MS);
+    return () => {
+      cancelled = true;
+      clearInterval(interval);
+    };
+  }, [managed, machine]);
+
   if (!record) {
     return (
       <aside className="drawer" data-testid="agent-drawer">
@@ -160,6 +240,49 @@ export function AgentDrawer({
         setKillReason(body.reason ?? 'request rejected');
       }
     });
+  };
+
+  // T2/T4 remote-answer plane — free-text ALWAYS available; a defensively
+  // parsed AskUserQuestion option list ALSO renders as one-tap choices that
+  // prefill the text (never invent options — parseAnswerOptions.ts is [] on
+  // any ambiguity). Every path — typed or tapped — passes through the same
+  // confirm step (verbatim-prompt discipline) before anything is sent.
+  const answerOptions = parseAnswerOptions(poll?.waitingFor);
+  const answerRemaining = ANSWER_TEXT_MAX_CHARS - answerText.length;
+  const canSendAnswer = managed && answerText.trim() !== '' && answerRemaining >= 0;
+
+  const handleSelectAnswerOption = (option: string) => {
+    setAnswerText(option);
+    setAnswerPhase('confirm');
+  };
+
+  const handleAnswerNext = () => {
+    if (answerPhase === 'compose') {
+      if (!canSendAnswer) return;
+      setAnswerPhase('confirm');
+      return;
+    }
+    if (answerPhase !== 'confirm' || record.machine === undefined || pid === undefined) return;
+    setAnswerPhase('sending');
+    void requestAnswer(record.machine, pid, answerText).then((body) => {
+      if (body.ok && body.id !== undefined) {
+        setAnswerRequestId(body.id);
+      } else {
+        setAnswerPhase('denied');
+        setAnswerReason(body.reason ?? 'request rejected');
+      }
+    });
+  };
+
+  const handleAnswerBack = () => {
+    setAnswerPhase('compose');
+  };
+
+  const handleAnswerReset = () => {
+    setAnswerPhase('compose');
+    setAnswerText('');
+    setAnswerReason(undefined);
+    setAnswerRequestId(null);
   };
 
   return (
@@ -235,6 +358,155 @@ export function AgentDrawer({
           {(killPhase === 'idle' || killPhase === 'denied') && '✕ KILL'}
         </button>
       </div>
+
+      {/* T2/T4 remote-answer plane (REMOTE-ANSWER-DESIGN.md): ANSWER only
+          renders when the runner has advertised this agent as one it
+          launched + owns. Every other agent — including any pre-existing
+          session the runner merely observes — keeps this honest row
+          instead, forever (the runner can only ever answer sessions it
+          supervises, by construction, not by policy). */}
+      {!managed && (
+        <div className="drawer__warn" data-testid="answer-desk-only">
+          ⌨ DESK-only — not launched via War Room, so no plane exists to type into it remotely.
+        </div>
+      )}
+
+      {managed && (
+        <div className="drawer__answer" data-testid="answer-composer">
+          <div className="drawer__answer-head">ANSWER</div>
+
+          {answerPhase === 'compose' && (
+            <>
+              {answerOptions.length > 0 && (
+                <div className="answer-options" data-testid="answer-options">
+                  {answerOptions.map((option) => (
+                    <button
+                      key={option}
+                      type="button"
+                      className="verb"
+                      data-testid="answer-option"
+                      onClick={() => {
+                        handleSelectAnswerOption(option);
+                      }}
+                    >
+                      {option}
+                    </button>
+                  ))}
+                </div>
+              )}
+              <textarea
+                className="answer-text"
+                data-testid="answer-text"
+                value={answerText}
+                maxLength={ANSWER_TEXT_MAX_CHARS}
+                placeholder="Type an answer to send into this session…"
+                onChange={(e) => {
+                  setAnswerText(e.target.value);
+                }}
+              />
+              <div className="drawer__verbs">
+                <span className="field__hint">{answerRemaining} chars remaining</span>
+                <button
+                  type="button"
+                  className="verb verb--confirm"
+                  data-testid="answer-next"
+                  disabled={!canSendAnswer}
+                  onClick={handleAnswerNext}
+                >
+                  ANSWER…
+                </button>
+              </div>
+            </>
+          )}
+
+          {answerPhase === 'confirm' && (
+            <>
+              {/* Verbatim-prompt discipline (CALL modal precedent): the
+                  exact text that will be typed into the session, never a
+                  summary or a truncation. */}
+              <div className="answer-confirm-text" data-testid="answer-confirm-text">
+                {answerText}
+              </div>
+              <div className="drawer__verbs">
+                <button
+                  type="button"
+                  className="verb"
+                  data-testid="answer-back"
+                  onClick={handleAnswerBack}
+                >
+                  BACK
+                </button>
+                <button
+                  type="button"
+                  className="verb verb--confirm"
+                  data-testid="answer-confirm-send"
+                  onClick={handleAnswerNext}
+                >
+                  ⚠ CONFIRM SEND
+                </button>
+              </div>
+            </>
+          )}
+
+          {answerPhase === 'sending' && (
+            <div className="drawer__warn" data-testid="answer-status">
+              … DELIVERING…
+            </div>
+          )}
+          {answerPhase === 'delivered' && (
+            <>
+              <div className="drawer__warn" data-testid="answer-status">
+                {answerStatusLabel('delivered')}
+              </div>
+              <div className="drawer__verbs">
+                <button
+                  type="button"
+                  className="verb"
+                  data-testid="answer-reset"
+                  onClick={handleAnswerReset}
+                >
+                  ANSWER AGAIN
+                </button>
+              </div>
+            </>
+          )}
+          {answerPhase === 'denied' && (
+            <>
+              <div className="drawer__warn" data-testid="answer-status">
+                {answerStatusLabel('denied', answerReason)}
+              </div>
+              <div className="drawer__verbs">
+                <button
+                  type="button"
+                  className="verb"
+                  data-testid="answer-reset"
+                  onClick={handleAnswerReset}
+                >
+                  TRY AGAIN
+                </button>
+              </div>
+            </>
+          )}
+
+          {/* Receipts — one-tap-real: the verbatim text IS the receipt. */}
+          {receipts.length > 0 && (
+            <div className="answer-receipts" data-testid="answer-receipts">
+              <div className="drawer__answer-head">RECENT ANSWERS ({record.machine ?? '?'})</div>
+              {receipts
+                .slice()
+                .reverse()
+                .map((receipt) => (
+                  <div className="answer-receipt-row" data-testid="answer-receipt" key={receipt.id}>
+                    <span className="answer-receipt-row__status">
+                      {answerStatusLabel(receipt.status, receipt.reason)}
+                    </span>
+                    <span className="answer-receipt-row__text">{receipt.text}</span>
+                  </div>
+                ))}
+            </div>
+          )}
+        </div>
+      )}
 
       <TailSheet
         state={tail}

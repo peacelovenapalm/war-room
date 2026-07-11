@@ -35,6 +35,7 @@ describe('agent reducer (core generated types)', () => {
       toolPermission: false,
       inputTokens: 0,
       outputTokens: 0,
+      managed: false,
     });
     expect(agents.get(2)?.name).toBe('war-room');
     expect(agents.get(2)?.sessionId).toBeUndefined();
@@ -189,6 +190,39 @@ describe('agent reducer (core generated types)', () => {
     expect(agents.get(1)?.status).toBe('waiting');
     reduceAgents(agents, { type: 'agentClosed', id: 1 }, NOW);
     expect(agents.has(1)).toBe(true);
+  });
+
+  describe('T2/T4 managed flag (agentManagedUpdate + existingAgents.managed)', () => {
+    it('defaults managed to false and picks it up from existingAgents.managed', () => {
+      const agents = reduceAgents(EMPTY_AGENTS, EXISTING, NOW);
+      expect(agents.get(1)?.managed).toBe(false);
+      expect(agents.get(2)?.managed).toBe(false);
+
+      const withManaged = reduceAgents(EMPTY_AGENTS, { ...EXISTING, managed: { '1': true } }, NOW);
+      expect(withManaged.get(1)?.managed).toBe(true);
+      expect(withManaged.get(2)?.managed).toBe(false);
+    });
+
+    it('agentManagedUpdate flips the flag for a known agent, no-ops for unknown ids', () => {
+      let agents = reduceAgents(EMPTY_AGENTS, EXISTING, NOW);
+      agents = reduceAgents(agents, { type: 'agentManagedUpdate', id: 1, managed: true }, NOW);
+      expect(agents.get(1)?.managed).toBe(true);
+      agents = reduceAgents(agents, { type: 'agentManagedUpdate', id: 1, managed: false }, NOW);
+      expect(agents.get(1)?.managed).toBe(false);
+      expect(
+        reduceAgents(agents, { type: 'agentManagedUpdate', id: 999, managed: true }, NOW),
+      ).toBe(agents);
+    });
+
+    it('RECONNECT MERGE: managed comes fresh from existingAgents (live advertisement, not preserved)', () => {
+      let agents = reduceAgents(EMPTY_AGENTS, EXISTING, NOW);
+      agents = reduceAgents(agents, { type: 'agentManagedUpdate', id: 1, managed: true }, NOW);
+      // A reconnect resends existingAgents WITHOUT the managed flag this
+      // time (runner stopped advertising it) — the fresh value wins, unlike
+      // toolPermission/poll which are preserved.
+      const reconnected = reduceAgents(agents, EXISTING, NOW + 60_000);
+      expect(reconnected.get(1)?.managed).toBe(false);
+    });
   });
 
   describe('agentIdentity', () => {
