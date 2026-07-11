@@ -675,6 +675,12 @@ components:
             Capped (~8KB) tail of the run's log — dispatch action, exited
             status only. The only place a run's actual output reaches the
             dashboard; same trust level as promptPreview (never the full log).
+        timeoutSec:
+          type: integer
+          description: >-
+            Verbatim echo of the request's timeoutSec, present only when the
+            request carried one — lets a capped status render "(Ns)" without
+            a second round trip.
         requestId:
           type: string
           maxLength: 64
@@ -698,9 +704,17 @@ components:
         TTL. `exited` = the spawned dispatch process ended on its own
         (dispatch only). `killed` = the dispatch was explicitly ended via
         the worker session kill mechanic (KICKOFF v1.1 item 3) — a DISTINCT
-        terminal status, never conflated with a natural `exited`.
+        terminal status, never conflated with a natural `exited`. `capped`
+        = the dispatch hit its optional timeoutSec and was ended by the
+        runner's own timer (T5 fleet controls) — a DISTINCT terminal
+        status, never conflated with `killed` (human-initiated) or a
+        natural `exited`. `queued-budget` = the dispatch was accepted by
+        the server but HELD, never sent to a runner, because today's real
+        fleet token spend has crossed the configured daily ceiling (T5
+        fleet controls) — non-terminal, releases to `ringing` on an
+        explicit override or an automatic local-date rollover.
       type: string
-      enum: [ringing, answered, denied, expired, exited, killed]
+      enum: [ringing, answered, denied, expired, exited, killed, capped, queued-budget]
 
     # ── Streaming telemetry (KICKOFF-v2.0 Phase 2 — live output tail) ──
 
@@ -1231,6 +1245,16 @@ components:
             pause condition (BUDGET_STALE_MS).
         receivedAt:
           type: [integer, 'null']
+        fiveHourResetsAt:
+          type: [integer, 'null']
+          description: >-
+            Unix ms the 5h window resets, verbatim from the rate-limit
+            snapshot's own resets_at (T5 fleet controls, display-only
+            scheduling hint) — null/absent means the snapshot itself
+            carried none, never a computed guess.
+        sevenDayResetsAt:
+          type: [integer, 'null']
+          description: Unix ms the 7d window resets — same honesty posture as fiveHourResetsAt.
 
     BudgetCodexSnapshot:
       type: object
@@ -2062,6 +2086,17 @@ components:
             threads it to argv only for providers with a real --model flag.
         effort:
           $ref: '#/components/schemas/DispatchEffortValue'
+        timeoutSec:
+          type: integer
+          minimum: 1
+          maximum: 3600
+          description: >-
+            Optional per-run wall-clock cap in seconds — action "dispatch"
+            only. The runner arms a timer on spawn; at the cap it SIGTERMs
+            the child through its own live-children registry (same
+            containment as the worker session kill mechanic), escalating to
+            SIGKILL after a short grace period if the child ignores TERM.
+            Absent means no cap — current (unbounded) behavior.
         requestId:
           type: string
           maxLength: 64

@@ -170,6 +170,38 @@ describe('BudgetStore — Codex weekly-cap heuristic', () => {
   });
 });
 
+describe('BudgetStore.getSnapshot — T5 fleet controls, RATE-LIMIT SCHEDULING HINTS resetsAt', () => {
+  it("converts the snapshot's resets_at (Unix SECONDS) to fiveHourResetsAt/sevenDayResetsAt in Unix MS", () => {
+    const s = new BudgetStore(statePath);
+    const resetsAtSec = Math.floor(T0 / 1000) + 3600;
+    s.reportClaudeSnapshot(
+      {
+        five_hour: { used_percentage: 50, resets_at: resetsAtSec },
+        seven_day: { used_percentage: 20, resets_at: resetsAtSec + 86_400 },
+      },
+      T0,
+    );
+    const snapshot = s.getSnapshot(T0);
+    expect(snapshot.claude.fiveHourResetsAt).toBe(resetsAtSec * 1000);
+    expect(snapshot.claude.sevenDayResetsAt).toBe((resetsAtSec + 86_400) * 1000);
+  });
+
+  it('null/absent when the snapshot itself carries none — never a computed guess', () => {
+    const s = new BudgetStore(statePath);
+    s.reportClaudeSnapshot({ five_hour: { used_percentage: 50 } }, T0);
+    const snapshot = s.getSnapshot(T0);
+    expect(snapshot.claude.fiveHourResetsAt).toBeNull();
+    expect(snapshot.claude.sevenDayResetsAt).toBeNull();
+  });
+
+  it('no snapshot ever received — both resetsAt fields are honestly null', () => {
+    const s = new BudgetStore(statePath);
+    const snapshot = s.getSnapshot(T0);
+    expect(snapshot.claude.fiveHourResetsAt).toBeNull();
+    expect(snapshot.claude.sevenDayResetsAt).toBeNull();
+  });
+});
+
 describe('BudgetStore VITEST guard (cloned from economyStore.test.ts pattern)', () => {
   beforeEach(() => {
     vitestGuardHome = fs.mkdtempSync(path.join(os.tmpdir(), 'budget-store-vitest-guard-'));

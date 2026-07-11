@@ -219,6 +219,20 @@ export async function createHttpServer(options: HttpServerOptions): Promise<Http
   reworkBinIngest.start(); //       failed/killed dispatches → crates
   rivalryDerivation.start(); //     completed chain runs → bonds
 
+  // T5 fleet controls, DAILY FLEET SPEND CEILING (KICKOFF T5, D-21/D-27):
+  // wired ONCE here, at process startup — dispatchStore itself never
+  // imports autoExecutorStore/shiftStats (one-way layering, same
+  // discipline worldEventStore's deps object keeps). Both sides are read
+  // fresh on every enqueue() call; a hand-edit to the whitelist file's
+  // sibling `budget.dailyTokenCeiling` takes effect on the very next
+  // dispatch request, no restart needed.
+  dispatchStore.setBudgetGate(() => {
+    const ceiling = autoExecutorStore.getDailyTokenCeiling();
+    if (ceiling === undefined) return null;
+    const report = shiftStats.getReport();
+    return { ceiling, spend: report.tokensIn + report.tokensOut };
+  });
+
   // Contract ingest tick (mint from the real todo file, complete on todo
   // disappearance, quiet expiry). One immediate sweep so a fresh boot
   // doesn't wait a full interval to surface the wall.
@@ -849,7 +863,13 @@ function pickRandomEmployeeId(): string | undefined {
  * payloads, never 403/404 (see dispatchStore.ts doc comment).
  */
 function registerDispatchRoutes(app: FastifyInstance, options: HttpServerOptions): void {
-  const sweepTimer = setInterval(() => dispatchStore.sweepExpired(), DISPATCH_SWEEP_INTERVAL_MS);
+  const sweepTimer = setInterval(() => {
+    dispatchStore.sweepExpired();
+    // T5 fleet controls: piggybacks this SAME existing timer (no new one) —
+    // a HELD dispatch auto-releases once the local date rolls over past the
+    // day it was held on.
+    dispatchStore.sweepHeldRollover();
+  }, DISPATCH_SWEEP_INTERVAL_MS);
   sweepTimer.unref?.();
   app.addHook('onClose', () => clearInterval(sweepTimer));
 
@@ -908,6 +928,16 @@ function registerDispatchRoutes(app: FastifyInstance, options: HttpServerOptions
     reply.send(dispatchStore.requestStop(request.params.id));
   });
 
+  // POST /api/dispatch/:id/release -- T5 fleet controls, DAILY FLEET SPEND
+  // CEILING: the explicit human override that releases a HELD
+  // ('queued-budget') dispatch to ring normally. Same trust level as
+  // /api/dispatch/:id/kill (unauthenticated, tailnet-only, a conscious
+  // player action). The automatic local-date-rollover release is a
+  // separate path (sweepHeldRollover, piggybacked on the sweep timer above).
+  app.post<{ Params: { id: string } }>('/api/dispatch/:id/release', async (request, reply) => {
+    reply.send(dispatchStore.releaseHeld(request.params.id));
+  });
+
   // POST /api/dispatch/:id/decision -- runner decision (Bearer). Deny AND an
   // unknown/already-decided id are BOTH 2xx -- a decision, never an HTTP error.
   app.post<{ Params: { id: string }; Body: Record<string, unknown> }>(
@@ -929,20 +959,26 @@ function registerDispatchRoutes(app: FastifyInstance, options: HttpServerOptions
 
   // POST /api/dispatch/:id/status -- runner-reported lifecycle event (Bearer):
   // spawn started (attaches pid), the process exited on its own (terminal,
-  // carries exitCode), or the runner explicitly killed it via the stop
-  // channel (KICKOFF v1.1 item 3 -- a DISTINCT terminal status, never
-  // conflated with a natural 'exited').
+  // carries exitCode), the runner explicitly killed it via the stop channel
+  // (KICKOFF v1.1 item 3 -- a DISTINCT terminal status, never conflated with
+  // a natural 'exited'), or the runner capped it via its own timeoutSec
+  // timer (T5 fleet controls -- another DISTINCT terminal status).
   app.post<{ Params: { id: string }; Body: Record<string, unknown> }>(
     '/api/dispatch/:id/status',
     { preHandler: bearerAuth(options.token) },
     async (request, reply) => {
       const body = request.body ?? {};
       const event =
-        body.event === 'started' || body.event === 'exited' || body.event === 'killed'
+        body.event === 'started' ||
+        body.event === 'exited' ||
+        body.event === 'killed' ||
+        body.event === 'capped'
           ? body.event
           : undefined;
       if (!event) {
-        reply.code(400).send({ error: 'expected body { event: "started" | "exited" | "killed" }' });
+        reply
+          .code(400)
+          .send({ error: 'expected body { event: "started" | "exited" | "killed" | "capped" }' });
         return;
       }
       const pid = typeof body.pid === 'number' ? body.pid : undefined;

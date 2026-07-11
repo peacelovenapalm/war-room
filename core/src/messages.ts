@@ -267,13 +267,14 @@ export interface DispatchUpdate {
   pid?: number;
   exitCode?: number;
   resultTail?: string;
+  timeoutSec?: number;
   requestId?: string;
 }
 
 export type DispatchActionValue = 'dispatch' | 'focus';
 
 export type DispatchStatusValue =
-  'ringing' | 'answered' | 'denied' | 'expired' | 'exited' | 'killed';
+  'ringing' | 'answered' | 'denied' | 'expired' | 'exited' | 'killed' | 'capped' | 'queued-budget';
 
 export interface OutputChunk {
   type: 'outputChunk';
@@ -450,6 +451,8 @@ export interface BudgetClaudeSnapshot {
   sevenDayUsedPct: number | null;
   stale: boolean;
   receivedAt: number | null;
+  fiveHourResetsAt?: number | null;
+  sevenDayResetsAt?: number | null;
 }
 
 export interface BudgetCodexSnapshot {
@@ -775,6 +778,7 @@ export interface DispatchRequest {
   pid?: number;
   model?: string;
   effort?: DispatchEffortValue;
+  timeoutSec?: number;
   requestId?: string;
 }
 

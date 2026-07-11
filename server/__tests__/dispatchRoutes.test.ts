@@ -279,6 +279,142 @@ describe('dispatch HTTP routes', () => {
     expect(statusRes.status).toBe(200);
     ws.close();
   });
+
+  // ── T5 fleet controls ────────────────────────────────────────
+
+  it('a timeoutSec on dispatchRequest reaches the runner poll item (PER-DISPATCH TIME CAP)', async () => {
+    const config = await server.start({ embedded: false, store: new AgentStateStore() });
+    const machine = uniqueMachine('MACBOOK');
+    const ws = new WebSocket(`ws://127.0.0.1:${config.port}/ws`);
+    await new Promise((resolve) => ws.addEventListener('open', resolve, { once: true }));
+    ws.send(
+      JSON.stringify({
+        type: 'dispatchRequest',
+        action: 'dispatch',
+        machine,
+        provider: 'claude',
+        cwd: '/tmp',
+        prompt: 'list files',
+        timeoutSec: 120,
+      }),
+    );
+    await new Promise((resolve) => setTimeout(resolve, 50));
+
+    const pollRes = await pollDispatch(config.port, config.token, machine);
+    const pollBody = (await pollRes.json()) as { pending: Array<{ timeoutSec?: number }> };
+    expect(pollBody.pending[0].timeoutSec).toBe(120);
+    ws.close();
+  });
+
+  it('an invalid timeoutSec on dispatchRequest is rejected before the request ever rings', async () => {
+    const config = await server.start({ embedded: false, store: new AgentStateStore() });
+    const machine = uniqueMachine('MACBOOK');
+    const ws = new WebSocket(`ws://127.0.0.1:${config.port}/ws`);
+    await new Promise((resolve) => ws.addEventListener('open', resolve, { once: true }));
+    ws.send(
+      JSON.stringify({
+        type: 'dispatchRequest',
+        action: 'dispatch',
+        machine,
+        provider: 'claude',
+        cwd: '/tmp',
+        prompt: 'list files',
+        timeoutSec: -5,
+      }),
+    );
+    await new Promise((resolve) => setTimeout(resolve, 50));
+
+    const pollRes = await pollDispatch(config.port, config.token, machine);
+    const pollBody = (await pollRes.json()) as { pending: unknown[] };
+    expect(pollBody.pending).toHaveLength(0);
+    ws.close();
+  });
+
+  it('POST /api/dispatch/:id/status accepts a capped event (PER-DISPATCH TIME CAP terminal report)', async () => {
+    const config = await server.start({ embedded: false, store: new AgentStateStore() });
+    const machine = uniqueMachine('MACBOOK');
+    const ws = new WebSocket(`ws://127.0.0.1:${config.port}/ws`);
+    await new Promise((resolve) => ws.addEventListener('open', resolve, { once: true }));
+    ws.send(
+      JSON.stringify({
+        type: 'dispatchRequest',
+        action: 'dispatch',
+        machine,
+        provider: 'claude',
+        cwd: '/tmp',
+        prompt: 'list files',
+        timeoutSec: 5,
+      }),
+    );
+    await new Promise((resolve) => setTimeout(resolve, 50));
+    const pollRes = await pollDispatch(config.port, config.token, machine);
+    const pollBody = (await pollRes.json()) as { pending: Array<{ id: string }> };
+    const id = pollBody.pending[0].id;
+    await fetch(`http://127.0.0.1:${config.port}/api/dispatch/${id}/decision`, {
+      method: 'POST',
+      headers: { Authorization: `Bearer ${config.token}`, 'Content-Type': 'application/json' },
+      body: JSON.stringify({ decision: 'accept', pid: 4242 }),
+    });
+    const statusRes = await fetch(`http://127.0.0.1:${config.port}/api/dispatch/${id}/status`, {
+      method: 'POST',
+      headers: { Authorization: `Bearer ${config.token}`, 'Content-Type': 'application/json' },
+      body: JSON.stringify({ event: 'capped', exitCode: -1, resultTail: 'cut off' }),
+    });
+    expect(statusRes.status).toBe(200);
+    const recentRes = await fetch(`http://127.0.0.1:${config.port}/api/dispatch/recent`);
+    const recent = (await recentRes.json()) as Array<{ id: string; status: string }>;
+    expect(recent.find((r) => r.id === id)?.status).toBe('capped');
+    ws.close();
+  });
+
+  it('POST /api/dispatch/:id/release releases a HELD dispatch to ring normally (DAILY FLEET SPEND CEILING override)', async () => {
+    const { dispatchStore } = await import('../src/dispatchStore.js');
+    // registerHttpServer() (inside server.start()) wires its OWN production
+    // budgetGate (autoExecutorStore-backed) unconditionally — this test's
+    // synthetic gate must be set AFTER start(), or start() overwrites it.
+    const config = await server.start({ embedded: false, store: new AgentStateStore() });
+    dispatchStore.setBudgetGate(() => ({ ceiling: 0, spend: 1 }));
+    try {
+      const machine = uniqueMachine('MACBOOK');
+      const ws = new WebSocket(`ws://127.0.0.1:${config.port}/ws`);
+      await new Promise((resolve) => ws.addEventListener('open', resolve, { once: true }));
+      ws.send(
+        JSON.stringify({
+          type: 'dispatchRequest',
+          action: 'dispatch',
+          machine,
+          provider: 'claude',
+          cwd: '/tmp',
+          prompt: 'list files',
+        }),
+      );
+      await new Promise((resolve) => setTimeout(resolve, 50));
+
+      // Held — never reaches the runner poll.
+      const pollBefore = await pollDispatch(config.port, config.token, machine);
+      expect(((await pollBefore.json()) as { pending: unknown[] }).pending).toHaveLength(0);
+
+      const recentRes = await fetch(`http://127.0.0.1:${config.port}/api/dispatch/recent`);
+      const recent = (await recentRes.json()) as Array<{ id: string; status: string }>;
+      const held = recent.find((r) => r.status === 'queued-budget');
+      expect(held).toBeDefined();
+
+      const releaseRes = await fetch(
+        `http://127.0.0.1:${config.port}/api/dispatch/${held?.id}/release`,
+        { method: 'POST' },
+      );
+      expect(releaseRes.status).toBe(200);
+      expect((await releaseRes.json()) as { ok: boolean }).toEqual({ ok: true });
+
+      // Now genuinely pollable by the runner.
+      const pollAfter = await pollDispatch(config.port, config.token, machine);
+      const pollAfterBody = (await pollAfter.json()) as { pending: Array<{ id: string }> };
+      expect(pollAfterBody.pending.map((p) => p.id)).toContain(held?.id);
+      ws.close();
+    } finally {
+      dispatchStore.setBudgetGate(undefined);
+    }
+  });
 });
 
 describe('dispatch WebSocket broadcast + replay', () => {

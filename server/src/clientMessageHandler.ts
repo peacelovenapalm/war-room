@@ -143,6 +143,10 @@ export function handleClientMessage(
         pid: typeof msg.pid === 'number' ? msg.pid : undefined,
         model: typeof msg.model === 'string' ? msg.model : undefined,
         effort: typeof msg.effort === 'string' ? msg.effort : undefined,
+        // T5 fleet controls, PER-DISPATCH TIME CAP — validated properly
+        // inside dispatchStore.enqueue(); a non-number here is simply
+        // dropped, same tolerance as every other optional field on this path.
+        timeoutSec: typeof msg.timeoutSec === 'number' ? msg.timeoutSec : undefined,
         // Contract correlation (v2 mechanic G4, §6.2) — explicit, never
         // string-matched. Employee correlation (G3, §7.3) mirrors it.
         contractId: typeof msg.contractId === 'string' ? msg.contractId : undefined,

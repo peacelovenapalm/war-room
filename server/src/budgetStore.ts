@@ -84,6 +84,12 @@ export interface BudgetSnapshot {
     sevenDayUsedPct: number | null;
     stale: boolean;
     receivedAt: number | null;
+    /** T5 fleet controls (RATE-LIMIT SCHEDULING HINTS, display-only) — Unix
+     *  MS, converted from the snapshot's own resets_at (Unix SECONDS per
+     *  RateLimitWindow's doc). null/absent means the snapshot itself
+     *  carried none — never a computed guess at when a window resets. */
+    fiveHourResetsAt: number | null;
+    sevenDayResetsAt: number | null;
   };
   codex: {
     weeklyCap: number | null;
@@ -182,12 +188,18 @@ export class BudgetStore {
       data.codexWeeklyMessageCap && data.codexWeeklyMessageCap > 0
         ? Math.round((data.codexWeeklyUsed / data.codexWeeklyMessageCap) * 100)
         : null;
+    const fiveHourResetsAtSec = data.lastClaudeSnapshot?.five_hour?.resets_at;
+    const sevenDayResetsAtSec = data.lastClaudeSnapshot?.seven_day?.resets_at;
     return {
       claude: {
         fiveHourUsedPct: data.lastClaudeSnapshot?.five_hour?.used_percentage ?? null,
         sevenDayUsedPct: data.lastClaudeSnapshot?.seven_day?.used_percentage ?? null,
         stale,
         receivedAt: data.lastClaudeReceivedAt,
+        fiveHourResetsAt:
+          typeof fiveHourResetsAtSec === 'number' ? fiveHourResetsAtSec * 1000 : null,
+        sevenDayResetsAt:
+          typeof sevenDayResetsAtSec === 'number' ? sevenDayResetsAtSec * 1000 : null,
       },
       codex: {
         weeklyCap: data.codexWeeklyMessageCap,

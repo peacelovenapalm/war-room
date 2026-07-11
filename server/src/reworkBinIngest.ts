@@ -2,8 +2,9 @@
  * Scrap & Rework Bin ingest (v3 WS-C STAGE 2 — KICKOFF-v3.1 §1 "failure
  * loop"). Feeds reworkBinStore.ts from REAL observed failures only:
  *
- *  - DISPATCH failures: a dispatch that exited nonzero, or was killed via
- *    the stop channel, piles a crate holding the VERBATIM output tail
+ *  - DISPATCH failures: a dispatch that exited nonzero, was killed via the
+ *    stop channel, or was capped by its own timeoutSec timer (T5 fleet
+ *    controls) piles a crate holding the VERBATIM output tail
  *    (dispatchStore's terminal broadcast — the same resultTail the result
  *    view shows). Focus actions and clean exits pile nothing. A denied
  *    dispatch piles nothing either: the runner's allowlist refused it and
@@ -75,6 +76,20 @@ export class ReworkBinIngest {
             broadcast.resultTail && broadcast.resultTail.trim() !== ''
               ? broadcast.resultTail
               : 'killed via the stop channel — no output tail reported',
+        },
+        now,
+      );
+      return;
+    }
+    if (broadcast.status === 'capped') {
+      this.bin.pile(
+        'dispatch',
+        {
+          id: broadcast.id,
+          excerpt:
+            broadcast.resultTail && broadcast.resultTail.trim() !== ''
+              ? broadcast.resultTail
+              : `capped at ${String(broadcast.timeoutSec ?? '?')}s — no output tail reported`,
         },
         now,
       );

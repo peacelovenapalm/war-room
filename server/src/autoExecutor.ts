@@ -64,6 +64,11 @@ export interface AutoActionConfig {
 
 export interface AutoWhitelistConfig {
   actions: Partial<Record<string, AutoActionConfig>>;
+  /** T5 fleet controls, DAILY FLEET SPEND CEILING — a sibling section in
+   *  the SAME hand-edited file (same deny-by-default posture as `actions`:
+   *  a missing file, corrupt file, or absent `dailyTokenCeiling` all mean
+   *  no ceiling — current, unbounded behavior). */
+  budget?: { dailyTokenCeiling?: number };
 }
 
 export interface AutoActionReceipt {
@@ -164,6 +169,16 @@ export class AutoExecutorStore {
     const cfg = this.loadWhitelist().actions[kind];
     if (!cfg || cfg.enabled !== true) return null; // deny-by-default: missing file/key/false all mean OFF
     return cfg;
+  }
+
+  /** T5 fleet controls — read fresh every call (same posture as the
+   *  whitelist itself), a missing file/section/field all mean `undefined`
+   *  (no ceiling configured). Consumed by httpServer.ts via
+   *  dispatchStore.setBudgetGate() — this module never imports
+   *  dispatchStore itself (one-way layering). */
+  getDailyTokenCeiling(): number | undefined {
+    const value = this.loadWhitelist().budget?.dailyTokenCeiling;
+    return typeof value === 'number' && Number.isFinite(value) && value > 0 ? value : undefined;
   }
 
   getStatus(): AutoStatus {

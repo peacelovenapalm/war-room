@@ -66,9 +66,20 @@ const DISPATCH_MODEL_PATTERN = /^[a-zA-Z0-9._/-]{1,64}$/;
 /** requestId cap (mirrors asyncapi maxLength 64) — overlong ids are DROPPED,
  *  never truncated: a truncated echo would mis-correlate on the client. */
 const REQUEST_ID_MAX_CHARS = 64;
+/** Per-dispatch timeoutSec upper bound (mirrors asyncapi's maximum: 3600) —
+ *  T5 fleet controls, PER-DISPATCH TIME CAP. */
+export const DISPATCH_TIMEOUT_MAX_SEC = 3600;
 
 export type DispatchAction = 'dispatch' | 'focus';
-export type DispatchStatus = 'ringing' | 'answered' | 'denied' | 'expired' | 'exited' | 'killed';
+/** `capped` (T5 fleet controls): the dispatch hit its optional timeoutSec
+ *  and was ended by the runner's own timer — a DISTINCT terminal status,
+ *  never conflated with `killed` (human-initiated) or a natural `exited`.
+ *  `queued-budget` (T5 fleet controls): accepted but HELD — never sent to a
+ *  runner — because today's real fleet token spend crossed the configured
+ *  daily ceiling; non-terminal, releases to `ringing` via an explicit
+ *  override or an automatic local-date rollover. */
+export type DispatchStatus =
+  'ringing' | 'answered' | 'denied' | 'expired' | 'exited' | 'killed' | 'capped' | 'queued-budget';
 
 /** A queued instruction attached to the NEXT poll response for the target
  *  machine (KICKOFF v1.1 item 3 — the first server->runner IMPERATIVE
@@ -122,6 +133,9 @@ interface DispatchRecord {
   pid?: number;
   model?: string;
   effort?: DispatchEffort;
+  /** T5 fleet controls, PER-DISPATCH TIME CAP — optional wall-clock cap in
+   *  seconds, threaded to the runner via pendingFor()'s DispatchRunnerItem. */
+  timeoutSec?: number;
   status: DispatchStatus;
   reason?: string;
   exitCode?: number;
@@ -165,6 +179,9 @@ export interface DispatchEnqueueInput {
   pid?: number;
   model?: string;
   effort?: string;
+  /** T5 fleet controls, PER-DISPATCH TIME CAP — validated against
+   *  DISPATCH_TIMEOUT_MAX_SEC in enqueue(). */
+  timeoutSec?: number;
   /** Chain correlation (G3, §7.1) — set only by chainOrchestrator.ts. */
   chainRunId?: string;
   chainStep?: number;
@@ -205,6 +222,9 @@ export interface DispatchBroadcast {
    *  webview client is free to ignore them. */
   chainRunId?: string;
   chainStep?: number;
+  /** T5 fleet controls — verbatim echo, present only when the request
+   *  carried one (lets a `capped` render "(Ns)" without a second round trip). */
+  timeoutSec?: number;
   /** Send correlation echo (asyncapi DispatchUpdate.requestId) — present
    *  only when the originating client supplied one. */
   requestId?: string;
@@ -222,6 +242,9 @@ export interface DispatchRunnerItem {
   pid?: number;
   model?: string;
   effort?: DispatchEffort;
+  /** T5 fleet controls, PER-DISPATCH TIME CAP — the runner arms its own
+   *  timer on spawn when present. */
+  timeoutSec?: number;
 }
 
 /** A runner's self-advertised capability, refreshed on every poll tick. */
@@ -268,6 +291,15 @@ export class DispatchStore {
   private explicitAuditPath: string | undefined;
   private resolvedAuditPath: string | undefined;
 
+  /** T5 fleet controls, DAILY FLEET SPEND CEILING — an injected closure, set
+   *  once at server startup (httpServer.ts), NOT a direct import of
+   *  autoExecutorStore/shiftStats (one-way layering, same discipline
+   *  worldEventStore's deps-object keeps: this store doesn't know WHAT
+   *  feeds the ceiling/spend numbers, only that enqueue() should hold new
+   *  dispatch requests once spend has crossed it). `null`/undefined-return
+   *  means no ceiling configured — current (unbounded) behavior. */
+  private budgetGate: (() => { ceiling: number; spend: number } | null) | undefined;
+
   constructor(persistPath?: string, auditPath?: string) {
     this.explicitPath = persistPath;
     this.explicitAuditPath = auditPath;
@@ -279,6 +311,12 @@ export class DispatchStore {
     return () => {
       this.listeners = this.listeners.filter((l) => l !== listener);
     };
+  }
+
+  /** T5 fleet controls — wire (or clear, passing undefined) the daily
+   *  spend-ceiling check. See the `budgetGate` field doc above. */
+  setBudgetGate(gate: (() => { ceiling: number; spend: number } | null) | undefined): void {
+    this.budgetGate = gate;
   }
 
   // ── Enqueue (webview → server) ──────────────────────────────────
@@ -309,6 +347,15 @@ export class DispatchStore {
       ) {
         return { ok: false, reason: 'invalid-effort' };
       }
+      if (input.timeoutSec !== undefined) {
+        if (
+          !Number.isInteger(input.timeoutSec) ||
+          input.timeoutSec <= 0 ||
+          input.timeoutSec > DISPATCH_TIMEOUT_MAX_SEC
+        ) {
+          return { ok: false, reason: 'invalid-timeout' };
+        }
+      }
     } else {
       // action === 'focus'
       if (!input.sessionId && !input.pid) {
@@ -317,14 +364,8 @@ export class DispatchStore {
     }
 
     const records = this.ensureLoaded();
-    const ringingForMachine = [...records.values()].filter(
-      (r) => r.machine === input.machine && r.status === 'ringing',
-    ).length;
-    if (ringingForMachine >= DISPATCH_RINGING_CAP) {
-      return { ok: false, reason: 'ringing-cap-exceeded' };
-    }
 
-    const record: DispatchRecord = {
+    const commonFields = {
       id: randomUUID(),
       action: input.action,
       machine: input.machine,
@@ -336,7 +377,7 @@ export class DispatchStore {
       model: input.action === 'dispatch' ? input.model : undefined,
       effort:
         input.action === 'dispatch' ? (input.effort as DispatchEffort | undefined) : undefined,
-      status: 'ringing',
+      timeoutSec: input.action === 'dispatch' ? input.timeoutSec : undefined,
       chainRunId: input.chainRunId,
       chainStep: input.chainStep,
       employeeId: input.employeeId,
@@ -349,12 +390,85 @@ export class DispatchStore {
           : undefined,
       createdAt: now,
       updatedAt: now,
-    };
+    } as const;
+
+    // T5 fleet controls, DAILY FLEET SPEND CEILING — checked BEFORE the
+    // ringing cap: a held request never rings at all, so the ringing cap
+    // (a backpressure limit on the runner poll queue) doesn't apply to it.
+    // Only 'dispatch' holds — a 'focus' request fronts a terminal, it
+    // spends nothing.
+    if (input.action === 'dispatch') {
+      const gate = this.budgetGate?.();
+      if (gate && gate.spend >= gate.ceiling) {
+        const record: DispatchRecord = {
+          ...commonFields,
+          status: 'queued-budget',
+          reason: `HELD — daily ceiling ${String(gate.ceiling)} reached, spend ${String(gate.spend)}`,
+        };
+        records.set(record.id, record);
+        this.persist();
+        this.audit('enqueue-held', record);
+        this.emit(record);
+        return { ok: true, record };
+      }
+    }
+
+    const ringingForMachine = [...records.values()].filter(
+      (r) => r.machine === input.machine && r.status === 'ringing',
+    ).length;
+    if (ringingForMachine >= DISPATCH_RINGING_CAP) {
+      return { ok: false, reason: 'ringing-cap-exceeded' };
+    }
+
+    const record: DispatchRecord = { ...commonFields, status: 'ringing' };
     records.set(record.id, record);
     this.persist();
     this.audit('enqueue', record);
     this.emit(record);
     return { ok: true, record };
+  }
+
+  /** T5 fleet controls — release a HELD ('queued-budget') dispatch to ring
+   *  normally. Explicit human override (POST /api/dispatch/:id/release);
+   *  the automatic local-date-rollover release is sweepHeldRollover()
+   *  below, a distinct path with its own audit event. */
+  releaseHeld(id: string, now: number = Date.now()): { ok: true } | { ok: false; reason: string } {
+    const record = this.ensureLoaded().get(id);
+    if (!record) return { ok: false, reason: 'unknown-id' };
+    if (record.status !== 'queued-budget') return { ok: false, reason: 'not-held' };
+    record.status = 'ringing';
+    record.reason = undefined;
+    record.updatedAt = now;
+    this.persist();
+    this.audit('held-released', record);
+    this.emit(record);
+    return { ok: true };
+  }
+
+  /** T5 fleet controls — every HELD ('queued-budget') dispatch created
+   *  before the start of `now`'s local calendar day auto-releases: a new
+   *  day resets the ceiling it was held against. Returns the count
+   *  released (0 = nothing to do, callers can skip the persist round-trip),
+   *  same idiom as sweepExpired(). */
+  sweepHeldRollover(now: number = Date.now()): number {
+    const records = this.ensureLoaded();
+    const todayStart = new Date(now);
+    todayStart.setHours(0, 0, 0, 0);
+    const start = todayStart.getTime();
+    let count = 0;
+    for (const record of records.values()) {
+      if (record.status !== 'queued-budget') continue;
+      if (record.createdAt < start) {
+        record.status = 'ringing';
+        record.reason = undefined;
+        record.updatedAt = now;
+        this.audit('held-rollover-released', record);
+        this.emit(record);
+        count++;
+      }
+    }
+    if (count > 0) this.persist();
+    return count;
   }
 
   // ── Runner-facing ────────────────────────────────────────────────
@@ -405,6 +519,7 @@ export class DispatchStore {
         pid: r.pid,
         model: r.model,
         effort: r.effort,
+        timeoutSec: r.timeoutSec,
       });
     }
     return out;
@@ -537,17 +652,20 @@ export class DispatchStore {
   }
 
   /** Runner-reported lifecycle event (spawn started / process exited /
-   *  explicitly killed via the stop channel). A 'killed' event with
-   *  `killOutcome` set (the runner's registry had no matching entry) is
-   *  audit-only — it must NEVER downgrade or invent a state transition for
-   *  a dispatch the runner didn't actually touch; only a bare `event:
-   *  'killed'` (the runner really signaled its own registered child) moves
-   *  the record to the distinct terminal `killed` status, and only from
-   *  `answered` (never re-terminalizes an already-terminal record). */
+   *  explicitly killed via the stop channel / capped by its own timeoutSec
+   *  timer). A 'killed' event with `killOutcome` set (the runner's registry
+   *  had no matching entry) is audit-only — it must NEVER downgrade or
+   *  invent a state transition for a dispatch the runner didn't actually
+   *  touch; only a bare `event: 'killed'` (the runner really signaled its
+   *  own registered child) moves the record to the distinct terminal
+   *  `killed` status, and only from `answered` (never re-terminalizes an
+   *  already-terminal record). `capped` (T5 fleet controls) follows the
+   *  identical from-`answered`-only discipline — a DISTINCT terminal status,
+   *  never conflated with `killed` or `exited`. */
   reportStatus(
     id: string,
     input: {
-      event: 'started' | 'exited' | 'killed';
+      event: 'started' | 'exited' | 'killed' | 'capped';
       pid?: number;
       exitCode?: number;
       resultTail?: string;
@@ -577,6 +695,18 @@ export class DispatchStore {
         return { ok: true };
       }
       record.status = 'killed';
+      if (input.exitCode !== undefined) record.exitCode = input.exitCode;
+      if (typeof input.resultTail === 'string') {
+        record.resultTail = input.resultTail.slice(-DISPATCH_RESULT_TAIL_MAX_CHARS);
+      }
+    } else if (input.event === 'capped') {
+      if (record.status !== 'answered') {
+        // Already terminal by some other path (e.g. a natural exit raced
+        // the cap timer) — never overwrite a settled terminal state.
+        this.audit('cap-already-terminal', record);
+        return { ok: true };
+      }
+      record.status = 'capped';
       if (input.exitCode !== undefined) record.exitCode = input.exitCode;
       if (typeof input.resultTail === 'string') {
         record.resultTail = input.resultTail.slice(-DISPATCH_RESULT_TAIL_MAX_CHARS);
@@ -680,15 +810,20 @@ export class DispatchStore {
       prompt: record.prompt,
       model: record.model,
       effort: record.effort,
+      timeoutSec: record.timeoutSec,
     };
   }
 
-  /** Non-terminal entries (ringing/answered) — replayed to a freshly
-   *  connected WebSocket client, same rationale as poll-state replay. */
+  /** Non-terminal entries (ringing/answered/queued-budget) — replayed to a
+   *  freshly connected WebSocket client, same rationale as poll-state
+   *  replay. A HELD dispatch is non-terminal too (T5 fleet controls) — it
+   *  must still be visible in the tray after a page refresh. */
   getActive(): DispatchBroadcast[] {
     const records = this.ensureLoaded();
     return [...records.values()]
-      .filter((r) => r.status === 'ringing' || r.status === 'answered')
+      .filter(
+        (r) => r.status === 'ringing' || r.status === 'answered' || r.status === 'queued-budget',
+      )
       .map((r) => this.toBroadcast(r));
   }
 
@@ -720,6 +855,7 @@ export class DispatchStore {
       resultTail: record.resultTail,
       chainRunId: record.chainRunId,
       chainStep: record.chainStep,
+      timeoutSec: record.timeoutSec,
       requestId: record.requestId,
     };
   }
