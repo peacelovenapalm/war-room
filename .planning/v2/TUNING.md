@@ -625,7 +625,7 @@ job is:**
    - **2 failed regens on the same asset → fall back to hue-shift-
      recoloring an existing sprite** (`adjustSprite`/`hueShiftSprites` in
      `colorize.ts`), logged explicitly as `[x] (FALLBACK: recolored
-     <source>)` in `assets-source/_progress.md` — never silently
+<source>)` in `assets-source/_progress.md` — never silently
      substituted, never blocks anything downstream (Track 1's code
      already renders correctly against pure hue-shift recolors, so a
      partial or zero-generation outcome ships fine).
@@ -788,3 +788,33 @@ commit — should be a fast pickup for a future session, not a fresh
 investigation.
 
 ---
+
+## [KICKOFF v4 1.6] T1 codex review — two review-on-return items (2026-07-11)
+
+Recorded by the v4 Phase-1 gate (STATE-v4.md item 1.6). Both surfaced by the
+codex gpt-5.6-sol cross-model review of the T1 remote-live-tail diff and
+adjudicated by the orchestrator as NOT gate-blocking; neither was fixed in
+the T1 codex fix round.
+
+**RoR-1 — X-Machine label is not cryptographically bound to the bearer
+token (fleet-wide, predates T1).** Any holder of the single shared
+WAR_ROOM_TOKEN can present any X-Machine label, letting one compromised
+machine drain another machine's tail-instruction queue (POST /api/tailer/poll)
+or inject fabricated output/usage into another machine's sessions
+(POST /api/agents/output). This is the SAME single-trust-tier model every
+existing per-machine route already runs (dispatch poll, agents poll, hook
+ingest) — DISPATCH-6B Amendment #2 explicitly recorded cross-machine
+injection as same-trust-tier accepted risk. T1 widens what that tier can
+DO (content injection), not who holds it. Close via per-machine tokens
+(server-side token→machine map; the bearerAuth seam is D-43's auth
+single-seam, so this lands in one module). Natural home: T2/T4's runner
+work or the v5 SaaS-seams pass.
+
+**RoR-2 — shift-spend replay guard is not durable across server restarts.**
+remoteTailDemand's everIssued flag is in-memory; a server restart +
+resubscribe issues fromStart:true again, and usage records stamped within
+the last SHIFT_TOKEN_REPLAY_CUTOFF_MS (5 min) re-count into today's shift
+spend. Bounded to a ≤5-minute usage window on the rare restart+resubscribe
+path; a durable per-record dedupe (message-id set or persisted everIssued)
+was judged not worth the complexity this phase. Revisit only if shift-spend
+numbers are ever observed drifting after deploys.
