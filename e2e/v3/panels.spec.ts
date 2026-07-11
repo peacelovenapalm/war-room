@@ -88,6 +88,47 @@ const REST_JSON: Record<string, unknown> = {
           { label: 'agentId', value: '2' },
           { label: 'machine', value: 'MACBOOK' },
         ],
+        // RUNG 2 gated proposals — real endpoint/message shapes, exercised
+        // end-to-end below (tap -> confirm -> mock host receives it).
+        proposedActions: [
+          {
+            verb: 'kill',
+            label: 'KILL agent 2 (pid 812) on MACBOOK',
+            params: { machine: 'MACBOOK', pid: 812 },
+          },
+          {
+            verb: 'focus',
+            label: 'FOCUS agent 2 (pid 812) on MACBOOK',
+            params: { machine: 'MACBOOK', pid: 812 },
+          },
+          {
+            verb: 'dispatch-nudge',
+            label:
+              'DISPATCH NUDGE on MACBOOK: check agent 2, blocked on: Approve: apply migration 0042? (y/n)',
+            params: {
+              machine: 'MACBOOK',
+              cwd: '/Users/dev/war-room',
+              provider: 'claude',
+              prompt:
+                'Agent 2 on MACBOOK (/Users/dev/war-room) has been blocked 5m, waiting for: "Approve: apply migration 0042? (y/n)". Please check on it, make the requested decision if you safely can, and unblock it.',
+            },
+          },
+        ],
+      },
+      {
+        id: 'dispatch-waste-failed',
+        kind: 'dispatch-waste',
+        severity: 'warn',
+        summary: 'a dispatch on MACBOOK exited nonzero',
+        detail: 'exitCode: 1',
+        receipts: [{ label: 'machine', value: 'MACBOOK' }],
+        proposedActions: [
+          {
+            verb: 'requeue',
+            label: 'REQUEUE: fix the flaky test on MACBOOK',
+            params: { reworkId: 'rework-1' },
+          },
+        ],
       },
     ],
   },
@@ -111,6 +152,11 @@ const REST_JSON: Record<string, unknown> = {
 interface StaticHost {
   url: string;
   close: () => Promise<void>;
+  /** Every WS frame the mock host received from the client, in order —
+   *  excludes the initial webviewReady handshake. Used to assert the
+   *  OPS REVIEW panel's FOCUS/DISPATCH-NUDGE proposals fire the exact
+   *  same dispatchRequest shape CallModal/AgentDrawer already send. */
+  receivedMessages: Record<string, unknown>[];
 }
 
 async function getFreePort(): Promise<number> {
@@ -131,11 +177,19 @@ async function getFreePort(): Promise<number> {
   });
 }
 
-async function serveV3Dist(options: { stopAllFails?: boolean } = {}): Promise<StaticHost> {
+async function serveV3Dist(
+  options: {
+    stopAllFails?: boolean;
+    killOutcome?: 'killed' | 'denied';
+    redispatchFails?: boolean;
+  } = {},
+): Promise<StaticHost> {
   if (!fs.existsSync(path.join(V3_DIST, 'index.html'))) {
     throw new Error(`webview-v3 not built at ${V3_DIST}. Run 'npm run build:webview-v3' first.`);
   }
   const port = await getFreePort();
+  const receivedMessages: Record<string, unknown>[] = [];
+  const killRequestId = 'kill-req-1';
   const server = http.createServer((req, res) => {
     const requestPath = decodeURIComponent((req.url ?? '/').split('?')[0]);
 
@@ -154,6 +208,32 @@ async function serveV3Dist(options: { stopAllFails?: boolean } = {}): Promise<St
     if (requestPath === '/api/automation/resume' && req.method === 'POST') {
       res.writeHead(200, { 'Content-Type': 'application/json' });
       res.end(JSON.stringify({ ok: true, resumedOrders: 0 }));
+      return;
+    }
+    // OPS REVIEW rung-2 proposals — the exact real endpoints being reused
+    // (net/killAgent.ts's requestKill/pollKillOutcome, and the pre-existing
+    // /api/rework/:id/redispatch route — zero new server capability).
+    if (requestPath === '/api/agents/kill' && req.method === 'POST') {
+      res.writeHead(200, { 'Content-Type': 'application/json' });
+      res.end(JSON.stringify({ ok: true, id: killRequestId }));
+      return;
+    }
+    if (requestPath === `/api/agents/kill/${killRequestId}` && req.method === 'GET') {
+      res.writeHead(200, { 'Content-Type': 'application/json' });
+      if (options.killOutcome === 'denied') {
+        res.end(JSON.stringify({ status: 'denied', reason: 'no runner replied' }));
+      } else {
+        res.end(JSON.stringify({ status: 'killed' }));
+      }
+      return;
+    }
+    if (requestPath === '/api/rework/rework-1/redispatch' && req.method === 'POST') {
+      res.writeHead(200, { 'Content-Type': 'application/json' });
+      if (options.redispatchFails) {
+        res.end(JSON.stringify({ ok: false, reason: 'not-piled' }));
+      } else {
+        res.end(JSON.stringify({ ok: true, dispatchId: 'd-99' }));
+      }
       return;
     }
     if (requestPath in REST_JSON) {
@@ -186,7 +266,7 @@ async function serveV3Dist(options: { stopAllFails?: boolean } = {}): Promise<St
   wss.on('connection', (socket) => {
     socket.on('message', (data: Buffer) => {
       try {
-        const message = JSON.parse(data.toString()) as { type?: string };
+        const message = JSON.parse(data.toString()) as { type?: string } & Record<string, unknown>;
         if (message.type === 'webviewReady') {
           const script: object[] = [
             {
@@ -221,6 +301,8 @@ async function serveV3Dist(options: { stopAllFails?: boolean } = {}): Promise<St
             },
           ];
           for (const serverMessage of script) socket.send(JSON.stringify(serverMessage));
+        } else {
+          receivedMessages.push(message);
         }
       } catch {
         // Ignore non-JSON frames.
@@ -233,6 +315,7 @@ async function serveV3Dist(options: { stopAllFails?: boolean } = {}): Promise<St
   });
   return {
     url: `http://127.0.0.1:${String(port)}`,
+    receivedMessages,
     close: () =>
       new Promise<void>((resolve, reject) => {
         for (const client of wss.clients) client.terminate();
@@ -461,6 +544,118 @@ test.describe('stage-3 panel ports (desktop chrome model)', () => {
 
       await close.click();
       await expect(page.getByTestId('agent-drawer')).toHaveCount(0);
+    } finally {
+      await context.close();
+      await host.close();
+    }
+  });
+
+  test('OPS REVIEW rung 2: each gated proposal arms a confirm step, then fires the exact reused endpoint/message per verb', async ({
+    browser,
+  }) => {
+    const host = await serveV3Dist({ killOutcome: 'killed' });
+    const context = await browser.newContext({ viewport: VIEWPORT });
+    try {
+      const page = await context.newPage();
+      await page.goto(`${host.url}/`);
+      await expect(page.getByTestId('hud-connection')).toHaveText('● LIVE', { timeout: 20_000 });
+
+      await page.getByTestId('dock-ops').click();
+      await expect(page.getByTestId('ops-review-panel')).toBeVisible();
+      const findingToggles = page.getByTestId('ops-finding-toggle');
+      await findingToggles.nth(0).click(); // blocked-age-2 — kill/focus/dispatch-nudge
+      await findingToggles.nth(1).click(); // dispatch-waste-failed — requeue
+
+      // KILL — first tap ARMS the confirm step, showing exactly what will
+      // happen; nothing has been sent yet.
+      const killTap = page.getByTestId('ops-proposal-tap-kill');
+      await killTap.click();
+      await expect(page.getByTestId('ops-proposal-confirm')).toContainText(
+        'KILL agent 2 (pid 812) on MACBOOK',
+      );
+      expect(host.receivedMessages.filter((m) => m.type === 'dispatchRequest')).toHaveLength(0);
+      await page.getByTestId('ops-proposal-confirm-kill').click();
+      // Fires net/killAgent.ts's requestKill -> the mock's ok:true+id, then
+      // polls GET /api/agents/kill/:id (1s cadence) until a real terminal
+      // status — never an optimistic "killed" before the poll confirms it.
+      await expect(killTap).toHaveText('✓ KILLED', { timeout: 5_000 });
+
+      // FOCUS — same confirm discipline, then the real dispatchRequest
+      // action:'focus' WS message (v1's exact shape, ported to v3).
+      const focusTap = page.getByTestId('ops-proposal-tap-focus');
+      await focusTap.click();
+      await page.getByTestId('ops-proposal-confirm-focus').click();
+      // No ack exists on the wire for focus anywhere in the system — "SENT"
+      // is the honest terminal state, never upgraded to a fabricated "done".
+      await expect(focusTap).toHaveText('→ FOCUS SENT');
+      expect(
+        host.receivedMessages.some(
+          (m) =>
+            m.type === 'dispatchRequest' &&
+            m.action === 'focus' &&
+            m.machine === 'MACBOOK' &&
+            m.pid === 812,
+        ),
+      ).toBe(true);
+
+      // DISPATCH-NUDGE — same confirm discipline, then the exact
+      // CallModal.tsx dispatchRequest/action:'dispatch' shape, pre-filled
+      // from the finding's verbatim waitingFor/machine/cwd/provider.
+      const nudgeTap = page.getByTestId('ops-proposal-tap-dispatch-nudge');
+      await nudgeTap.click();
+      await page.getByTestId('ops-proposal-confirm-dispatch-nudge').click();
+      const nudgeMessage = host.receivedMessages.find(
+        (m) => m.type === 'dispatchRequest' && m.action === 'dispatch',
+      );
+      expect(nudgeMessage).toBeDefined();
+      expect(nudgeMessage?.machine).toBe('MACBOOK');
+      expect(nudgeMessage?.provider).toBe('claude');
+      expect(nudgeMessage?.cwd).toBe('/Users/dev/war-room');
+      expect(nudgeMessage?.prompt).toContain('Agent 2 on MACBOOK');
+      expect(nudgeMessage?.prompt).toContain('Approve: apply migration 0042? (y/n)');
+      expect(typeof nudgeMessage?.requestId).toBe('string');
+
+      // REQUEUE — hits the pre-existing /api/rework/:id/redispatch route
+      // verbatim (zero new server capability); the response is synchronous
+      // so the outcome renders immediately, no polling needed.
+      const requeueTap = page.getByTestId('ops-proposal-tap-requeue');
+      await requeueTap.click();
+      await expect(page.getByTestId('ops-proposal-confirm')).toContainText(
+        'REQUEUE: fix the flaky test on MACBOOK',
+      );
+      await page.getByTestId('ops-proposal-confirm-requeue').click();
+      await expect(requeueTap).toHaveText('✓ REQUEUED');
+    } finally {
+      await context.close();
+      await host.close();
+    }
+  });
+
+  test('OPS REVIEW rung 2: CANCEL backs out of the confirm step without firing anything; a denied KILL renders ✗ FAILED honestly', async ({
+    browser,
+  }) => {
+    const host = await serveV3Dist({ killOutcome: 'denied' });
+    const context = await browser.newContext({ viewport: VIEWPORT });
+    try {
+      const page = await context.newPage();
+      await page.goto(`${host.url}/`);
+      await expect(page.getByTestId('hud-connection')).toHaveText('● LIVE', { timeout: 20_000 });
+
+      await page.getByTestId('dock-ops').click();
+      await page.getByTestId('ops-finding-toggle').first().click();
+
+      const killTap = page.getByTestId('ops-proposal-tap-kill');
+      await killTap.click();
+      await expect(page.getByTestId('ops-proposal-confirm')).toBeVisible();
+      await page.getByTestId('ops-proposal-cancel-kill').click();
+      // Back to idle — the original proposal label, nothing sent.
+      await expect(killTap).toHaveText('KILL agent 2 (pid 812) on MACBOOK');
+      expect(host.receivedMessages.filter((m) => m.type === 'dispatchRequest')).toHaveLength(0);
+
+      await killTap.click();
+      await page.getByTestId('ops-proposal-confirm-kill').click();
+      // The runner denies it — never rendered as success.
+      await expect(killTap).toHaveText(/✗ FAILED — no runner replied/, { timeout: 5_000 });
     } finally {
       await context.close();
       await host.close();

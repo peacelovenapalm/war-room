@@ -11,6 +11,19 @@ export interface OpsReceipt {
   value: string;
 }
 
+/** RUNG 2: gated proposals. Mirrors server/src/opsAdvisor.ts's
+ *  OpsProposalVerb/OpsProposedAction exactly — every verb here maps 1:1 to
+ *  an EXISTING endpoint/message the client already knows how to call
+ *  (never a new server capability). `proposedActions` is absent (never an
+ *  empty array) when the finding has nothing to propose. */
+export type OpsProposalVerb = 'kill' | 'focus' | 'dispatch-nudge' | 'requeue';
+
+export interface OpsProposedAction {
+  verb: OpsProposalVerb;
+  label: string;
+  params: Record<string, string | number>;
+}
+
 export interface OpsFinding {
   id: string;
   kind: string;
@@ -18,6 +31,7 @@ export interface OpsFinding {
   summary: string;
   detail: string;
   receipts: OpsReceipt[];
+  proposedActions?: OpsProposedAction[];
 }
 
 export interface OpsReview {

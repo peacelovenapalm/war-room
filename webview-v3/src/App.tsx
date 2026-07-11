@@ -1030,7 +1030,14 @@ export default function App() {
         onClose={closePanel}
         onDispatchContract={handleDispatchContract}
       />
-      <OpsReviewPanel isOpen={openPanel === 'ops'} onClose={closePanel} />
+      <OpsReviewPanel
+        isOpen={openPanel === 'ops'}
+        onClose={closePanel}
+        send={send}
+        onDispatchSend={handleDispatchSend}
+        dispatchEntries={dispatchEntries}
+        sendFailures={sendFailures}
+      />
       {viewingResult && (
         <div className="modal-backdrop" onClick={() => setViewingResult(null)}>
           <div className="modal" role="dialog" onClick={(e) => e.stopPropagation()}>

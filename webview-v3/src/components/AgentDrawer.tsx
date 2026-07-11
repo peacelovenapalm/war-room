@@ -2,6 +2,12 @@ import { useEffect, useState } from 'react';
 
 import type { AgentMap } from '../net/agentStore';
 import { buildCopyIdLine, canKillAgent, type DispatchMachine } from '../net/dispatchFacts';
+import {
+  KILL_POLL_INTERVAL_MS,
+  KILL_RESULT_TIMEOUT_MS,
+  pollKillOutcome,
+  requestKill,
+} from '../net/killAgent';
 import { formatAge } from '../state/crisis';
 import type { CrisisState } from '../state/crisisStore';
 import { compactTokens } from '../state/hud';
@@ -11,9 +17,6 @@ import { TailSheet } from './TailSheet';
 
 /** Refresh cadence for the live-runner check while the drawer is open. */
 const MACHINES_REFRESH_MS = 10_000;
-/** Kill-outcome poll cadence + honest give-up (mirrors the v1 drawer). */
-const KILL_POLL_INTERVAL_MS = 1_000;
-const KILL_RESULT_TIMEOUT_MS = 15_000;
 
 type KillPhase = 'idle' | 'confirm' | 'pending' | 'killed' | 'denied';
 
@@ -92,29 +95,18 @@ export function AgentDrawer({
     let cancelled = false;
     const startedAt = Date.now();
     const interval = setInterval(() => {
-      void fetch(`/api/agents/kill/${killRequestId}`)
-        .then(async (res) => {
-          if (!res.ok) return null;
-          return (await res.json()) as { status: 'pending' | 'killed' | 'denied'; reason?: string };
-        })
-        .then((body) => {
-          if (cancelled) return;
-          if (body?.status === 'killed') {
-            setKillPhase('killed');
-          } else if (body?.status === 'denied') {
-            setKillPhase('denied');
-            setKillReason(body.reason);
-          } else if (Date.now() - startedAt > KILL_RESULT_TIMEOUT_MS) {
-            setKillPhase('denied');
-            setKillReason('no response from runner');
-          }
-        })
-        .catch(() => {
-          if (!cancelled && Date.now() - startedAt > KILL_RESULT_TIMEOUT_MS) {
-            setKillPhase('denied');
-            setKillReason('no response from runner');
-          }
-        });
+      void pollKillOutcome(killRequestId).then((body) => {
+        if (cancelled) return;
+        if (body?.status === 'killed') {
+          setKillPhase('killed');
+        } else if (body?.status === 'denied') {
+          setKillPhase('denied');
+          setKillReason(body.reason);
+        } else if (Date.now() - startedAt > KILL_RESULT_TIMEOUT_MS) {
+          setKillPhase('denied');
+          setKillReason('no response from runner');
+        }
+      });
     }, KILL_POLL_INTERVAL_MS);
     return () => {
       cancelled = true;
@@ -160,24 +152,14 @@ export function AgentDrawer({
     }
     if (killPhase !== 'confirm') return;
     setKillPhase('pending');
-    void fetch('/api/agents/kill', {
-      method: 'POST',
-      headers: { 'content-type': 'application/json' },
-      body: JSON.stringify({ machine: record.machine, pid }),
-    })
-      .then((res) => res.json())
-      .then((body: { ok: boolean; id?: string; reason?: string }) => {
-        if (body.ok && body.id !== undefined) {
-          setKillRequestId(body.id);
-        } else {
-          setKillPhase('denied');
-          setKillReason(body.reason ?? 'request rejected');
-        }
-      })
-      .catch(() => {
+    void requestKill(record.machine, pid).then((body) => {
+      if (body.ok && body.id !== undefined) {
+        setKillRequestId(body.id);
+      } else {
         setKillPhase('denied');
-        setKillReason('request failed');
-      });
+        setKillReason(body.reason ?? 'request rejected');
+      }
+    });
   };
 
   return (
