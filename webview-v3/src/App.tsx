@@ -163,19 +163,22 @@ export default function App() {
   // fetched at construction", so building one is a pure allocation; the
   // setters are never called, these are just a stable-identity escape
   // hatch from useMemo's "may be recomputed" caveat. Manifest URLs are the
-  // sync-assets.mjs mirror (webview-v3-assets/ -> public/assets/, served
-  // at /assets/... in dev, e2e, and the build).
+  // sync-assets.mjs mirror (webview-v3-assets/ -> public/assets/). RELATIVE
+  // paths, not /assets/... — the deployed build is served under /v3/ (the
+  // old face owns the root), so absolute paths would resolve against the
+  // wrong static root and 404 into permanent placeholder art. Relative
+  // resolves correctly in dev (/), e2e (/), and deploy (/v3/).
   const [propStore] = useState(() =>
-    createSpriteStore<HTMLImageElement>('/assets/props.manifest.json', createBrowserLoaderDeps()),
+    createSpriteStore<HTMLImageElement>('assets/props.manifest.json', createBrowserLoaderDeps()),
   );
   const [characterStore] = useState(() =>
     createSpriteStore<HTMLImageElement>(
-      '/assets/characters.manifest.json',
+      'assets/characters.manifest.json',
       createBrowserLoaderDeps(),
     ),
   );
   const [imageStore] = useState(() =>
-    createImageStore<HTMLImageElement>('/assets/imagegen/manifest.json', {
+    createImageStore<HTMLImageElement>('assets/imagegen/manifest.json', {
       ...createBrowserLoaderDeps(),
       // imagegen/manifest.json's `path` values are ASSET-ROOT-relative
       // (already carry the `imagegen/` prefix — assets/manifest.ts's

@@ -11,13 +11,14 @@ import { defineConfig } from 'vite';
  *   (src/assets/loader.ts) with procedural placeholders until then — never
  *   an eager full-catalog push (MOBILE-FORENSICS constraint 3).
  *
- * Build output stays inside the workspace (webview-v3/dist) so the frozen
- * webview-ui fallback build in dist/webview is never touched.
+ * Build output lands in dist/webview-v3 — a SIBLING of the frozen
+ * webview-ui fallback build in dist/webview (never touched). The standalone
+ * server serves it at /v3/ (httpServer staticDirV3).
  */
 export default defineConfig({
   plugins: [react()],
   build: {
-    outDir: 'dist',
+    outDir: '../dist/webview-v3',
     emptyOutDir: true,
   },
   base: './',

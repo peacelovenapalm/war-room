@@ -8,6 +8,7 @@
  * Each connecting WebSocket client receives the full state on webviewReady.
  */
 
+import * as fs from 'fs';
 import * as os from 'os';
 import * as path from 'path';
 
@@ -75,6 +76,9 @@ async function main(): Promise<void> {
   // dist/ contains both the CLI bundle and the assets/ + webview/ directories
   const distRoot = __dirname;
   const staticDir = path.join(distRoot, 'webview');
+  // v3 face is optional: served at /v3/ only when its build is present.
+  const v3Candidate = path.join(distRoot, 'webview-v3');
+  const staticDirV3 = fs.existsSync(path.join(v3Candidate, 'index.html')) ? v3Candidate : undefined;
 
   // ── Load assets on startup (same pipeline as VS Code extension) ──
   console.log('[Pixel Agents] Loading assets...');
@@ -143,6 +147,7 @@ async function main(): Promise<void> {
       host: args.host,
       port: args.port,
       staticDir,
+      staticDirV3,
       assetCache,
       onSetHooksEnabled,
       token: envToken,

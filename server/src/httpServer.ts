@@ -70,6 +70,8 @@ export interface HttpServerOptions {
   runtime?: AgentRuntime;
   /** Path to SPA dist directory for static serving (standalone only) */
   staticDir?: string;
+  /** Path to the v3 "Living Studio" face dist, served at /v3/ (standalone only) */
+  staticDirV3?: string;
   /** Cached assets loaded at startup (standalone only) */
   assetCache?: AssetCache;
   /** TEXT label identifying the machine this server runs on (e.g. "MACBOOK").
@@ -110,9 +112,27 @@ export async function createHttpServer(options: HttpServerOptions): Promise<Http
       root: options.staticDir,
       prefix: '/',
     });
-    // HTML5 history fallback: serve index.html for unmatched routes
-    app.setNotFoundHandler((_req, reply) => {
-      reply.sendFile('index.html');
+    // v3 "Living Studio" face at /v3/ — sibling build, old face stays the
+    // root fallback until the parity gate closes (KICKOFF-v3.1).
+    const staticDirV3 = options.staticDirV3;
+    if (staticDirV3) {
+      await app.register(fastifyStatic, {
+        root: staticDirV3,
+        prefix: '/v3/',
+        decorateReply: false,
+      });
+    }
+    // HTML5 history fallback: serve the matching face's index.html.
+    // Bare /v3 redirects to /v3/ so the face's RELATIVE asset URLs resolve
+    // under its own prefix (relative-to-document semantics).
+    app.setNotFoundHandler((req, reply) => {
+      if (staticDirV3 && (req.url === '/v3' || req.url.startsWith('/v3?'))) {
+        reply.redirect('/v3/', 301);
+      } else if (staticDirV3 && req.url.startsWith('/v3/')) {
+        reply.sendFile('index.html', staticDirV3);
+      } else {
+        reply.sendFile('index.html');
+      }
     });
   }
 

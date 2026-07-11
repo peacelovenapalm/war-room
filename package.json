@@ -27,7 +27,7 @@
     "build:webview": "cd webview-ui && npm run build",
     "build:webview-v3": "cd webview-v3 && npm run build",
     "compile": "npm run asyncapi:generate && npm run check-types && npm run lint && node esbuild.js && npm run build:webview",
-    "build": "npm run asyncapi:generate && node esbuild.js && npm run build:webview",
+    "build": "npm run asyncapi:generate && node esbuild.js && npm run build:webview && npm run build:webview-v3",
     "start": "node dist/cli.js",
     "watch": "npm-run-all -p watch:*",
     "watch:esbuild": "node esbuild.js --watch",

@@ -20,6 +20,7 @@ WORKDIR /app
 COPY package.json package-lock.json ./
 COPY server/package.json server/package.json
 COPY webview-ui/package.json webview-ui/package.json
+COPY webview-v3/package.json webview-v3/package.json
 # --ignore-scripts: skips husky "prepare" (no .git in the build context).
 # esbuild/vite binaries ship as platform optionalDependencies, no scripts needed.
 RUN npm ci --ignore-scripts
