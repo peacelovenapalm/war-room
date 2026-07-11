@@ -20,7 +20,6 @@ import {
   MAX_AGENT_OUTPUT_LINE_BYTES,
   MAX_AGENT_OUTPUT_LINES_PER_POST,
   MAX_HOOK_BODY_SIZE,
-  MAX_REMOTE_TRANSCRIPT_PATHS,
 } from './constants.js';
 import { contractStore } from './contractStore.js';
 import { renderDigest } from './digest.js';
@@ -43,10 +42,16 @@ import {
 import { addRoom, buyFurniture, expandOffice, getOfficeLayout, sell } from './officeLayoutStore.js';
 import type { RoomType } from './officeLayoutTypes.js';
 import { RoomType as RoomTypeValues } from './officeLayoutTypes.js';
-import { outputRingStore, outputStreamKey } from './outputRingStore.js';
+import { outputRingStore, outputStreamKey, parseOutputStreamKey } from './outputRingStore.js';
 import { perfectOpsDay } from './perfectOpsDay.js';
 import { applyPollStates, parsePollBody, startPollStateSweep } from './pollStateHandler.js';
 import { progression } from './progressionStore.js';
+import * as remoteTailDemand from './remoteTailDemand.js';
+import {
+  evictRemoteTranscriptPath,
+  linkRemoteTranscriptPathToAgent,
+  retainRemoteTranscriptPath,
+} from './remoteTranscriptPaths.js';
 import { reworkBinIngest } from './reworkBinIngest.js';
 import { reworkBinStore } from './reworkBinStore.js';
 import { RIVALRY_SWEEP_INTERVAL_MS, rivalryDerivation } from './rivalryDerivation.js';
@@ -151,6 +156,7 @@ export async function createHttpServer(options: HttpServerOptions): Promise<Http
   registerHookRoute(app, options);
   registerPollRoute(app, options);
   registerAgentOutputRoute(app, options);
+  registerTailerPollRoute(app, options);
   registerDispatchRoutes(app, options);
   registerAgentKillRoutes(app, options);
   registerEmployeeRoutes(app);
@@ -354,6 +360,15 @@ export async function createHttpServer(options: HttpServerOptions): Promise<Http
     options.store?.off('agentRemoved', onAgentRemovedEvictTranscriptPath),
   );
 
+  // Remote tail-instruction demand's own agentRemoved cleanup (T1 remote
+  // live-tail plane, S2): a final tail-off if there was live demand, then
+  // the record itself is dropped. Uses its own last-known transcriptPath
+  // (see remoteTailDemand.ts), so it has no ordering dependency on the
+  // transcript-path eviction hook above.
+  const onAgentRemovedTailDemand = (id: number) => remoteTailDemand.onAgentRemoved(id);
+  options.store?.on('agentRemoved', onAgentRemovedTailDemand);
+  app.addHook('onClose', () => options.store?.off('agentRemoved', onAgentRemovedTailDemand));
+
   // ── Listen ──────────────────────────────────────────────────
 
   await app.listen({ host: options.host ?? '127.0.0.1', port: options.port ?? 0 });
@@ -407,65 +422,11 @@ function registerBriefingRoute(app: FastifyInstance): void {
 
 // ── Hook Events ────────────────────────────────────────────────
 
-/**
- * Remote transcript-path retention (T1 remote live-tail plane, S1 of
- * .planning/v2/REMOTE-TAILER-DESIGN.md). registerHookRoute strips
- * transcript_path from remote hook events so this process never watches a
- * file on another machine, but S2's tail-instruction builder needs the path
- * to tell the remote tailer what to read. Retained here as an OPAQUE
- * string only — nothing in this process ever opens a path stored in this
- * map; it is remote-machine data passed through, not consumed.
- *
- * Keyed by (machine, sessionId) — the same identity TailInstruction will
- * carry. Bounded defensively at MAX_REMOTE_TRANSCRIPT_PATHS (oldest-first
- * eviction) so a runaway/malicious remote can't grow this unboundedly.
- * Real lifecycle cleanup rides the store's 'agentRemoved' choke point via
- * the agentId reverse index below (linked once the hook-created/-matched
- * agent is known — see the linkRemoteTranscriptPathToAgent call site).
- */
-const remoteTranscriptPaths = new Map<string, string>();
-const remoteTranscriptPathAgentKeys = new Map<number, string>();
-
-function remoteTranscriptPathKey(machine: string, sessionId: string): string {
-  return `${machine} ${sessionId}`;
-}
-
-function retainRemoteTranscriptPath(
-  machine: string,
-  sessionId: string,
-  transcriptPath: string,
-): void {
-  const key = remoteTranscriptPathKey(machine, sessionId);
-  remoteTranscriptPaths.set(key, transcriptPath);
-  if (remoteTranscriptPaths.size > MAX_REMOTE_TRANSCRIPT_PATHS) {
-    const oldest = remoteTranscriptPaths.keys().next().value;
-    if (oldest !== undefined) remoteTranscriptPaths.delete(oldest);
-  }
-}
-
-function linkRemoteTranscriptPathToAgent(
-  agentId: number,
-  machine: string,
-  sessionId: string,
-): void {
-  remoteTranscriptPathAgentKeys.set(agentId, remoteTranscriptPathKey(machine, sessionId));
-}
-
-/** Called from the 'agentRemoved' choke point (createHttpServer) — the
- *  transcript-path retention entry can never outlive its agent. */
-function evictRemoteTranscriptPath(agentId: number): void {
-  const key = remoteTranscriptPathAgentKeys.get(agentId);
-  if (key !== undefined) {
-    remoteTranscriptPaths.delete(key);
-    remoteTranscriptPathAgentKeys.delete(agentId);
-  }
-}
-
-/** Test/S2 accessor — S2's tail-instruction builder resolves this exact
- *  (machine, sessionId) → transcriptPath lookup. */
-export function getRemoteTranscriptPath(machine: string, sessionId: string): string | undefined {
-  return remoteTranscriptPaths.get(remoteTranscriptPathKey(machine, sessionId));
-}
+// Remote transcript-path retention moved to its own module in S2
+// (remoteTranscriptPaths.ts) so remoteTailDemand.ts can import the
+// retention map without a circular dependency on this file. Re-exported
+// here for the existing S1 route/test call sites.
+export { getRemoteTranscriptPath } from './remoteTranscriptPaths.js';
 
 /** Find the live agent matching a remote machine's (machine, sessionId)
  *  pair — the resolution rule shared by the hook route's transcript-path
@@ -744,6 +705,50 @@ function registerAgentOutputRoute(app: FastifyInstance, options: HttpServerOptio
         }
       }
       reply.send({ ok: true });
+    },
+  );
+}
+
+// ── Remote tail-instruction plane (T1 remote live-tail, S2) ─────
+
+/**
+ * POST /api/tailer/poll — the tailer daemon's (S3, bin/transcript-tailer.mjs)
+ * poll route. Bearer + X-Machine authed, same tier as /api/dispatch/poll
+ * (a missing/invalid X-Machine can't resolve a per-machine queue, so it's a
+ * 400 here, not a tolerant default — mirrors /api/dispatch/poll exactly,
+ * not /api/agents/poll's ownMachineLabel fallback, since this route's
+ * per-machine-queue shape matches dispatch's, not the poll-state-ingest
+ * use case). Request body: { active?: string[] } — sessionIds the tailer
+ * is CURRENTLY tailing this tick (tolerant of an absent/empty array, same
+ * posture as the poll route's optional fields).
+ *
+ * Response: { tail: TailInstruction[] } — this machine's queue drained
+ * AT-MOST-ONCE (dispatchStore.drainStopsFor's exact precedent), PLUS
+ * reconcileAdvertisement's recovery instructions computed against what the
+ * tailer just advertised. Per REMOTE-TAILER-DESIGN.md "Steering": a tailer
+ * that restarts loses its in-memory active-tail state, and the next poll's
+ * advertisement (now empty, or stale) drives reconciliation to re-issue
+ * tail-on for every still-demanded session and tail-off for every session
+ * the tailer thinks is active but nothing demands anymore — self-healing,
+ * no separate recovery path needed.
+ */
+function registerTailerPollRoute(app: FastifyInstance, options: HttpServerOptions): void {
+  app.post<{ Body: Record<string, unknown> }>(
+    '/api/tailer/poll',
+    { preHandler: bearerAuth(options.token) },
+    async (request, reply) => {
+      const machine = sanitizeMachineLabel(request.headers['x-machine']);
+      if (!machine) {
+        reply.code(400).send({ error: 'missing/invalid X-Machine header' });
+        return;
+      }
+      const body = request.body ?? {};
+      const active = Array.isArray(body.active)
+        ? body.active.filter((s): s is string => typeof s === 'string')
+        : [];
+      const drained = remoteTailDemand.drainTailQueueFor(machine);
+      const recovered = remoteTailDemand.reconcileAdvertisement(machine, active, drained);
+      reply.send({ tail: [...drained, ...recovered] });
     },
   );
 }
@@ -1881,7 +1886,18 @@ function registerWebSocketRoute(
       unsubscribeReworkBin();
       unsubscribeRivalries();
       // Socket close implicitly unsubscribes every tail (protocol contract
-      // on TailUnsubscribe) — drop the registry with the fan-out listener.
+      // on TailUnsubscribe). Remote tail demand (T1 remote live-tail plane,
+      // S2): decrement refcount for each surviving agent-source key BEFORE
+      // clearing the registry, the same as an explicit tailUnsubscribe
+      // would — otherwise a closed socket's remote subscriptions would
+      // never release their tail-on demand.
+      for (const key of tailSubscriptions) {
+        const parsed = parseOutputStreamKey(key);
+        if (parsed?.source === 'agent') {
+          const agentId = Number(parsed.id);
+          if (Number.isInteger(agentId)) remoteTailDemand.noteTailUnsubscribe(agentId);
+        }
+      }
       tailSubscriptions.clear();
       unsubscribeOutputChunks();
     });

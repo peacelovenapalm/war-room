@@ -81,6 +81,20 @@ export function outputStreamKey(source: OutputSource, id: string): string {
   return `${source}\u0000${id}`;
 }
 
+/** Inverse of outputStreamKey — used where a caller only has the composite
+ *  key (e.g. iterating a tailSubscriptions Set at socket-close teardown)
+ *  and needs the (source, id) pair back. Returns undefined for a
+ *  malformed key (missing separator) rather than guessing. */
+export function parseOutputStreamKey(
+  key: string,
+): { source: OutputSource; id: string } | undefined {
+  const sep = key.indexOf('\u0000');
+  if (sep === -1) return undefined;
+  const source = key.slice(0, sep);
+  if (source !== 'agent' && source !== 'dispatch') return undefined;
+  return { source, id: key.slice(sep + 1) };
+}
+
 export class OutputRingStore {
   private readonly entries = new Map<string, RingEntry>();
   private listeners: Array<(chunk: OutputChunkBroadcast) => void> = [];

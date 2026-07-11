@@ -58,6 +58,15 @@ export const MAX_AGENT_OUTPUT_LINE_BYTES = 16_384;
  *  bounds a runaway/malicious remote's ability to grow server memory via
  *  distinct (machine, sessionId) pairs. Oldest entry evicted first. */
 export const MAX_REMOTE_TRANSCRIPT_PATHS = 500;
+
+// ── Remote tail-instruction plane (T1 remote live-tail, S2) ─
+/** Defensive cap on a machine's queued TailInstructions between polls
+ *  (remoteTailDemand.ts) — bounds unbounded growth if a tailer stops
+ *  polling (or a machine's queue never drains). Oldest-first eviction,
+ *  matching MAX_REMOTE_TRANSCRIPT_PATHS' posture. Never hit in normal
+ *  operation — one instruction per tail-on/off transition. */
+export const MAX_TAIL_QUEUE_PER_MACHINE = 200;
+
 /** Grace period after SessionEnd(reason=clear/resume) before triggering onSessionEnd.
  *  /clear and /resume fire SessionEnd then SessionStart within ms. This timeout is a
  *  safety net: if SessionStart never arrives (e.g. the CLI crashes mid-transition),

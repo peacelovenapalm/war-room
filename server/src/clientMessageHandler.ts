@@ -7,6 +7,7 @@ import { readLayoutFromFile, writeLayoutToFile } from './layoutPersistence.js';
 import type { OutputSource } from './outputRingStore.js';
 import { outputRingStore, outputStreamKey } from './outputRingStore.js';
 import { claudeProvider } from './providers/index.js';
+import * as remoteTailDemand from './remoteTailDemand.js';
 
 type WsSend = (message: Record<string, unknown>) => void;
 
@@ -164,7 +165,21 @@ export function handleClientMessage(
     case 'tailSubscribe': {
       const target = parseTailTarget(msg);
       if (!target || !ctx.tailSubscriptions) break;
-      ctx.tailSubscriptions.add(outputStreamKey(target.source, target.id));
+      const key = outputStreamKey(target.source, target.id);
+      // Remote tail demand (T1 remote live-tail plane, S2): only a
+      // genuinely NEW subscription for THIS socket counts — re-sending
+      // tailSubscribe for an already-subscribed key must never double the
+      // refcount. Agent-source only; dispatch output has no remote-tailer
+      // plane. Local agents are a guaranteed no-op inside noteTailSubscribe
+      // itself (see its doc) — checked there, not duplicated here.
+      const isNewSubscription = !ctx.tailSubscriptions.has(key);
+      ctx.tailSubscriptions.add(key);
+      if (isNewSubscription && target.source === 'agent') {
+        const agentId = Number(target.id);
+        if (Number.isInteger(agentId)) {
+          remoteTailDemand.noteTailSubscribe(ctx.store, agentId, ctx.machineLabel);
+        }
+      }
       for (const chunk of outputRingStore.replay(target.source, target.id)) {
         send(chunk as unknown as Record<string, unknown>);
       }
@@ -174,7 +189,15 @@ export function handleClientMessage(
     case 'tailUnsubscribe': {
       const target = parseTailTarget(msg);
       if (!target || !ctx.tailSubscriptions) break;
-      ctx.tailSubscriptions.delete(outputStreamKey(target.source, target.id));
+      const key = outputStreamKey(target.source, target.id);
+      const wasSubscribed = ctx.tailSubscriptions.has(key);
+      ctx.tailSubscriptions.delete(key);
+      if (wasSubscribed && target.source === 'agent') {
+        const agentId = Number(target.id);
+        if (Number.isInteger(agentId)) {
+          remoteTailDemand.noteTailUnsubscribe(agentId);
+        }
+      }
       break;
     }
 
