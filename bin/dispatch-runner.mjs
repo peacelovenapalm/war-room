@@ -55,6 +55,13 @@
  *     whether the pid happens to also be in the dispatch registry (the two
  *     containment rules are never cross-shortcut).
  *
+ * T5 fleet controls, PER-DISPATCH TIME CAP — a `dispatch` item optionally
+ * carries `timeoutSec`; when present, runDispatch() arms a timer at spawn
+ * (see `triggerCap`). At the cap: SIGTERM through the SAME live-children
+ * registry (never a raw pid), then SIGKILL after KILL_GRACE_MS if the child
+ * ignores TERM. Reports the DISTINCT terminal event 'capped' — never
+ * conflated with a human-initiated 'killed' or a natural 'exited'.
+ *
  * Config (env, overridable by flags):
  *   WAR_ROOM_URL                  server base URL  (default http://127.0.0.1:3141)
  *   WAR_ROOM_TOKEN                bearer token     (REQUIRED)
@@ -100,6 +107,11 @@ const FINAL_FLUSH_MAX_WAIT_MS = POST_TIMEOUT_MS;
  *  (dispatchStore.ts DISPATCH_RESULT_TAIL_MAX_CHARS) so a chatty run never
  *  balloons the status POST. */
 const RESULT_TAIL_MAX_BYTES = 8 * 1024;
+/** T5 fleet controls, PER-DISPATCH TIME CAP: grace period between the cap
+ *  timer's SIGTERM and its SIGKILL escalation if the child ignores TERM.
+ *  Overridable via deps.killGraceMs for tests (real timers would otherwise
+ *  make an escalation test slow). */
+const KILL_GRACE_MS = 5_000;
 
 // ── Config ──────────────────────────────────────────────────────
 
@@ -345,6 +357,46 @@ function readResultTail(logPath) {
   }
 }
 
+/**
+ * T5 fleet controls, PER-DISPATCH TIME CAP: fires when `item.timeoutSec`
+ * elapses. Uses the EXACT SAME containment discipline as
+ * processDispatchStop — the registry IS the boundary, never a raw pid — but
+ * reports a DISTINCT terminal event ('capped'), never conflated with a
+ * human-initiated 'killed'. Escalates SIGTERM -> SIGKILL after
+ * KILL_GRACE_MS if the child ignores the first signal. A no-op if the
+ * dispatch already exited or was already capped/killed by the time the
+ * timer fires (registry lookup naturally guards this — 'exit' always
+ * deletes the entry first).
+ */
+function triggerCap(cfg, id, state, deps) {
+  const entry = state.children.get(id);
+  if (!entry || entry.capped || entry.killRequested) return;
+  entry.capped = true;
+  try {
+    entry.child.kill('SIGTERM');
+    audit(cfg, 'cap-signal-sent', { id, pid: entry.child.pid });
+  } catch (err) {
+    audit(cfg, 'cap-signal-error', { id, pid: entry.child.pid, reason: shortErr(err) });
+  }
+  const graceMs = deps.killGraceMs ?? KILL_GRACE_MS;
+  const escalationTimer = setTimeout(() => {
+    const stillRunning = state.children.get(id);
+    if (!stillRunning) return; // already exited — nothing to escalate
+    try {
+      stillRunning.child.kill('SIGKILL');
+      audit(cfg, 'cap-escalated-sigkill', { id, pid: stillRunning.child.pid });
+    } catch (err) {
+      audit(cfg, 'cap-escalation-error', {
+        id,
+        pid: stillRunning.child.pid,
+        reason: shortErr(err),
+      });
+    }
+  }, graceMs);
+  escalationTimer.unref?.();
+  entry.escalationTimer = escalationTimer;
+}
+
 function runDispatch(cfg, item, argv, state, deps) {
   const spawnImpl = deps.spawn ?? spawn;
   ensureLogDir(cfg);
@@ -373,7 +425,36 @@ function runDispatch(cfg, item, argv, state, deps) {
   // Registered here (right after a real spawn), cleared unconditionally on
   // 'exit' below (whether that exit was self-caused or the result of a stop
   // instruction's SIGTERM).
-  state.children.set(item.id, { child, killRequested: false });
+  const registryEntry = {
+    child,
+    killRequested: false,
+    capped: false,
+    capTimer: null,
+    escalationTimer: null,
+  };
+  state.children.set(item.id, registryEntry);
+
+  // T5 fleet controls, PER-DISPATCH TIME CAP: arm the timer only when the
+  // request actually carried one (absent = no cap, current behavior).
+  // Cleared in the 'exit' handler below if the process finishes on its own
+  // before the cap fires.
+  // The server already validates timeoutSec as a positive integer <=
+  // DISPATCH_TIMEOUT_MAX_SEC before it ever reaches a poll response — the
+  // runner just needs a usable positive number to schedule a timer with,
+  // same trust level as model/effort (validated once, upstream, not
+  // re-validated here).
+  if (
+    typeof item.timeoutSec === 'number' &&
+    Number.isFinite(item.timeoutSec) &&
+    item.timeoutSec > 0
+  ) {
+    const capTimer = setTimeout(
+      () => triggerCap(cfg, item.id, state, deps),
+      item.timeoutSec * 1000,
+    );
+    capTimer.unref?.();
+    registryEntry.capTimer = capTimer;
+  }
 
   // Live output forwarding (KICKOFF-v2.0 Phase 2 slice 2.5) — ADDITIVE tap
   // beside the per-run log stream (which stays the durable record):
@@ -402,8 +483,15 @@ function runDispatch(cfg, item, argv, state, deps) {
   audit(cfg, 'started', { id: item.id, pid: child.pid, provider: item.provider, cwd: item.cwd });
 
   child.on('exit', (code) => {
-    const registryEntry = state.children.get(item.id);
-    const wasKilled = registryEntry?.killRequested === true;
+    const finalEntry = state.children.get(item.id);
+    const wasKilled = finalEntry?.killRequested === true;
+    const wasCapped = finalEntry?.capped === true;
+    // Clear both timers regardless of which path this exit took — a
+    // natural exit before the cap ever fired must not leave a stray timer
+    // that later signals a long-gone pid; a cap that already fired has
+    // nothing left to escalate once the child is actually gone.
+    if (finalEntry?.capTimer) clearTimeout(finalEntry.capTimer);
+    if (finalEntry?.escalationTimer) clearTimeout(finalEntry.escalationTimer);
     state.children.delete(item.id);
     // Final output flush — stops the coalescing loop. The returned promise
     // (the forwarder's serialized POST chain) GATES the terminal status
@@ -424,9 +512,12 @@ function runDispatch(cfg, item, argv, state, deps) {
       if (reported) return;
       reported = true;
       const resultTail = readResultTail(logPath);
-      // A DISTINCT terminal status for an explicit kill — never conflated
-      // with a natural exit (KICKOFF v1.1 item 3's explicit requirement).
-      const event = wasKilled ? 'killed' : 'exited';
+      // DISTINCT terminal statuses, never conflated: an explicit kill
+      // (KICKOFF v1.1 item 3), a T5 fleet-controls cap, or a natural exit.
+      // capped takes priority over killed — a human kill racing an
+      // already-fired cap timer is still honestly reported as capped (the
+      // cap is what actually ended it first).
+      const event = wasCapped ? 'capped' : wasKilled ? 'killed' : 'exited';
       // Sequence AFTER the final output flush (bounded — see finalFlush's
       // comment above) so the terminal status POST can never overtake the
       // run's last chunks into the server's liveness-gated /output route.
@@ -449,6 +540,9 @@ function runDispatch(cfg, item, argv, state, deps) {
     }
   });
   child.on('error', (err) => {
+    const erroredEntry = state.children.get(item.id);
+    if (erroredEntry?.capTimer) clearTimeout(erroredEntry.capTimer);
+    if (erroredEntry?.escalationTimer) clearTimeout(erroredEntry.escalationTimer);
     state.children.delete(item.id);
     void forwarder.stop();
     log(`⚠ spawn error for ${item.id}: ${shortErr(err)}`);

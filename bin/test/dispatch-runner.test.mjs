@@ -846,6 +846,208 @@ test('worker session kill (observed pid) END-TO-END: a real claude-like process 
   assert.equal(stillAlive, false, 'the real process must actually be dead, not just reported so');
 });
 
+// ── T5 fleet controls, PER-DISPATCH TIME CAP ─────────────────────
+
+test('T5 cap: absent timeoutSec arms no timer — a long-lived child is never signaled', async () => {
+  const item = {
+    id: 'req-nocap',
+    action: 'dispatch',
+    provider: 'claude',
+    cwd: tmpDir,
+    prompt: 'hi',
+  };
+  const { server, port } = await startStubServer(stubHandler({ pending: [item] }));
+  const cfg = baseCfg(port);
+  const allowlist = { providers: ['claude'], roots: [tmpDir], focus: false };
+  const state = { handled: new Set(), children: new Map() };
+  let child;
+  await tick(cfg, state, {
+    readAllowlist: () => allowlist,
+    spawn: () => {
+      child = new EventEmitter();
+      child.pid = 4242;
+      child.stdout = new EventEmitter();
+      child.stderr = new EventEmitter();
+      child.kill = (signal) => {
+        child.killedWith = signal;
+      };
+      return child; // never auto-exits — this test drives it
+    },
+  });
+  // Long enough that a WOULD-be cap (if wrongly armed with no timeoutSec)
+  // has every opportunity to fire.
+  await new Promise((resolve) => setTimeout(resolve, 100));
+  assert.equal(child.killedWith, undefined, 'no timeoutSec must arm no timer at all');
+  child.emit('exit', 0);
+  await new Promise((resolve) => setTimeout(resolve, 50));
+  server.close();
+});
+
+test('T5 cap: fires SIGTERM through the SAME live-children registry, escalates to SIGKILL if the child ignores it, and reports the DISTINCT "capped" status', async () => {
+  // timeoutSec is fractional-seconds here (the runner just multiplies by
+  // 1000ms with no re-validation of its own — the server enforces the
+  // integer-seconds bound before this ever reaches the poll response) —
+  // the fastest honest way to exercise a real setTimeout in this suite.
+  const item = {
+    id: 'req-cap',
+    action: 'dispatch',
+    provider: 'claude',
+    cwd: tmpDir,
+    prompt: 'runs too long',
+    timeoutSec: 0.03, // 30ms
+  };
+  const { server, captured, port } = await startStubServer(stubHandler({ pending: [item] }));
+  const cfg = baseCfg(port);
+  const allowlist = { providers: ['claude'], roots: [tmpDir], focus: false };
+  const state = { handled: new Set(), children: new Map() };
+  const signals = [];
+  let child;
+  await tick(cfg, state, {
+    readAllowlist: () => allowlist,
+    killGraceMs: 30,
+    spawn: () => {
+      child = new EventEmitter();
+      child.pid = 4242;
+      child.stdout = new EventEmitter();
+      child.stderr = new EventEmitter();
+      // Deliberately ignores SIGTERM (never emits 'exit' on its own) so the
+      // escalation path is actually exercised — the SAME child object each
+      // time, proving both signals go through the ONE registry entry, never
+      // a second/raw path.
+      child.kill = (signal) => {
+        signals.push(signal);
+      };
+      return child;
+    },
+  });
+
+  // Wait past the cap AND the escalation grace period.
+  await new Promise((resolve) => setTimeout(resolve, 120));
+  assert.deepEqual(
+    signals,
+    ['SIGTERM', 'SIGKILL'],
+    'expected TERM then an escalated KILL, both via child.kill()',
+  );
+
+  // The OS actually terminating it (simulated here) is what triggers the
+  // terminal report — never reported before the process really exits.
+  child.emit('exit', null);
+  await new Promise((resolve) => setTimeout(resolve, 50));
+  server.close();
+
+  const cappedStatus = captured.find(
+    (c) => c.url === '/api/dispatch/req-cap/status' && c.body.event === 'capped',
+  );
+  assert.ok(cappedStatus, 'expected a distinct "capped" status POST');
+  assert.equal(
+    captured.some(
+      (c) =>
+        c.url === '/api/dispatch/req-cap/status' &&
+        (c.body.event === 'killed' || c.body.event === 'exited'),
+    ),
+    false,
+    'a capped dispatch must never ALSO report killed or exited',
+  );
+});
+
+test('T5 cap: a child that exits naturally BEFORE the cap fires is reported "exited", never "capped" — the timer is cleared, not just ignored', async () => {
+  const item = {
+    id: 'req-cap-beaten',
+    action: 'dispatch',
+    provider: 'claude',
+    cwd: tmpDir,
+    prompt: 'finishes first',
+    timeoutSec: 1, // 1000ms — comfortably longer than this test's own waits
+  };
+  const { server, captured, port } = await startStubServer(stubHandler({ pending: [item] }));
+  const cfg = baseCfg(port);
+  const allowlist = { providers: ['claude'], roots: [tmpDir], focus: false };
+  const state = { handled: new Set(), children: new Map() };
+  const signals = [];
+  await tick(cfg, state, {
+    readAllowlist: () => allowlist,
+    spawn: () => {
+      const child = new EventEmitter();
+      child.pid = 4242;
+      child.stdout = new EventEmitter();
+      child.stderr = new EventEmitter();
+      child.kill = (signal) => signals.push(signal);
+      setImmediate(() => child.emit('exit', 0)); // finishes almost immediately
+      return child;
+    },
+  });
+  await new Promise((resolve) => setTimeout(resolve, 100));
+  server.close();
+
+  assert.deepEqual(signals, [], 'the cap timer must never fire once the child already exited');
+  const exited = captured.find(
+    (c) => c.url === '/api/dispatch/req-cap-beaten/status' && c.body.event === 'exited',
+  );
+  assert.ok(exited, 'expected a normal "exited" report');
+});
+
+test("T5 cap: a concurrent, un-capped dispatch is entirely unaffected by another dispatch's cap", async () => {
+  const cappedItem = {
+    id: 'req-cap-a',
+    action: 'dispatch',
+    provider: 'claude',
+    cwd: tmpDir,
+    prompt: 'capped',
+    timeoutSec: 0.03,
+  };
+  const uncappedItem = {
+    id: 'req-cap-b',
+    action: 'dispatch',
+    provider: 'claude',
+    cwd: tmpDir,
+    prompt: 'uncapped',
+  };
+  const { server, captured, port } = await startStubServer(
+    stubHandler({ pending: [cappedItem, uncappedItem] }),
+  );
+  const cfg = baseCfg(port);
+  const allowlist = { providers: ['claude'], roots: [tmpDir], focus: false };
+  const state = { handled: new Set(), children: new Map() };
+  const children = {};
+  await tick(cfg, state, {
+    readAllowlist: () => allowlist,
+    killGraceMs: 20,
+    spawn: (_cmd, args) => {
+      const child = new EventEmitter();
+      child.pid = args[args.length - 1] === 'capped' ? 1111 : 2222;
+      child.stdout = new EventEmitter();
+      child.stderr = new EventEmitter();
+      child.kill = (signal) => {
+        child.killedWith = signal;
+      };
+      children[child.pid] = child;
+      return child; // neither auto-exits — this test drives B explicitly
+    },
+  });
+
+  await new Promise((resolve) => setTimeout(resolve, 100));
+  assert.equal(children[1111].killedWith, 'SIGKILL', 'A was capped and escalated');
+  assert.equal(children[2222].killedWith, undefined, 'B (no cap) must be entirely untouched');
+
+  children[1111].emit('exit', null);
+  children[2222].emit('exit', 0);
+  await new Promise((resolve) => setTimeout(resolve, 50));
+  server.close();
+
+  assert.equal(
+    captured.find(
+      (c) => c.url === '/api/dispatch/req-cap-a/status' && c.body.event === 'capped',
+    ) !== undefined,
+    true,
+  );
+  assert.equal(
+    captured.find(
+      (c) => c.url === '/api/dispatch/req-cap-b/status' && c.body.event === 'exited',
+    ) !== undefined,
+    true,
+  );
+});
+
 test('worker session kill (observed pid): an UNKNOWN pid has no server/runner path at all — the UI disables the button instead (nothing to test at this layer)', () => {
   // Documented no-op: see AgentDrawer.tsx's disabled-button state and
   // KICKOFF v1.1 item 3's explicit "don't build a server/runner path for
