@@ -63,6 +63,12 @@ const COMPUTE_SCRIPT_ID_PATTERN = /^[a-zA-Z0-9._-]{1,64}$/;
  *  registry may lower it per-script (COMPUTE_MAX_ARGS_CEILING in
  *  dispatch-rules.mjs); this is the outer backstop before it ever rings. */
 const COMPUTE_MAX_ARGS_CEILING = 16;
+/** Per-arg charset+length gate, MIRRORED from the runner's COMPUTE_ARG_PATTERN
+ *  (dispatch-rules.mjs) so an oversized/metacharacter arg is rejected BEFORE
+ *  it rides server persistence (dispatch-queue.json) + the audit log — never
+ *  trust the wire for a limit the runner already holds, twice-enforced is a
+ *  limit actually held (same discipline as DISPATCH_RESULT_TAIL_MAX_CHARS). */
+const COMPUTE_ARG_PATTERN = /^[a-zA-Z0-9._/=:@,+-]{1,256}$/;
 
 /** Providers a runner actually has an `--effort`-equivalent flag for
  *  (bin/lib/dispatch-rules.mjs buildArgv is the enforcement point) — the
@@ -478,6 +484,12 @@ export class DispatchStore {
         if (input.args.length > COMPUTE_MAX_ARGS_CEILING) {
           return { ok: false, reason: 'too-many-args' };
         }
+        // Per-arg charset+length, mirrored from the runner (codex 2B review):
+        // reject an oversized/metacharacter arg BEFORE it rides server
+        // persistence + the audit log, not one hop later at poll-consume time.
+        if (input.args.some((a) => !COMPUTE_ARG_PATTERN.test(a))) {
+          return { ok: false, reason: 'invalid-arg' };
+        }
       }
     } else if (input.action === 'dispatch' || input.action === 'session') {
       if (!isValidProvider(input.provider) || !isLlmProvider(input.provider)) {
@@ -705,7 +717,9 @@ export class DispatchStore {
       roots: ad.roots,
       focus: ad.focus,
       sessions: ad.sessions === true,
-      scriptIds: Array.isArray(ad.scriptIds) ? ad.scriptIds.filter((s) => typeof s === 'string') : [],
+      scriptIds: Array.isArray(ad.scriptIds)
+        ? ad.scriptIds.filter((s) => typeof s === 'string')
+        : [],
       lastSeenAt: now,
     });
   }

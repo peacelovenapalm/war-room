@@ -877,3 +877,34 @@ codex cross-model review — see below). Accepted-as-is unless promoted:
   vanishes sweeps to denied/'expired' on the dispatch sweep timer. Honest
   (board shows ✗ FAILED — expired), never a permanent DELIVERING…. Correct
   by construction; noted for completeness.
+
+## [v4 Phase 2B] codex gpt-5.6-sol cross-model review — reconcile (2026-07-11)
+
+Reviewed 43e19e8..HEAD (T2/T4 + T8). **0 critical, 0 major, 3 minor.**
+Codex confirmed the containment story holds end-to-end (no answer reaches
+an unmanaged pty; shell can't escape the registry; nonce truly one-shot;
+managed flag not client-assertable; auth tiers correct; no 500-paths).
+
+- **FIXED before ship:** server-side `shell` enqueue now mirrors the
+  runner's COMPUTE_ARG_PATTERN (charset + 256-char length) so an
+  oversized/metacharacter arg is rejected before it rides dispatch-queue
+  persistence + the audit log, not one hop later at poll-consume time.
+  Never was a containment break (shell:false + registry + runner filter
+  still gate execution) — a persistence-hygiene mirror of the codebase's
+  own "twice-enforced" principle. +1 server test.
+- **DEFERRED (resource hygiene, not exploitable):** runner
+  `state.consumedNonces` Set and server `answerRequests` Map both grow
+  unbounded over a process lifetime (one UUID per answer). Human-paced +
+  frequent runner restarts make this a non-issue for v4; bound with an
+  LRU/TTL if answer volume ever climbs. Same pre-existing pattern as
+  pidKillRequests.
+- **DEFERRED (pre-existing, not T2-introduced):** OS pid-reuse in the
+  (machine,pid) addressing scheme — if a pid is reused within the 30s
+  advertisement window, requestAnswer/kill/focus could resolve to the
+  wrong target. Inherent to the whole codebase's pid addressing (FOCUS +
+  pid-kill already carry it), not new to the answer plane. A real fix
+  would key on (machine, pid, startTime) or the sessionId; out of v4 scope.
+- **DEFERRED (availability, not security):** checkTmuxVersion's regex
+  could fail to parse exotic tmux version strings (e.g. OpenBSD builds) →
+  deny-by-default (no launch), which is safe but could surprise. Widen the
+  parse if a real machine hits it.

@@ -86,6 +86,40 @@ describe('DispatchStore: shell (compute) enqueue', () => {
     ).toEqual({ ok: false, reason: 'shell-must-be-dispatch' });
   });
 
+  it('rejects a shell arg with metacharacters or over the length cap SERVER-SIDE (codex 2B review)', () => {
+    const store = new DispatchStore();
+    // Shell metacharacters — caught here, never persisted to the queue/audit.
+    expect(
+      store.enqueue({
+        action: 'dispatch',
+        machine: 'M',
+        provider: 'shell',
+        scriptId: 'ok',
+        args: ['fine', 'rm -rf; $(x)'],
+      }),
+    ).toEqual({ ok: false, reason: 'invalid-arg' });
+    // Over the 256-char per-arg length (would otherwise ride persistence).
+    expect(
+      store.enqueue({
+        action: 'dispatch',
+        machine: 'M',
+        provider: 'shell',
+        scriptId: 'ok',
+        args: ['a'.repeat(257)],
+      }),
+    ).toEqual({ ok: false, reason: 'invalid-arg' });
+    // A clean arg still passes.
+    expect(
+      store.enqueue({
+        action: 'dispatch',
+        machine: 'M',
+        provider: 'shell',
+        scriptId: 'ok',
+        args: ['--width=800', '/in/dir'],
+      }).ok,
+    ).toBe(true);
+  });
+
   it('an LLM provider still requires prompt/cwd; a bare shell never carries them', () => {
     const store = new DispatchStore();
     expect(
