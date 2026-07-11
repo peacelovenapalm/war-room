@@ -11,6 +11,8 @@ export interface DispatchMachine {
   providers: string[];
   roots: string[];
   focus: boolean;
+  /** T2/T4 managed sessions — deny-by-default, same posture as `focus`. */
+  sessions: boolean;
 }
 
 /** One-line copy-able identity for the drawer's COPY ID button:
@@ -74,7 +76,7 @@ export const DISPATCH_STATUSES = [
 ] as const;
 export type DispatchStatusValue = (typeof DISPATCH_STATUSES)[number];
 
-export type DispatchActionValue = 'dispatch' | 'focus';
+export type DispatchActionValue = 'dispatch' | 'focus' | 'session';
 
 /** Mirrors server/src/dispatchStore.ts DISPATCH_PROMPT_MAX_CHARS. */
 export const DISPATCH_PROMPT_MAX_CHARS = 4000;
@@ -283,6 +285,17 @@ export function machineSupportsFocus(
 ): boolean {
   if (!machine) return false;
   return machines.some((m) => m.machine === machine && m.focus);
+}
+
+/** True when `machine` has a live runner advertisement with the T2/T4
+ *  managed-session capability enabled (deny-by-default — absent = false,
+ *  same posture as machineSupportsFocus). */
+export function machineSupportsSessions(
+  machines: DispatchMachine[],
+  machine: string | undefined,
+): boolean {
+  if (!machine) return false;
+  return machines.some((m) => m.machine === machine && m.sessions);
 }
 
 // ── Send-failure detection ──────────────────────────────────────────

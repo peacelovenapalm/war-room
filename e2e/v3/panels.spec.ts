@@ -207,6 +207,20 @@ async function serveV3Dist(
     /** T5 fleet controls — extra dispatchUpdate broadcasts pushed right
      *  after the webviewReady script, to seed CAPPED/HELD tray chips. */
     extraDispatchUpdates?: object[];
+    /** Any other extra broadcasts pushed right after the webviewReady
+     *  script (e.g. T2/T4 tests seeding agentPollState.waitingFor so the
+     *  ANSWER composer's option parser has real text to work with). */
+    extraMessages?: object[];
+    /** T2/T4 remote-answer plane — advertises agent 1 as `managed: true`
+     *  in the existingAgents script (the board's only license to render
+     *  ANSWER). Defaults false — agent 1 is DESK-only unless a test opts in. */
+    agentManaged?: boolean;
+    /** T2/T4 remote-answer plane — GET /api/agents/answer/:id outcome for
+     *  the answer this suite's POST route mints. */
+    answerOutcome?: 'delivered' | 'denied';
+    answerDenyReason?: string;
+    /** T2/T4 remote-answer plane — canned GET /api/agents/answers receipts. */
+    answerReceiptsOverride?: unknown[];
   } = {},
 ): Promise<StaticHost> {
   if (!fs.existsSync(path.join(V3_DIST, 'index.html'))) {
@@ -216,6 +230,7 @@ async function serveV3Dist(
   const receivedMessages: Record<string, unknown>[] = [];
   const receivedHttpPosts: { path: string }[] = [];
   const killRequestId = 'kill-req-1';
+  const answerRequestId = 'answer-req-1';
   const server = http.createServer((req, res) => {
     const requestPath = decodeURIComponent((req.url ?? '/').split('?')[0]);
 
@@ -251,6 +266,29 @@ async function serveV3Dist(
       } else {
         res.end(JSON.stringify({ status: 'killed' }));
       }
+      return;
+    }
+    // T2/T4 remote-answer plane — same "canned response, no body parsing
+    // needed" tolerance as the KILL routes above (the drawer's exact
+    // request shape is asserted via the rendered confirm-step text, not a
+    // captured POST body).
+    if (requestPath === '/api/agents/answer' && req.method === 'POST') {
+      res.writeHead(200, { 'Content-Type': 'application/json' });
+      res.end(JSON.stringify({ ok: true, id: answerRequestId }));
+      return;
+    }
+    if (requestPath === `/api/agents/answer/${answerRequestId}` && req.method === 'GET') {
+      res.writeHead(200, { 'Content-Type': 'application/json' });
+      if (options.answerOutcome === 'denied') {
+        res.end(JSON.stringify({ status: 'denied', reason: options.answerDenyReason }));
+      } else {
+        res.end(JSON.stringify({ status: options.answerOutcome ?? 'delivered' }));
+      }
+      return;
+    }
+    if (requestPath === '/api/agents/answers' && req.method === 'GET') {
+      res.writeHead(200, { 'Content-Type': 'application/json' });
+      res.end(JSON.stringify({ answers: options.answerReceiptsOverride ?? [] }));
       return;
     }
     if (requestPath === '/api/rework/rework-1/redispatch' && req.method === 'POST') {
@@ -322,6 +360,11 @@ async function serveV3Dist(
               externalAgents: {},
               machines: { '1': 'MACBOOK' },
               providers: { '1': 'claude' },
+              pids: { '1': 4242 },
+              // T2/T4 remote-answer plane — the board's ONLY license to
+              // render ANSWER; false (agent absent from the map) is the
+              // honest default every other test in this suite relies on.
+              ...(options.agentManaged ? { managed: { '1': true } } : {}),
             },
             { type: 'agentStatus', id: 1, status: 'active' },
             {
@@ -348,6 +391,9 @@ async function serveV3Dist(
           ];
           for (const serverMessage of script) socket.send(JSON.stringify(serverMessage));
           for (const extra of options.extraDispatchUpdates ?? []) {
+            socket.send(JSON.stringify(extra));
+          }
+          for (const extra of options.extraMessages ?? []) {
             socket.send(JSON.stringify(extra));
           }
         } else {
@@ -603,6 +649,189 @@ test.describe('stage-3 panel ports (desktop chrome model)', () => {
 
       await close.click();
       await expect(page.getByTestId('agent-drawer')).toHaveCount(0);
+    } finally {
+      await context.close();
+      await host.close();
+    }
+  });
+
+  test('T2/T4 remote-answer plane: unmanaged agent stays DESK-only; a managed agent gets ANSWER, one-tap options, verbatim confirm, and DELIVERING…→✓ DELIVERED', async ({
+    browser,
+  }) => {
+    const host = await serveV3Dist({ agentManaged: false });
+    const context = await browser.newContext({ viewport: VIEWPORT });
+    try {
+      const page = await context.newPage();
+      await page.goto(`${host.url}/?agentId=1`);
+      await expect(page.getByTestId('hud-connection')).toHaveText('● LIVE', { timeout: 20_000 });
+      await expect(page.getByTestId('agent-drawer')).toBeVisible({ timeout: 20_000 });
+
+      // Unmanaged (the honest default) — DESK-only explainer, no composer.
+      await expect(page.getByTestId('answer-desk-only')).toBeVisible();
+      await expect(page.getByTestId('answer-composer')).toHaveCount(0);
+    } finally {
+      await context.close();
+      await host.close();
+    }
+  });
+
+  test('T2/T4 remote-answer plane: managed agent — one-tap options prefill, confirm shows verbatim text, send reaches DELIVERING…→✓ DELIVERED, receipts render', async ({
+    browser,
+  }) => {
+    const host = await serveV3Dist({
+      agentManaged: true,
+      answerOutcome: 'delivered',
+      answerReceiptsOverride: [
+        {
+          id: 'answer-req-0',
+          machine: 'MACBOOK',
+          managedSessionRef: 'd-1',
+          text: 'an earlier answer',
+          status: 'delivered',
+          createdAt: 0,
+          updatedAt: 0,
+        },
+      ],
+      extraMessages: [
+        {
+          type: 'agentPollState',
+          id: 1,
+          state: 'blocked',
+          waitingFor: 'Approve the migration?\n1. Yes, apply it\n2. No, skip it',
+          ageMs: 0,
+        },
+      ],
+    });
+    const context = await browser.newContext({ viewport: VIEWPORT });
+    try {
+      const page = await context.newPage();
+      await page.goto(`${host.url}/?agentId=1`);
+      await expect(page.getByTestId('hud-connection')).toHaveText('● LIVE', { timeout: 20_000 });
+      await expect(page.getByTestId('agent-drawer')).toBeVisible({ timeout: 20_000 });
+
+      // Managed — the honest explainer is gone, the real composer renders.
+      await expect(page.getByTestId('answer-desk-only')).toHaveCount(0);
+      const composer = page.getByTestId('answer-composer');
+      await expect(composer).toBeVisible();
+
+      // Pre-existing receipt renders verbatim on load (one-tap-real).
+      await expect(page.getByTestId('answer-receipt')).toContainText('an earlier answer');
+      await expect(page.getByTestId('answer-receipt')).toContainText('DELIVERED');
+
+      // Defensively parsed AskUserQuestion options render as one-tap choices.
+      const options = page.getByTestId('answer-option');
+      await expect(options).toHaveCount(2);
+      await options.filter({ hasText: 'Yes, apply it' }).click();
+
+      // Verbatim-prompt discipline: the confirm step shows the EXACT text,
+      // nothing summarized/truncated, before anything is sent.
+      await expect(page.getByTestId('answer-confirm-text')).toHaveText('Yes, apply it');
+
+      await page.getByTestId('answer-confirm-send').click();
+      // No fake states: DELIVERING… while the outcome poll is in flight.
+      await expect(page.getByTestId('answer-status')).toContainText('DELIVERING', {
+        timeout: 2_000,
+      });
+      await expect(page.getByTestId('answer-status')).toContainText('✓ DELIVERED', {
+        timeout: 5_000,
+      });
+    } finally {
+      await context.close();
+      await host.close();
+    }
+  });
+
+  test('T2/T4 remote-answer plane: a runner deny renders ✗ FAILED with the reason honestly, never an optimistic success', async ({
+    browser,
+  }) => {
+    const host = await serveV3Dist({
+      agentManaged: true,
+      answerOutcome: 'denied',
+      answerDenyReason: 'session-dead',
+    });
+    const context = await browser.newContext({ viewport: VIEWPORT });
+    try {
+      const page = await context.newPage();
+      await page.goto(`${host.url}/?agentId=1`);
+      await expect(page.getByTestId('hud-connection')).toHaveText('● LIVE', { timeout: 20_000 });
+      await expect(page.getByTestId('answer-composer')).toBeVisible({ timeout: 20_000 });
+
+      await page.getByTestId('answer-text').fill('please retry the migration');
+      await page.getByTestId('answer-next').click();
+      await expect(page.getByTestId('answer-confirm-text')).toHaveText(
+        'please retry the migration',
+      );
+      await page.getByTestId('answer-confirm-send').click();
+      await expect(page.getByTestId('answer-status')).toContainText('✗ FAILED — session-dead', {
+        timeout: 5_000,
+      });
+    } finally {
+      await context.close();
+      await host.close();
+    }
+  });
+
+  test('T4 session launch: CALL modal PERSISTENT SESSION mode disables machines without the sessions capability and sends action:session with no timeout field', async ({
+    browser,
+  }) => {
+    const host = await serveV3Dist({
+      dispatchMachinesOverride: [
+        {
+          machine: 'MACBOOK',
+          providers: ['claude'],
+          roots: ['/Users/dev/war-room'],
+          focus: true,
+          sessions: true,
+        },
+        {
+          machine: 'NEXUS',
+          providers: ['claude'],
+          roots: ['/data'],
+          focus: false,
+          sessions: false,
+        },
+      ],
+    });
+    const context = await browser.newContext({ viewport: VIEWPORT });
+    try {
+      const page = await context.newPage();
+      await page.goto(`${host.url}/`);
+      await expect(page.getByTestId('hud-connection')).toHaveText('● LIVE', { timeout: 20_000 });
+
+      await page.getByTestId('dock-call').click();
+      await expect(page.getByTestId('call-modal')).toBeVisible();
+      await page.getByTestId('call-mode-session').click();
+
+      const machineSelect = page.locator('select').first();
+      // The option itself is disabled (native <option disabled>) — the
+      // honest "sessions not enabled" label, not an omission.
+      await expect(machineSelect.locator('option', { hasText: 'NEXUS' })).toHaveAttribute(
+        'disabled',
+        '',
+      );
+      await expect(machineSelect.locator('option', { hasText: 'NEXUS' })).toContainText(
+        'sessions not enabled',
+      );
+      await expect(machineSelect.locator('option', { hasText: 'MACBOOK' })).not.toHaveAttribute(
+        'disabled',
+        '',
+      );
+
+      await machineSelect.selectOption('MACBOOK');
+      await expect(page.getByTestId('call-session-disabled-hint')).toHaveCount(0);
+      // No TIME CAP field in session mode.
+      await expect(page.getByTestId('call-timeout-input')).toHaveCount(0);
+
+      await page.locator('select').nth(1).selectOption('claude'); // PROVIDER
+      await page.locator('select').nth(2).selectOption('/Users/dev/war-room'); // PROJECT
+
+      await page.getByTestId('call-submit').click();
+      const sessionMessage = host.receivedMessages.find(
+        (m) => m.type === 'dispatchRequest' && m.action === 'session',
+      );
+      expect(sessionMessage).toBeDefined();
+      expect(sessionMessage?.machine).toBe('MACBOOK');
+      expect(sessionMessage?.timeoutSec).toBeUndefined();
     } finally {
       await context.close();
       await host.close();

@@ -56,6 +56,7 @@ import { type AgentMap, EMPTY_AGENTS, reduceAgents, toOccupants } from './net/ag
 import { type ConnectionStatus, connectToServer, type ServerConnection } from './net/connection';
 import {
   detectSendFailures,
+  type DispatchActionValue,
   type DispatchEntry,
   type PendingSend,
   type SendFailure,
@@ -793,7 +794,7 @@ export default function App() {
   }, []);
 
   const handleDispatchSend = useCallback(
-    (machine: string, action: 'dispatch', requestId: string) => {
+    (machine: string, action: DispatchActionValue, requestId: string) => {
       // The pending id IS the wire requestId (CallModal generated it) — the
       // tick's detectSendFailures matches the echoed dispatchUpdate on it.
       pendingSendsRef.current = [

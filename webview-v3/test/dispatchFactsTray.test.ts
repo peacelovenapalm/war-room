@@ -141,7 +141,9 @@ describe('joinRootSubpath / splitCwdIntoRootSubpath', () => {
 
 describe('machineSupportsFocus', () => {
   it('requires a live runner AND the focus flag', () => {
-    const machines = [{ machine: 'MACBOOK', providers: ['claude'], roots: ['/x'], focus: true }];
+    const machines = [
+      { machine: 'MACBOOK', providers: ['claude'], roots: ['/x'], focus: true, sessions: false },
+    ];
     expect(machineSupportsFocus(machines, 'MACBOOK')).toBe(true);
     expect(machineSupportsFocus(machines, 'GHOST')).toBe(false);
     expect(machineSupportsFocus(machines, undefined)).toBe(false);

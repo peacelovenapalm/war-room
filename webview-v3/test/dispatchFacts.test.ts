@@ -5,11 +5,18 @@ import {
   canKillAgent,
   type DispatchMachine,
   machineHasLiveRunner,
+  machineSupportsSessions,
 } from '../src/net/dispatchFacts';
 
 const MACHINES: DispatchMachine[] = [
-  { machine: 'MACBOOK', providers: ['claude'], roots: ['/Users/greg/code'], focus: true },
-  { machine: 'NEXUS', providers: ['claude'], roots: ['/data'], focus: false },
+  {
+    machine: 'MACBOOK',
+    providers: ['claude'],
+    roots: ['/Users/greg/code'],
+    focus: true,
+    sessions: true,
+  },
+  { machine: 'NEXUS', providers: ['claude'], roots: ['/data'], focus: false, sessions: false },
 ];
 
 describe('buildCopyIdLine', () => {
@@ -40,5 +47,15 @@ describe('machineHasLiveRunner / canKillAgent', () => {
 
   it('no machine label → no runner', () => {
     expect(machineHasLiveRunner(MACHINES, undefined)).toBe(false);
+  });
+});
+
+describe('machineSupportsSessions (T2/T4 CALL modal session mode)', () => {
+  it('deny-by-default: only true when the advertisement carries sessions:true', () => {
+    expect(machineSupportsSessions(MACHINES, 'MACBOOK')).toBe(true);
+    expect(machineSupportsSessions(MACHINES, 'NEXUS')).toBe(false);
+    expect(machineSupportsSessions(MACHINES, 'GHOST')).toBe(false);
+    expect(machineSupportsSessions(MACHINES, undefined)).toBe(false);
+    expect(machineSupportsSessions([], 'MACBOOK')).toBe(false);
   });
 });

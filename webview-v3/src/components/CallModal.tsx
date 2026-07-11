@@ -8,6 +8,7 @@ import {
   DISPATCH_PROMPT_MAX_CHARS,
   DISPATCH_TIMEOUT_MAX_SEC,
   DISPATCH_UI_PROVIDERS,
+  type DispatchActionValue,
   type DispatchEffort,
   type DispatchMachine,
   type DispatchProvider,
@@ -20,6 +21,11 @@ import { budgetChipLabel, budgetResetHintLine, type BudgetSnapshotClient } from 
 import { Modal } from './Modal';
 
 const REFRESH_INTERVAL_MS = 10_000;
+
+/** CALL modal mode (T4 session launch, REMOTE-ANSWER-DESIGN.md's shared
+ *  substrate): 'dispatch' is the existing one-shot run, 'session' launches
+ *  a runner-owned tmux the T2 answer plane can later type into. */
+type CallMode = 'dispatch' | 'session';
 
 /** Prefill carried from a BRIEFING todo line's DISPATCH button, or from
  *  ContractsPanel's "Dispatch via…" employee-assign dropdown. */
@@ -39,7 +45,7 @@ export interface CallModalProps {
   send: (message: ClientMessage) => void;
   /** `requestId` is the correlation id sent on the wire — the caller's
    *  send-failure detector matches the echoed dispatchUpdate on it. */
-  onSend: (machine: string, action: 'dispatch', requestId: string) => void;
+  onSend: (machine: string, action: DispatchActionValue, requestId: string) => void;
   budget: BudgetSnapshotClient | null;
 }
 
@@ -47,6 +53,7 @@ export interface CallModalProps {
  *  project + prompt → enqueue a real dispatchRequest over the real WS
  *  connection. Options come ONLY from GET /api/dispatch/machines. */
 export function CallModal({ isOpen, onClose, prefill, send, onSend, budget }: CallModalProps) {
+  const [mode, setMode] = useState<CallMode>('dispatch');
   const [machines, setMachines] = useState<DispatchMachine[]>([]);
   const [fetchFailed, setFetchFailed] = useState(false);
   const [machine, setMachine] = useState('');
@@ -97,6 +104,7 @@ export function CallModal({ isOpen, onClose, prefill, send, onSend, budget }: Ca
   if (isOpen !== wasOpen) {
     setWasOpen(isOpen);
     if (isOpen) {
+      setMode('dispatch');
       setMachine(prefill?.machine ?? '');
       setProvider(prefill?.provider ?? '');
       setRoot('');
@@ -145,13 +153,18 @@ export function CallModal({ isOpen, onClose, prefill, send, onSend, budget }: Ca
       timeoutParsed !== undefined &&
       timeoutParsed > 0 &&
       timeoutParsed <= DISPATCH_TIMEOUT_MAX_SEC);
+  // PERSISTENT SESSION mode (T4): the opening brief is optional (a session
+  // can launch with no prompt at all), and there is NO time-cap field — the
+  // server rejects timeoutSec for action:'session' outright
+  // ('timeout-unsupported-for-session'), so the field is never rendered.
   const canSubmit =
     machine.trim() !== '' &&
     provider !== '' &&
     joined.ok &&
-    prompt.trim() !== '' &&
     remaining >= 0 &&
-    timeoutValid;
+    (mode === 'session'
+      ? selectedMachine?.sessions === true
+      : prompt.trim() !== '' && timeoutValid);
   const resetHint = budgetResetHintLine(budget, provider || undefined);
 
   const handleSubmit = () => {
@@ -165,24 +178,51 @@ export function CallModal({ isOpen, onClose, prefill, send, onSend, budget }: Ca
     const requestId = crypto.randomUUID();
     send({
       type: 'dispatchRequest',
-      action: 'dispatch',
+      action: mode,
       machine,
       provider,
       cwd: joined.cwd,
-      prompt,
       requestId,
+      ...(prompt.trim() !== '' ? { prompt } : {}),
       ...(model.trim() !== '' ? { model: model.trim() } : {}),
       ...(showEffort && effort !== '' ? { effort } : {}),
-      ...(timeoutTrimmed !== '' && timeoutParsed !== undefined
+      ...(mode === 'dispatch' && timeoutTrimmed !== '' && timeoutParsed !== undefined
         ? { timeoutSec: timeoutParsed }
         : {}),
     });
-    onSend(machine, 'dispatch', requestId);
+    onSend(machine, mode, requestId);
     onClose();
   };
 
   return (
     <Modal isOpen={isOpen} onClose={onClose} title="CALL A COWORKER" testId="call-modal">
+      {/* T4 session launch: PERSISTENT SESSION shares the CALL modal + the
+          real dispatchRequest wire path (action:'session'), same queue /
+          runner-decision / receipts plane as a one-shot DISPATCH — the hire
+          flow's substrate, no separate modal. */}
+      <div className="modal__actions" data-testid="call-mode-toggle">
+        <button
+          type="button"
+          className={mode === 'dispatch' ? 'verb verb--confirm' : 'verb'}
+          data-testid="call-mode-dispatch"
+          onClick={() => {
+            setMode('dispatch');
+          }}
+        >
+          DISPATCH
+        </button>
+        <button
+          type="button"
+          className={mode === 'session' ? 'verb verb--confirm' : 'verb'}
+          data-testid="call-mode-session"
+          onClick={() => {
+            setMode('session');
+          }}
+        >
+          PERSISTENT SESSION
+        </button>
+      </div>
+
       {fetchFailed && machines.length === 0 && (
         <div className="modal__warn">⚠ unable to reach /api/dispatch/machines</div>
       )}
@@ -205,11 +245,24 @@ export function CallModal({ isOpen, onClose, prefill, send, onSend, budget }: Ca
             >
               <option value="">— choose a machine —</option>
               {machines.map((m) => (
-                <option key={m.machine} value={m.machine}>
+                <option
+                  key={m.machine}
+                  value={m.machine}
+                  disabled={mode === 'session' && !m.sessions}
+                >
                   {m.machine}
+                  {mode === 'session' && !m.sessions ? ' — sessions not enabled' : ''}
                 </option>
               ))}
             </select>
+            {mode === 'session' && selectedMachine && !selectedMachine.sessions && (
+              <span
+                className="field__hint field__hint--warn"
+                data-testid="call-session-disabled-hint"
+              >
+                ⚠ sessions not enabled on this machine
+              </span>
+            )}
           </label>
 
           {selectedMachine && (
@@ -294,30 +347,42 @@ export function CallModal({ isOpen, onClose, prefill, send, onSend, budget }: Ca
             </>
           )}
 
-          <label className="field">
-            <span className="field__label">TIME CAP (optional, seconds)</span>
-            <input
-              type="text"
-              inputMode="numeric"
-              value={timeoutSecInput}
-              onChange={(e) => setTimeoutSecInput(e.target.value)}
-              placeholder="no cap"
-              data-testid="call-timeout-input"
-            />
-            <span className={timeoutValid ? 'field__hint' : 'field__hint field__hint--warn'}>
-              {timeoutValid
-                ? 'runner SIGTERMs then SIGKILLs at the cap — absent means no cap'
-                : `⚠ enter a whole number of seconds, 1–${String(DISPATCH_TIMEOUT_MAX_SEC)}`}
-            </span>
-          </label>
+          {/* PERSISTENT SESSION rides the runner's tmux-managed lifecycle,
+              not the one-shot SIGTERM/SIGKILL timer — the server rejects
+              timeoutSec outright for action:'session', so the field is
+              never offered in this mode. */}
+          {mode === 'dispatch' && (
+            <label className="field">
+              <span className="field__label">TIME CAP (optional, seconds)</span>
+              <input
+                type="text"
+                inputMode="numeric"
+                value={timeoutSecInput}
+                onChange={(e) => setTimeoutSecInput(e.target.value)}
+                placeholder="no cap"
+                data-testid="call-timeout-input"
+              />
+              <span className={timeoutValid ? 'field__hint' : 'field__hint field__hint--warn'}>
+                {timeoutValid
+                  ? 'runner SIGTERMs then SIGKILLs at the cap — absent means no cap'
+                  : `⚠ enter a whole number of seconds, 1–${String(DISPATCH_TIMEOUT_MAX_SEC)}`}
+              </span>
+            </label>
+          )}
 
           <label className="field">
-            <span className="field__label">PROMPT</span>
+            <span className="field__label">
+              {mode === 'session' ? 'OPENING BRIEF (optional)' : 'PROMPT'}
+            </span>
             <textarea
               value={prompt}
               maxLength={DISPATCH_PROMPT_MAX_CHARS}
               onChange={(e) => setPrompt(e.target.value)}
-              placeholder="What should this session do?"
+              placeholder={
+                mode === 'session'
+                  ? 'Optional — the session can also launch with nothing queued yet'
+                  : 'What should this session do?'
+              }
             />
             <span className={remaining < 0 ? 'field__hint field__hint--warn' : 'field__hint'}>
               {remaining} chars remaining
@@ -347,7 +412,7 @@ export function CallModal({ isOpen, onClose, prefill, send, onSend, budget }: Ca
               onClick={handleSubmit}
               data-testid="call-submit"
             >
-              CALL
+              {mode === 'session' ? 'LAUNCH SESSION' : 'CALL'}
             </button>
           </div>
         </>
