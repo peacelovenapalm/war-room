@@ -88,8 +88,7 @@ export type DispatchStatus = 'ringing' | 'answered' | 'denied' | 'expired' | 'ex
  *  as the rest of this file's best-effort POSTs) — a lost delivery just
  *  means the human can click kill again. */
 export type StopInstruction =
-  | { kind: 'dispatch'; id: string }
-  | { kind: 'pid'; id: string; pid: number };
+  { kind: 'dispatch'; id: string } | { kind: 'pid'; id: string; pid: number };
 
 export type PidKillStatus = 'pending' | 'killed' | 'denied';
 
@@ -184,8 +183,7 @@ export interface DispatchEnqueueInput {
 }
 
 export type DispatchEnqueueResult =
-  | { ok: true; record: Readonly<DispatchRecord> }
-  | { ok: false; reason: string };
+  { ok: true; record: Readonly<DispatchRecord> } | { ok: false; reason: string };
 
 /** Broadcast-friendly snapshot (WS `dispatchUpdate` / replay on connect). */
 export interface DispatchBroadcast {
@@ -379,6 +377,15 @@ export class DispatchStore {
     ttlMs: number = DISPATCH_MACHINE_AD_TTL_MS,
   ): DispatchMachineAdvertisement[] {
     return [...this.machines.values()].filter((m) => now - m.lastSeenAt <= ttlMs);
+  }
+
+  /** EVERY machine this process has ever seen an advertisement from,
+   *  regardless of staleness — the inverse of getMachines()'s TTL filter.
+   *  Read-only, no new persistence (T3 Ops Advisor, DEAD-TELEMETRY finding):
+   *  a machine's runner going silent is itself the observation, so the
+   *  advisor needs the STALE ones getMachines() deliberately hides. */
+  getAllMachineAdvertisements(): DispatchMachineAdvertisement[] {
+    return [...this.machines.values()];
   }
 
   /** Requests still ringing for a machine, WITH the full prompt — the only

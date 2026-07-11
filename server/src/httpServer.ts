@@ -44,6 +44,7 @@ import {
 import { addRoom, buyFurniture, expandOffice, getOfficeLayout, sell } from './officeLayoutStore.js';
 import type { RoomType } from './officeLayoutTypes.js';
 import { RoomType as RoomTypeValues } from './officeLayoutTypes.js';
+import { getOpsReview, opsReviewSummary } from './opsAdvisor.js';
 import { outputRingStore, outputStreamKey, parseOutputStreamKey } from './outputRingStore.js';
 import { perfectOpsDay } from './perfectOpsDay.js';
 import { applyPollStates, parsePollBody, startPollStateSweep } from './pollStateHandler.js';
@@ -154,7 +155,7 @@ export async function createHttpServer(options: HttpServerOptions): Promise<Http
   // ── Routes ──────────────────────────────────────────────────
 
   registerHealthRoute(app);
-  registerBriefingRoute(app);
+  registerBriefingRoute(app, options);
   registerHookRoute(app, options);
   registerPollRoute(app, options);
   registerAgentOutputRoute(app, options);
@@ -400,7 +401,7 @@ function registerHealthRoute(app: FastifyInstance): void {
 // ── Briefing (post-v0) ─────────────────────────────────────────
 
 /** GET /api/briefing -- unauthenticated, like /api/health; the server is tailnet-only. */
-function registerBriefingRoute(app: FastifyInstance): void {
+function registerBriefingRoute(app: FastifyInstance, options: HttpServerOptions): void {
   app.get('/api/briefing', async () => {
     const briefing = getBriefing();
     // Contracts (v2 mechanic G4, §6.2): piggybacks briefingProvider's own
@@ -412,14 +413,23 @@ function registerBriefingRoute(app: FastifyInstance): void {
   // Shift report (v1 mechanic #2): today's scorecard — same trust level.
   // Also carries yesterday's closed ledger (deferred nit: previous-day card)
   // so a checked-out day isn't lost the moment midnight rolls over.
+  // opsReview (T3 rung 1): the compact fold KICKOFF-v4 calls for ("folded
+  // into SHIFT") — counts + the single most urgent finding. The full
+  // receipt-laden list lives at GET /api/ops/review below.
   app.get('/api/shift', async () => ({
     today: shiftStats.getReport(),
     yesterday: shiftStats.getYesterdayReport(),
+    opsReview: opsReviewSummary(getOpsReview(options.store)),
   }));
   // Progression (v1 mechanic #3): XP/level/streak/unlock snapshot — same
   // trust level. Primarily consumed live over the WS plane
   // (progressionUpdate); this route mirrors /api/shift for parity/debugging.
   app.get('/api/progression', async () => progression.getSnapshot());
+  // Ops Advisor (T3 self-healing ladder, rung 1 — read-only): the full
+  // findings list with receipts. Same trust level as /api/briefing;
+  // analyze-on-demand with a short TTL cache (opsAdvisor.ts), never a new
+  // polling loop.
+  app.get('/api/ops/review', async () => getOpsReview(options.store));
 }
 
 // ── Hook Events ────────────────────────────────────────────────

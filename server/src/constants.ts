@@ -96,6 +96,35 @@ export const MAX_TAIL_QUEUE_PER_MACHINE = 200;
 export const SESSION_END_GRACE_MS = 2000;
 export const MAX_HOOK_BODY_SIZE = 65_536; // 64KB
 
+// ── Ops Advisor (T3 self-healing ladder, rung 1 — read-only) ─
+/** Analyze-on-demand cache, mirroring briefingProvider.ts's own 60s TTL
+ *  cache pattern — no new polling loop. */
+export const OPS_ADVISOR_CACHE_TTL_MS = 60_000;
+/** Blocked-age thresholds — deliberately the SAME numbers as
+ *  webview-v3/src/state/crisis.ts's FIRE_AT_MS/ALARM_AT_MS (that file can't
+ *  be imported server-side; this mirrors the same operator-facing aging
+ *  bands rather than inventing a second set of numbers). */
+export const OPS_BLOCKED_WARN_MS = 90_000;
+export const OPS_BLOCKED_ALERT_MS = 240_000;
+/** How far back into dispatchStore's ledger the DISPATCH-WASTE finding
+ *  source scans (dispatchStore.getRecent's own default is 20 — too short a
+ *  window to see a repeated-failure pattern). Read-only, no new
+ *  persistence — same ledger, just a bigger read. */
+export const OPS_DISPATCH_HISTORY_LIMIT = 100;
+/** Cap on how many raw ledger entries a single finding cites as receipts —
+ *  bounds payload size when a waste pattern spans dozens of entries. */
+export const OPS_RECEIPT_SAMPLE_LIMIT = 5;
+/** Same-provider dispatch failures within OPS_DISPATCH_HISTORY_LIMIT before
+ *  DISPATCH-WASTE calls it a repeated-failure pattern (not just one bad
+ *  run). */
+export const OPS_DISPATCH_FAILURE_REPEAT_THRESHOLD = 2;
+/** DEAD-TELEMETRY escalates a stale dispatch-runner advertisement from
+ *  warn to alert once it's this many multiples of
+ *  DISPATCH_MACHINE_AD_TTL_MS old (a machine JUST past the TTL is a
+ *  routine blip; one that's been dark for multiples of it is a real
+ *  outage). */
+export const OPS_MACHINE_STALE_ALERT_MULTIPLIER = 3;
+
 // ── Layout/Config Persistence ──────────────────────────────
 export const LAYOUT_FILE_DIR = '.pixel-agents';
 export const LAYOUT_FILE_NAME = 'layout.json';
