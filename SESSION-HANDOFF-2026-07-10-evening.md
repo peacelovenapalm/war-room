@@ -10,9 +10,10 @@
 - **Real-device acceptance: PASSED** — iPhone + MacBook, Safari + Chrome,
   Greg-confirmed (drawer ✕ CLOSE verified after 645caf4 redeploy).
 - `npm audit --omit=dev` = 0 vulnerabilities (was 1 high + 1 moderate).
-- Mini (via tailscale 100.121.189.6): War Room stack installed but runner
-  dead-looping 401s — stale WAR_ROOM_TOKEN plist, dispatch path silently
-  broken (agent-verified from its log).
+- Mini (via tailscale 100.121.189.6): War Room stack installed; the 401
+  token loop found at inventory was FIXED 2026-07-11T05:51Z (token
+  re-issued into 3 plists + env, hash-verified; MINI now advertises live
+  in /api/dispatch/machines — dispatch path operational).
 - FOCUS TCC consent: GRANTED (osascript diagnostic returned in 0.4s).
 - NEXUS nightly backup includes `~/apps/war-room/state` (verified run,
   16 files; `server.json` excluded on purpose).
@@ -71,17 +72,16 @@
 
 ## 6. Next steps (max 3)
 
-1. **(<5 min) Fix the Mini token** — at the Mini (or via ssh): re-issue
-   WAR_ROOM_TOKEN in the dispatch-runner plist from the runbook, then
-   `launchctl kickstart -k gui/$(id -u)/com.war-room.dispatch-runner`;
-   confirm 401 spam stops in `~/Library/Logs/war-room-dispatch-runner.log`.
+1. ~~Fix the Mini token~~ — ✓ DONE 2026-07-11 (verified live in
+   /api/dispatch/machines).
 2. **Approve (or edit) KICKOFF-v4** — read `.planning/v4/KICKOFF-v4.md`;
-   answer the 3 Mini open questions at the bottom of
+   answer Mini open questions 2–3 at the bottom of
    `MINI-COMPUTE-NODE.md` in the same breath.
-3. **Kick off Phase 1 (T1 live tails)** — say go and the sprint starts
-   with the per-machine tailer (Sonnet build lane, Fable verify).
+3. **Kick off Phase 1 (T1 live tails)** — launch the v4 agent with the
+   /goal prompt in §8 below (or the /loop fallback if the session dies
+   mid-span).
 
-## 7. Kickoff prompt (paste verbatim into a fresh session)
+## 7. Kickoff prompt (superseded by §8 — kept for reference)
 
 ```
 Working dir /Users/greg/code/war-room, branch war-room/v3 @ 12804b2
@@ -95,4 +95,54 @@ implementation to Sonnet lanes, Fable orchestrates and adversarially
 verifies, one agent per checkout, full gate re-derived by the orchestrator
 before any deploy ask. Deploys stay Greg-executed via
 `! cd /Users/greg/code/war-room && NEXUS_HOST=nexus-ts bash .planning/runbooks/nexus-war-room-deploy.sh -y`.
+```
+
+## 8. v4 launch prompts (fresh session in /Users/greg/code/war-room)
+
+Pasting the /goal prompt constitutes Greg's approval of KICKOFF-v4 as
+written; edit the bracket first if he wants contract changes.
+
+**Primary — /goal (self-evaluating run):**
+
+```
+/goal Execute the War Room v4 "Console" sprint per the binding contract
+.planning/v4/KICKOFF-v4.md (+ .planning/v4/MINI-COMPUTE-NODE.md for T8;
+decisions ground truth = .planning/v4/DEBRIEF-REGISTER-2026-07-10.md).
+I approve the contract as written [EDITS: none / list here; Mini Q2:
+hand-edit dispatch.json; Mini Q3: interruptible, no caffeinate — change
+if I say otherwise]. Branch war-room/v3 @ e44b2e8+, deployed NEXUS =
+645caf4, Mini dispatch path live as of 2026-07-11. Create and maintain
+the run ledger at .planning/v4/STATE-v4.md (same format as
+STATE-v2.0.md). Work the phases in order: Phase 1 = T1 per-machine live
+tailer; Phase 2 = T2 remote-answer DESIGN DOC then STOP for my approval
+before any T2/T4 code; Phase 3 = T3 self-healing + T5 controls; Phase 4
+= T6/T7/T8 riders as capacity allows. Execution rules: Fable
+orchestrates/verifies/merges, Sonnet implements well-scoped stages,
+codex gpt-5.6-sol reviews cross-model + $imagegen; one agent per
+checkout (worktrees for parallel tracks); every phase ends with the
+FULL gate re-derived by the orchestrator (server + webview-ui +
+webview-v3 + poller + e2e + types/lint/build), never trusted from agent
+reports; review-on-return items land in .planning/v2/TUNING.md, never
+stall the line. Never deploy yourself — deploys are mine via the
+runbook one-liner. GOAL COMPLETE when: Phases 1–3 code-complete with
+gates green, T2 design doc delivered (approval-pending is acceptable),
+STATE-v4.md current, everything committed and pushed. Otherwise end
+state = BLOCKED-AWAITING-GREG with the ledger saying exactly what and
+why.
+```
+
+**Fallback — /loop (if a /goal session dies mid-span; self-paced):**
+
+```
+/loop Continue the War Room v4 sprint. Read .planning/v4/STATE-v4.md
+(create from .planning/v4/KICKOFF-v4.md Phase 1 if missing) and
+.planning/v4/KICKOFF-v4.md, verify actual repo/deploy state with git
+log + /api/version before trusting the ledger, then advance exactly ONE
+increment (one stage of the current phase) per iteration under the
+contract's rules: Sonnet implements, Fable verifies, full gate
+re-derived at phase ends, one agent per checkout, no deploys (Greg-run
+only), review-on-return to TUNING.md. Update STATE-v4.md + commit +
+push each iteration. Stop the loop when the current phase hits a GREG
+GATE (T2 design approval, deploy, acceptance) or Phases 1–3 are
+complete — write the ask into STATE-v4.md and end with a handoff.
 ```

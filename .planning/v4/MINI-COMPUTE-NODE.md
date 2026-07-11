@@ -19,12 +19,13 @@ CPU — use it for python/data/media compute, NOT LLM sessions.
   coworker-adapter, needs-input-poller LaunchAgents + ~~/.war-room/
   {dispatch.json, env, hook.sh}. Current allowlist: providers
   [claude, codex], roots [~~/code, ~/Brain2], focus true.
-- **LIVE BUG:** the runner log spams `skip tick — server responded 401`
-  every 5s — the plist's WAR_ROOM_TOKEN predates the v2.0 rotation. The
-  Mini's entire dispatch path is silently dead until the token is
-  re-issued (runbook token step or hand-patch the plist, then
-  `launchctl kickstart -k gui/$(id -u)/com.war-room.dispatch-runner`).
-  This fix is INDEPENDENT of the compute work and should happen first.
+- **LIVE BUG — ✓ FIXED 2026-07-11T05:51Z:** the runner had been spamming
+  `skip tick — server responded 401` every 5s since the v2.0 token
+  rotation (plists kept the old WAR_ROOM_TOKEN). Fix applied: token
+  re-issued from nexus war-room.env into all 3 LaunchAgent plists +
+  `~/.war-room/env` (hash-verified, never displayed), agents
+  bootout→bootstrap'd. Verified: zero 401s post-restart and MINI now
+  advertises in `/api/dispatch/machines` with a live lastSeenAt.
 - No DISPATCH-era zombies; crontab empty. Stale README-only checkout at
   ~/Code/arcade/war-room (ignore); live checkout /Users/greg/code/war-room.
 
@@ -91,10 +92,8 @@ from the MacBook.
 
 ## Onboarding — 3 steps, each under 5 minutes
 
-1. **Fix the token** (independent of v4): re-run the runbook token step
-   or patch the plist's WAR_ROOM_TOKEN (source of truth: nexus
-   `~/apps/war-room/war-room.env` — never echo it), kickstart the
-   runner, confirm the 401 spam stops.
+1. **Fix the token** — ✓ DONE 2026-07-11 (see LIVE BUG note above); the
+   Mini's claude/codex dispatch path is operational again.
 2. **Install python 3.12 + register one script**: `brew install
 python@3.12`, drop a script at `~/scripts/compute/`, add its
    `compute.scripts` entry + `"shell"` to providers (after the code
@@ -104,8 +103,7 @@ python@3.12`, drop a script at `~/scripts/compute/`, add its
 
 ## Open questions for Greg
 
-1. Fix the Mini's 401 token loop NOW as a standalone task (the existing
-   claude/codex dispatch path is silently broken), or bundle with v4?
+1. ~~Token loop~~ — RESOLVED 2026-07-11, fixed standalone same night.
 2. Script registration UX: hand-edit dispatch.json every time (safest,
    matches current philosophy) vs. a small `war-room-allow-script` CLI
    helper once this is frequent?
