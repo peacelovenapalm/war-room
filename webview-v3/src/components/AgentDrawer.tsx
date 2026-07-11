@@ -199,9 +199,19 @@ export function AgentDrawer({
         <Row label="STATE" value={`${chip.glyph} ${chip.label}`} />
         <Row label="NEEDS INPUT / PERMISSION" value={poll?.waitingFor ?? '—'} />
         <Row label="BLOCKED AGE" value={blockedAge} />
+        {/* One-tap-real: token counts come from the LOCAL transcript
+            parser only — remote (X-Machine) sessions have transcript_path
+            stripped at the ingest boundary and headless runs never report
+            usage, so their counters sit at 0 forever. A permanent
+            "0 in · 0 out" reads as a real measurement; NO DATA is the
+            honest render until the v4 per-machine tailer exists. */}
         <Row
           label="TOKENS"
-          value={`${compactTokens(record.inputTokens)} in · ${compactTokens(record.outputTokens)} out`}
+          value={
+            record.inputTokens === 0 && record.outputTokens === 0
+              ? '— NO DATA (no transcript access)'
+              : `${compactTokens(record.inputTokens)} in · ${compactTokens(record.outputTokens)} out`
+          }
         />
       </div>
 

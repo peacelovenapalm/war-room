@@ -926,6 +926,29 @@ export default function App() {
         {/* Phone-only (CSS-gated): GAME-DESIGN-V3 §3.2 item 4, below the
             triage board, remaining-height merged tail strip. */}
         <FloorFeed entries={floorFeed} />
+        {/* Inside .surfaces (the below-HUD region) so the drawer's own
+            header — with ✕ CLOSE — can never render underneath the HUD
+            strip (z 60): anchored at the root it started at viewport
+            top: 0 and the HUD painted over the close button on desktop
+            (found on real-device acceptance, 2026-07-10). */}
+        {drawerAgentId !== null && drawerTailKey !== null && (
+          <AgentDrawer
+            key={drawerAgentId}
+            agentId={drawerAgentId}
+            agents={agents}
+            crisis={crisis}
+            now={now}
+            tail={tails.get(drawerTailKey)}
+            pinned={pins.includes(drawerAgentId)}
+            onTogglePin={() => {
+              handleTogglePin(drawerAgentId);
+            }}
+            onTogglePause={() => {
+              handleTogglePause(drawerTailKey);
+            }}
+            onClose={handleCloseDrawer}
+          />
+        )}
       </div>
       <PinDock
         pins={pins}
@@ -936,24 +959,6 @@ export default function App() {
         onUnpin={handleTogglePin}
         onPromote={handleDesk}
       />
-      {drawerAgentId !== null && drawerTailKey !== null && (
-        <AgentDrawer
-          key={drawerAgentId}
-          agentId={drawerAgentId}
-          agents={agents}
-          crisis={crisis}
-          now={now}
-          tail={tails.get(drawerTailKey)}
-          pinned={pins.includes(drawerAgentId)}
-          onTogglePin={() => {
-            handleTogglePin(drawerAgentId);
-          }}
-          onTogglePause={() => {
-            handleTogglePause(drawerTailKey);
-          }}
-          onClose={handleCloseDrawer}
-        />
-      )}
       <RealSheet
         content={realContent}
         onClose={() => {

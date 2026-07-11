@@ -90,7 +90,7 @@ declare global {
 }
 
 const REPO_ROOT = path.resolve(__dirname, '../..');
-const V3_DIST = path.join(REPO_ROOT, 'webview-v3', 'dist');
+const V3_DIST = path.join(REPO_ROOT, 'dist', 'webview-v3');
 const SCREENSHOT_DIR = path.join(REPO_ROOT, 'test-results', 'e2e-v3', 'screenshots');
 const VIEWPORT = { width: 390, height: 664 };
 

@@ -19,7 +19,7 @@ import { WebSocketServer } from 'ws';
  */
 
 const REPO_ROOT = path.resolve(__dirname, '../..');
-const V3_DIST = path.join(REPO_ROOT, 'webview-v3', 'dist');
+const V3_DIST = path.join(REPO_ROOT, 'dist', 'webview-v3');
 const VIEWPORT = { width: 390, height: 664 };
 
 const MIME: Record<string, string> = {

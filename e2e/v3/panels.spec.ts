@@ -22,7 +22,7 @@ import { WebSocketServer } from 'ws';
  */
 
 const REPO_ROOT = path.resolve(__dirname, '../..');
-const V3_DIST = path.join(REPO_ROOT, 'webview-v3', 'dist');
+const V3_DIST = path.join(REPO_ROOT, 'dist', 'webview-v3');
 const VIEWPORT = { width: 1280, height: 860 };
 
 const MIME: Record<string, string> = {
@@ -384,6 +384,42 @@ test.describe('stage-3 panel ports (desktop chrome model)', () => {
       // Still armed: no RESUME anywhere — the halt was never confirmed.
       await expect(hud.getByTestId('stop-all-control')).toBeVisible();
       await expect(page.getByTestId('resume-control')).toHaveCount(0);
+    } finally {
+      await context.close();
+      await host.close();
+    }
+  });
+
+  test('agent drawer header (✕ CLOSE) renders below the HUD and actually closes — never buried under the z-60 strip', async ({
+    browser,
+  }) => {
+    // Regression (real-device acceptance, 2026-07-10): the drawer was
+    // anchored at the app root with top:0, so on desktop its header row —
+    // including ✕ CLOSE — rendered underneath the HUD (z-index 60) and the
+    // drawer could not be dismissed. The drawer now lives inside .surfaces
+    // (the below-HUD region). Before the fix this test fails twice over:
+    // toBeInViewport on an obscured button, then the intercepted click.
+    const host = await serveV3Dist();
+    const context = await browser.newContext({ viewport: VIEWPORT });
+    try {
+      const page = await context.newPage();
+      await page.goto(`${host.url}/?agentId=1`);
+      await expect(page.getByTestId('hud-connection')).toHaveText('● LIVE', { timeout: 20_000 });
+
+      const drawer = page.getByTestId('agent-drawer');
+      await expect(drawer).toBeVisible({ timeout: 20_000 });
+
+      const close = page.getByTestId('drawer-close');
+      await expect(close).toBeInViewport();
+      // The close button must clear the HUD strip entirely.
+      const hudBox = await page.locator('.hud').boundingBox();
+      const closeBox = await close.boundingBox();
+      expect(hudBox).not.toBeNull();
+      expect(closeBox).not.toBeNull();
+      expect(closeBox!.y).toBeGreaterThanOrEqual(hudBox!.y + hudBox!.height);
+
+      await close.click();
+      await expect(page.getByTestId('agent-drawer')).toHaveCount(0);
     } finally {
       await context.close();
       await host.close();
