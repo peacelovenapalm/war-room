@@ -164,6 +164,16 @@ export default defineConfig({
             handler: 'NetworkOnly',
           },
         ],
+        // The v3 face lives at /v3/ on the same origin as this (old) face.
+        // Without this denylist, generateSW's default navigateFallback
+        // serves THIS face's precached index.html for every /v3/
+        // navigation on any client this SW already controls — broke real
+        // Safari on iPhone + MacBook 2026-07-10 (Chrome was unaffected
+        // only because no SW was installed there yet). /api/ is denylisted
+        // too so a stale fallback never masks a real backend error.
+        // registerType: 'autoUpdate' means one redeploy + reload heals
+        // existing clients — no manual unregister needed.
+        navigateFallbackDenylist: [/^\/v3/, /^\/api\//],
       },
     }),
   ],
