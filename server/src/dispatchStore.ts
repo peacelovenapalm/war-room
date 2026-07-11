@@ -300,6 +300,14 @@ export class DispatchStore {
    *  means no ceiling configured — current (unbounded) behavior. */
   private budgetGate: (() => { ceiling: number; spend: number } | null) | undefined;
 
+  /** Codex fix round finding 1 — an injected closure (same one-way-layering
+   *  discipline as budgetGate), consulted ONLY by the automatic rollover
+   *  sweep. Returns true while STOP ALL's kill switch is engaged, which
+   *  freezes sweepHeldRollover() entirely; a human's explicit releaseHeld()
+   *  is deliberately NOT gated by this — the kill switch suppresses
+   *  unattended automation, never a conscious human override. */
+  private heldReleaseGate: (() => boolean) | undefined;
+
   constructor(persistPath?: string, auditPath?: string) {
     this.explicitPath = persistPath;
     this.explicitAuditPath = auditPath;
@@ -317,6 +325,12 @@ export class DispatchStore {
    *  spend-ceiling check. See the `budgetGate` field doc above. */
   setBudgetGate(gate: (() => { ceiling: number; spend: number } | null) | undefined): void {
     this.budgetGate = gate;
+  }
+
+  /** Codex fix round finding 1 — wire (or clear) the STOP ALL kill-switch
+   *  check consulted by sweepHeldRollover(). See the field doc above. */
+  setHeldReleaseGate(gate: (() => boolean) | undefined): void {
+    this.heldReleaseGate = gate;
   }
 
   // ── Enqueue (webview → server) ──────────────────────────────────
@@ -413,10 +427,7 @@ export class DispatchStore {
       }
     }
 
-    const ringingForMachine = [...records.values()].filter(
-      (r) => r.machine === input.machine && r.status === 'ringing',
-    ).length;
-    if (ringingForMachine >= DISPATCH_RINGING_CAP) {
+    if (this.ringingCount(input.machine, records) >= DISPATCH_RINGING_CAP) {
       return { ok: false, reason: 'ringing-cap-exceeded' };
     }
 
@@ -436,6 +447,16 @@ export class DispatchStore {
     const record = this.ensureLoaded().get(id);
     if (!record) return { ok: false, reason: 'unknown-id' };
     if (record.status !== 'queued-budget') return { ok: false, reason: 'not-held' };
+    // Codex fix round finding 6: the ringing cap could have filled while
+    // this dispatch sat held — re-check it here, the SAME backpressure a
+    // fresh enqueue() would hit. An explicit human override into a full
+    // queue is an honest 2xx deny, never a bypass — but it DOES still work
+    // even while STOP ALL's kill switch is engaged (a human verb beats the
+    // kill switch; only the AUTOMATIC rollover release below is frozen).
+    if (this.ringingCount(record.machine) >= DISPATCH_RINGING_CAP) {
+      this.audit('release-ringing-cap', record);
+      return { ok: false, reason: 'ringing-cap' };
+    }
     record.status = 'ringing';
     record.reason = undefined;
     record.updatedAt = now;
@@ -449,8 +470,17 @@ export class DispatchStore {
    *  before the start of `now`'s local calendar day auto-releases: a new
    *  day resets the ceiling it was held against. Returns the count
    *  released (0 = nothing to do, callers can skip the persist round-trip),
-   *  same idiom as sweepExpired(). */
+   *  same idiom as sweepExpired(). Codex fix round finding 1: frozen
+   *  entirely while STOP ALL's kill switch is engaged (heldReleaseGate) —
+   *  the automatic release is exactly the kind of unattended action the
+   *  kill switch exists to suppress; a human's explicit releaseHeld() above
+   *  is unaffected. Finding 6: each candidate re-checks the ringing cap —
+   *  over-cap entries stay held and retry on the next sweep rather than
+   *  bypassing backpressure; the cap is re-read from the live records on
+   *  every iteration so an earlier release in THIS SAME sweep correctly
+   *  counts against a later candidate on the same machine. */
   sweepHeldRollover(now: number = Date.now()): number {
+    if (this.heldReleaseGate?.()) return 0;
     const records = this.ensureLoaded();
     const todayStart = new Date(now);
     todayStart.setHours(0, 0, 0, 0);
@@ -458,16 +488,32 @@ export class DispatchStore {
     let count = 0;
     for (const record of records.values()) {
       if (record.status !== 'queued-budget') continue;
-      if (record.createdAt < start) {
-        record.status = 'ringing';
-        record.reason = undefined;
-        record.updatedAt = now;
-        this.audit('held-rollover-released', record);
-        this.emit(record);
-        count++;
+      if (record.createdAt >= start) continue;
+      if (this.ringingCount(record.machine, records) >= DISPATCH_RINGING_CAP) {
+        this.audit('held-rollover-blocked-ringing-cap', record);
+        continue;
       }
+      record.status = 'ringing';
+      record.reason = undefined;
+      record.updatedAt = now;
+      this.audit('held-rollover-released', record);
+      this.emit(record);
+      count++;
     }
     if (count > 0) this.persist();
+    return count;
+  }
+
+  /** Live ringing count for one machine — shared by enqueue()'s own cap
+   *  check and the release/rollover re-checks (finding 6). Reads the
+   *  PASSED-IN map when given (so a caller iterating and mutating the same
+   *  map mid-loop sees its own just-applied changes), else loads fresh. */
+  private ringingCount(machine: string, records?: Map<string, DispatchRecord>): number {
+    const source = records ?? this.ensureLoaded();
+    let count = 0;
+    for (const r of source.values()) {
+      if (r.machine === machine && r.status === 'ringing') count++;
+    }
     return count;
   }
 

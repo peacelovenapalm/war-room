@@ -96,10 +96,16 @@ interface AutoExecutorData {
   originOf: Record<string, string>;
   /** Newest last; capped at AUTO_EXECUTOR_RECEIPT_CAP, oldest pruned. */
   receipts: AutoActionReceipt[];
+  /** Codex fix round finding 1 — STOP ALL's kill switch, mirroring
+   *  standingOrderStore's stoppedByKillSwitch pattern: persisted so a
+   *  restart mid-STOP-ALL doesn't silently resume auto-actions. Set/cleared
+   *  ONLY by haltAll()/resumeAll(), called from the SAME stop-all/resume
+   *  transaction httpServer.ts already runs for standing orders + chains. */
+  killSwitchActive: boolean;
 }
 
 function emptyData(): AutoExecutorData {
-  return { lineages: {}, originOf: {}, receipts: [] };
+  return { lineages: {}, originOf: {}, receipts: [], killSwitchActive: false };
 }
 
 function emptyWhitelist(): AutoWhitelistConfig {
@@ -117,21 +123,69 @@ export interface AutoStatus {
   actions: Record<string, AutoActionStatus>;
   /** Newest first. */
   receipts: AutoActionReceipt[];
-  /** Colorblind-safe shape+label line, e.g. "AUTO: OFF — whitelist empty"
-   *  or "AUTO: requeue-failed-dispatch ON (cap 2, cooldown 10m)". */
+  /** Colorblind-safe shape+label line, e.g. "AUTO: OFF — whitelist empty",
+   *  "AUTO: requeue-failed-dispatch ON (cap 2, cooldown 10m)", or (STOP ALL
+   *  engaged with an otherwise-enabled action) "AUTO: requeue-failed-dispatch
+   *  ON (cap 2, cooldown 10m) — SUSPENDED (STOP ALL engaged)". */
   whitelistLine: string;
+  /** Codex fix round finding 1 — surfaced so the panel can show the
+   *  suspension honestly rather than a silent no-op. */
+  killSwitchActive: boolean;
 }
 
 function formatMinutes(ms: number): string {
   return `${String(Math.round(ms / 60_000))}m`;
 }
 
+/** Codex fix round finding 2 — deny-by-default extends to the guardrail
+ *  PARAMS themselves: an invalid maxPerId (non-integer, <=0, or absurdly
+ *  large) never DISABLES the cap — it falls back to the safe default and
+ *  logs once, the same fail-safe posture a corrupt whitelist file already
+ *  gets (never permissive, never a crash). */
+const MAX_PER_ID_UPPER_BOUND = 20;
+const COOLDOWN_MS_UPPER_BOUND = 24 * 60 * 60_000; // 1 day
+
+function validatedMaxPerId(raw: unknown): number {
+  if (
+    typeof raw === 'number' &&
+    Number.isInteger(raw) &&
+    raw > 0 &&
+    raw <= MAX_PER_ID_UPPER_BOUND
+  ) {
+    return raw;
+  }
+  if (raw !== undefined) {
+    console.warn(
+      `[autoExecutor] invalid maxPerId (${JSON.stringify(raw)}) — falling back to default ${String(AUTO_REQUEUE_DEFAULT_MAX_PER_ID)}`,
+    );
+  }
+  return AUTO_REQUEUE_DEFAULT_MAX_PER_ID;
+}
+
+function validatedCooldownMs(raw: unknown): number {
+  // Strictly positive: cooldownMs 0 would disable the cooldown guardrail
+  // outright — exactly what this validation exists to prevent. Zero,
+  // negative, and fractional values all fall back to the default.
+  if (
+    typeof raw === 'number' &&
+    Number.isInteger(raw) &&
+    raw > 0 &&
+    raw <= COOLDOWN_MS_UPPER_BOUND
+  ) {
+    return raw;
+  }
+  if (raw !== undefined) {
+    console.warn(
+      `[autoExecutor] invalid cooldownMs (${JSON.stringify(raw)}) — falling back to default ${String(AUTO_REQUEUE_DEFAULT_COOLDOWN_MS)}`,
+    );
+  }
+  return AUTO_REQUEUE_DEFAULT_COOLDOWN_MS;
+}
+
 function describeEnabledAction(kind: string, params: Record<string, unknown> | undefined): string {
   if (kind === REQUEUE_FAILED_DISPATCH_ACTION_KIND) {
-    const maxPerId =
-      typeof params?.maxPerId === 'number' ? params.maxPerId : AUTO_REQUEUE_DEFAULT_MAX_PER_ID;
-    const cooldownMs =
-      typeof params?.cooldownMs === 'number' ? params.cooldownMs : AUTO_REQUEUE_DEFAULT_COOLDOWN_MS;
+    const maxPerId = validatedMaxPerId(params?.maxPerId);
+    const cooldownMs = validatedCooldownMs(params?.cooldownMs);
     return `${kind} ON (cap ${String(maxPerId)}, cooldown ${formatMinutes(cooldownMs)})`;
   }
   return `${kind} ON`;
@@ -183,6 +237,7 @@ export class AutoExecutorStore {
 
   getStatus(): AutoStatus {
     const whitelist = this.loadWhitelist();
+    const killSwitchActive = this.isKillSwitchActive();
     const actions: Record<string, AutoActionStatus> = {};
     const enabledLines: string[] = [];
     for (const kind of AUTO_ACTION_KINDS) {
@@ -191,14 +246,44 @@ export class AutoExecutorStore {
       actions[kind] = { enabled, params: cfg?.params };
       if (enabled) enabledLines.push(describeEnabledAction(kind, cfg?.params));
     }
+    const whitelistLine =
+      enabledLines.length === 0
+        ? 'AUTO: OFF — whitelist empty'
+        : killSwitchActive
+          ? `AUTO: ${enabledLines.join('; ')} — SUSPENDED (STOP ALL engaged)`
+          : `AUTO: ${enabledLines.join('; ')}`;
     return {
       actions,
       receipts: this.ensureLoaded().receipts.slice().reverse(),
-      whitelistLine:
-        enabledLines.length > 0
-          ? `AUTO: ${enabledLines.join('; ')}`
-          : 'AUTO: OFF — whitelist empty',
+      whitelistLine,
+      killSwitchActive,
     };
+  }
+
+  /** Codex fix round finding 1 — STOP ALL's kill switch. Returns whether it
+   *  actually changed anything (idempotent, mirrors standingOrderStore's
+   *  haltAll semantics). Called from the SAME stop-all transaction as
+   *  standingOrderStore.haltAll()/chainOrchestrator.haltAll(). */
+  haltAll(now: number = Date.now()): boolean {
+    const data = this.ensureLoaded();
+    if (data.killSwitchActive) return false;
+    data.killSwitchActive = true;
+    this.persistence.persist(data, now, true);
+    return true;
+  }
+
+  /** RESUME — explicit action, never automatic. Mirrors standingOrderStore's
+   *  resumeAll: called from the SAME resume transaction. */
+  resumeAll(now: number = Date.now()): boolean {
+    const data = this.ensureLoaded();
+    if (!data.killSwitchActive) return false;
+    data.killSwitchActive = false;
+    this.persistence.persist(data, now, true);
+    return true;
+  }
+
+  isKillSwitchActive(): boolean {
+    return this.ensureLoaded().killSwitchActive;
   }
 
   private appendReceipt(receipt: AutoActionReceipt, now: number): void {
@@ -242,10 +327,8 @@ export class AutoExecutorStore {
     const wasAutoCreated = data.originOf[failedDispatchId] !== undefined;
     const effectiveConsecutiveFailures = wasAutoCreated ? lineage.consecutiveAutoFailures + 1 : 0;
 
-    const maxPerId =
-      typeof params?.maxPerId === 'number' ? params.maxPerId : AUTO_REQUEUE_DEFAULT_MAX_PER_ID;
-    const cooldownMs =
-      typeof params?.cooldownMs === 'number' ? params.cooldownMs : AUTO_REQUEUE_DEFAULT_COOLDOWN_MS;
+    const maxPerId = validatedMaxPerId(params?.maxPerId);
+    const cooldownMs = validatedCooldownMs(params?.cooldownMs);
 
     const blockedByStreak = effectiveConsecutiveFailures >= AUTO_REQUEUE_CONSECUTIVE_FAILURE_STOP;
     const blockedByCap = lineage.autoRequeueCount >= maxPerId;
@@ -308,6 +391,11 @@ export class AutoExecutorStore {
    *  proposals, execute, receipt. Exported at instance level so tests can
    *  call it directly without waiting on a real timer. */
   runTick(store: AgentStateStore, now: number = Date.now()): AutoActionReceipt[] {
+    // Codex fix round finding 1 — STOP ALL must reach the auto-executor: an
+    // engaged kill switch makes every tick a genuine no-op (checked BEFORE
+    // even reading the whitelist), surfaced honestly via getStatus()'s
+    // whitelistLine rather than a silent skip nobody can see.
+    if (this.isKillSwitchActive()) return [];
     const requeueCfg = this.isEnabled(REQUEUE_FAILED_DISPATCH_ACTION_KIND);
     if (!requeueCfg) return [];
 

@@ -307,3 +307,69 @@ describe('DispatchStore.sweepHeldRollover — automatic local-date-rollover rele
     expect(s.getRecent().find((r) => r.id === enq.record.id)?.status).toBe('ringing');
   });
 });
+
+// ── Codex fix round finding 6: release/rollover re-check the ringing cap ──
+
+describe('HELD release re-checks the per-machine ringing cap — never a backpressure bypass', () => {
+  /** Fill a machine's ringing queue to exactly `count` live entries. */
+  function fillRinging(s: DispatchStore, count: number): void {
+    for (let i = 0; i < count; i++) {
+      const r = enqueueDispatch(s, { prompt: `filler-${String(i)}` });
+      expect(r.ok).toBe(true);
+    }
+  }
+
+  it('releaseHeld into a FULL ringing queue is an honest 2xx deny; the record stays held and releases once a slot frees', () => {
+    const s = new DispatchStore(statePath, auditPath);
+    fillRinging(s, 5); // DISPATCH_RINGING_CAP
+    s.setBudgetGate(() => ({ ceiling: 0, spend: 1 }));
+    const held = enqueueDispatch(s, { prompt: 'held' });
+    if (!held.ok) throw new Error('unreachable');
+    expect(held.record.status).toBe('queued-budget');
+    s.setBudgetGate(() => null);
+
+    expect(s.releaseHeld(held.record.id)).toEqual({ ok: false, reason: 'ringing-cap' });
+    expect(s.getRecent().find((r) => r.id === held.record.id)?.status).toBe('queued-budget');
+
+    // Free one slot (a ringing request expires via deny) — now the override works.
+    const filler = s.getRecent().find((r) => r.status === 'ringing');
+    if (!filler) throw new Error('unreachable');
+    s.decide(filler.id, 'deny', { reason: 'test' });
+    expect(s.releaseHeld(held.record.id).ok).toBe(true);
+  });
+
+  it('the rollover sweep releases only up to the cap — over-cap entries stay held (retried next sweep), and an earlier release in the SAME sweep counts against later candidates', () => {
+    const yesterday = new Date();
+    yesterday.setDate(yesterday.getDate() - 1);
+    yesterday.setHours(12, 0, 0, 0);
+    const s = new DispatchStore(statePath, auditPath);
+    fillRinging(s, 4); // one slot left under the cap of 5
+    s.setBudgetGate(() => ({ ceiling: 0, spend: 1 }));
+    const heldA = s.enqueue(
+      { action: 'dispatch', machine: 'MACBOOK', provider: 'claude', cwd: '/x', prompt: 'a' },
+      yesterday.getTime(),
+    );
+    const heldB = s.enqueue(
+      { action: 'dispatch', machine: 'MACBOOK', provider: 'claude', cwd: '/x', prompt: 'b' },
+      yesterday.getTime(),
+    );
+    if (!heldA.ok || !heldB.ok) throw new Error('unreachable');
+    s.setBudgetGate(() => null);
+
+    expect(s.sweepHeldRollover(Date.now())).toBe(1); // exactly the one free slot
+    const statuses = [heldA.record.id, heldB.record.id].map(
+      (id) => s.getRecent().find((r) => r.id === id)?.status,
+    );
+    expect(statuses.filter((st) => st === 'ringing')).toHaveLength(1);
+    expect(statuses.filter((st) => st === 'queued-budget')).toHaveLength(1);
+
+    // Next sweep with a freed slot picks up the straggler.
+    const heldIds = [heldA.record.id, heldB.record.id];
+    const ringingFiller = s
+      .getRecent()
+      .find((r) => r.status === 'ringing' && !heldIds.includes(r.id));
+    if (!ringingFiller) throw new Error('unreachable');
+    s.decide(ringingFiller.id, 'deny', { reason: 'test' });
+    expect(s.sweepHeldRollover(Date.now())).toBe(1);
+  });
+});

@@ -232,6 +232,11 @@ export async function createHttpServer(options: HttpServerOptions): Promise<Http
     const report = shiftStats.getReport();
     return { ceiling, spend: report.tokensIn + report.tokensOut };
   });
+  // Codex fix round finding 1 — STOP ALL must reach HELD auto-releases too:
+  // the automatic rollover sweep is frozen while the auto-executor's kill
+  // switch is engaged (a human's explicit /release override is unaffected —
+  // see dispatchStore.releaseHeld's own doc).
+  dispatchStore.setHeldReleaseGate(() => autoExecutorStore.isKillSwitchActive());
 
   // Contract ingest tick (mint from the real todo file, complete on todo
   // disappearance, quiet expiry). One immediate sweep so a fresh boot
@@ -1548,6 +1553,12 @@ function registerAutomationStopAllRoutes(app: FastifyInstance, options: HttpServ
   app.post('/api/automation/stop-all', async (_request, reply) => {
     const haltedOrders = standingOrderStore.haltAll();
     const haltedRuns = chainOrchestrator.haltAll();
+    // Codex fix round finding 1 — the SAME transaction now also suppresses
+    // the T3 rung-3 auto-executor (ticks become a no-op) and freezes HELD
+    // dispatches' automatic rollover release. A human's explicit REQUEUE
+    // proposal tap or /release override still works — the kill switch
+    // targets unattended automation, never a conscious human action.
+    autoExecutorStore.haltAll();
     options.store.broadcast({
       type: 'automationStopped',
       haltedOrderIds: haltedOrders.map((o) => o.id),
@@ -1562,6 +1573,9 @@ function registerAutomationStopAllRoutes(app: FastifyInstance, options: HttpServ
 
   app.post('/api/automation/resume', async (_request, reply) => {
     const resumedOrders = standingOrderStore.resumeAll();
+    // Codex fix round finding 1 — mirrors standingOrderStore's resumeAll
+    // exactly: restores the auto-executor + HELD-rollover release.
+    autoExecutorStore.resumeAll();
     reply.send({ ok: true, resumedOrders: resumedOrders.length });
   });
 }

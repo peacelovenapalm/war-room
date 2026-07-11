@@ -255,7 +255,10 @@ describe("guardrail: two consecutive auto-failures stops the lineage (human's tu
   it('a high cap never blocks it, but the SECOND consecutive auto-created failure in a row permanently stops further auto-requeues for that lineage', () => {
     writeWhitelist({
       actions: {
-        'requeue-failed-dispatch': { enabled: true, params: { maxPerId: 10, cooldownMs: 0 } },
+        // cooldownMs: 1 — the smallest VALID value (0 falls back to the
+        // 10m default since the codex fix round's param validation), with
+        // tick times spaced comfortably past it.
+        'requeue-failed-dispatch': { enabled: true, params: { maxPerId: 10, cooldownMs: 1 } },
       },
     });
     const store = new mods.AgentStateStore();
@@ -268,14 +271,14 @@ describe("guardrail: two consecutive auto-failures stops the lineage (human's tu
 
     // B was auto-created and has now failed — streak = 1, still under the
     // stop threshold (2), so this fires: B -> C.
-    expect(mods.autoExecutorStore.runTick(store, now + 1)).toHaveLength(1);
+    expect(mods.autoExecutorStore.runTick(store, now + 10)).toHaveLength(1);
 
     failNewlyCreatedDispatch([b]);
 
     // C was ALSO auto-created and has ALSO failed — two consecutive
     // auto-failures (B, then C) — the lineage stops for good, cap (10) is
     // nowhere near reached.
-    const blocked = mods.autoExecutorStore.runTick(store, now + 2);
+    const blocked = mods.autoExecutorStore.runTick(store, now + 20);
     expect(blocked).toEqual([]);
     expect(mods.reworkBinStore.getPiled()).toHaveLength(1); // C's crate stays piled — human's turn
     expect(mods.autoExecutorStore.getStatus().receipts).toHaveLength(2); // only A->B and B->C fired
@@ -294,5 +297,114 @@ describe("SHIFT fold: autoActionCount reflects today's real receipts", () => {
     // A receipt logged "now" must not count against a query anchored 25h earlier.
     const yesterday = now - 25 * 60 * 60_000;
     expect(mods.autoExecutorStore.getTodayReceiptCount(yesterday)).toBe(0);
+  });
+});
+
+// ── Codex fix round finding 1: STOP ALL's kill switch ────────────
+
+describe('STOP ALL kill switch: haltAll suppresses every auto path, resumeAll restores', () => {
+  it('an engaged kill switch makes ticks a genuine no-op even with an enabled whitelist + eligible crates, surfaced honestly in the whitelistLine', () => {
+    writeWhitelist({ actions: { 'requeue-failed-dispatch': { enabled: true } } });
+    const store = new mods.AgentStateStore();
+    failAndPile('MACBOOK', 'fix it', 100);
+
+    expect(mods.autoExecutorStore.haltAll()).toBe(true);
+    expect(mods.autoExecutorStore.haltAll()).toBe(false); // idempotent
+
+    expect(mods.autoExecutorStore.runTick(store, Date.now())).toEqual([]);
+    expect(mods.reworkBinStore.getPiled()).toHaveLength(1); // untouched
+
+    const status = mods.autoExecutorStore.getStatus();
+    expect(status.killSwitchActive).toBe(true);
+    expect(status.whitelistLine).toContain('SUSPENDED (STOP ALL engaged)');
+
+    // Resume restores the exact pre-halt behavior.
+    expect(mods.autoExecutorStore.resumeAll()).toBe(true);
+    const fired = mods.autoExecutorStore.runTick(store, Date.now());
+    expect(fired).toHaveLength(1);
+    expect(mods.autoExecutorStore.getStatus().killSwitchActive).toBe(false);
+  });
+
+  it('the kill switch PERSISTS across a restart (a store reloaded from the same state file mid-STOP-ALL must not silently resume auto-actions)', () => {
+    // Explicit paths: V3JsonPersistence deliberately no-ops persist() under
+    // VITEST when using its DEFAULT path (test-safety valve) — an explicit
+    // path opts back into real writes, exactly like DispatchStore's own
+    // persistence tests.
+    const statePath = path.join(tmpBase, '.pixel-agents', 'auto-exec-state-test.json');
+    const first = new mods.AutoExecutorStore(statePath, whitelistPath());
+    expect(first.haltAll()).toBe(true);
+
+    // Simulate a server restart: a FRESH store over the SAME state file.
+    const second = new mods.AutoExecutorStore(statePath, whitelistPath());
+    expect(second.isKillSwitchActive()).toBe(true);
+  });
+
+  it('freezes the HELD rollover sweep via the heldReleaseGate wiring, while a human releaseHeld still works', () => {
+    const yesterday = Date.now() - 25 * 60 * 60_000;
+    mods.dispatchStore.setBudgetGate(() => ({ ceiling: 1, spend: 2 }));
+    const held1 = mods.dispatchStore.enqueue(
+      { action: 'dispatch', machine: 'MACBOOK', provider: 'claude', cwd: '/tmp', prompt: 'a' },
+      yesterday,
+    );
+    const held2 = mods.dispatchStore.enqueue(
+      { action: 'dispatch', machine: 'MACBOOK', provider: 'claude', cwd: '/tmp', prompt: 'b' },
+      yesterday,
+    );
+    expect(held1.record.status).toBe('queued-budget');
+    expect(held2.record.status).toBe('queued-budget');
+    mods.dispatchStore.setBudgetGate(() => null);
+    // The same wiring httpServer.ts installs at boot.
+    mods.dispatchStore.setHeldReleaseGate(() => mods.autoExecutorStore.isKillSwitchActive());
+
+    mods.autoExecutorStore.haltAll();
+    expect(mods.dispatchStore.sweepHeldRollover(Date.now())).toBe(0); // frozen
+
+    // A conscious human override beats the kill switch (finding 1's contract).
+    const released = mods.dispatchStore.releaseHeld(held1.record.id, Date.now());
+    expect(released.ok).toBe(true);
+
+    // Resume unfreezes the automatic path for the remaining held record.
+    mods.autoExecutorStore.resumeAll();
+    expect(mods.dispatchStore.sweepHeldRollover(Date.now())).toBe(1);
+  });
+});
+
+// ── Codex fix round finding 2: guardrail param validation ────────
+
+describe('whitelist guardrail params are validated — invalid values fall back to defaults, never disable a guardrail', () => {
+  it('cooldownMs of -1, 0, and 2.5 all behave as the default cooldown (second candidate within the window is held back)', () => {
+    for (const bad of [-1, 0, 2.5]) {
+      writeWhitelist({
+        actions: { 'requeue-failed-dispatch': { enabled: true, params: { cooldownMs: bad } } },
+      });
+      // The status line proves the EFFECTIVE value is the default 10m.
+      const status = mods.autoExecutorStore.getStatus();
+      expect(status.whitelistLine).toContain('cooldown 10m');
+    }
+  });
+
+  it('maxPerId of 0, -5, and 2.5 all behave as the default cap', () => {
+    for (const bad of [0, -5, 2.5]) {
+      writeWhitelist({
+        actions: { 'requeue-failed-dispatch': { enabled: true, params: { maxPerId: bad } } },
+      });
+      const status = mods.autoExecutorStore.getStatus();
+      expect(status.whitelistLine).toContain('cap 2');
+    }
+  });
+
+  it('an invalid cooldownMs is ENFORCED as the default at tick time, not just displayed (a second candidate inside the default window is held back)', () => {
+    writeWhitelist({
+      actions: { 'requeue-failed-dispatch': { enabled: true, params: { cooldownMs: -1 } } },
+    });
+    const store = new mods.AgentStateStore();
+    const firstId = failAndPile('MACBOOK', 'first', 100);
+    const t0 = Date.now();
+    expect(mods.autoExecutorStore.runTick(store, t0)).toHaveLength(1);
+
+    // Fail the auto-created attempt 1 minute later — inside the DEFAULT
+    // 10m cooldown. A -1 cooldown taken literally would fire again here.
+    failNewlyCreatedDispatch([firstId]);
+    expect(mods.autoExecutorStore.runTick(store, t0 + 60_000)).toEqual([]);
   });
 });
