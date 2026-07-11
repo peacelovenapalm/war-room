@@ -7,6 +7,7 @@ import Fastify from 'fastify';
 
 import type { AgentRuntime } from './agentRuntime.js';
 import type { AgentStateStore } from './agentStateStore.js';
+import { autoExecutorStore } from './autoExecutor.js';
 import { getBriefing } from './briefingProvider.js';
 import type { ClaudeRateLimitSnapshot } from './budgetStore.js';
 import { budgetStore } from './budgetStore.js';
@@ -16,6 +17,7 @@ import { chainMaxSteps, type ChainStepDef, chainStore } from './chainStore.js';
 import type { AssetCache, SetHooksEnabledSideEffect } from './clientMessageHandler.js';
 import { handleClientMessage } from './clientMessageHandler.js';
 import {
+  AUTO_EXECUTOR_TICK_INTERVAL_MS,
   HOOK_API_PREFIX,
   MAX_AGENT_OUTPUT_BODY_BYTES,
   MAX_AGENT_OUTPUT_LINE_BYTES,
@@ -57,6 +59,7 @@ import {
 } from './remoteTranscriptPaths.js';
 import { reworkBinIngest } from './reworkBinIngest.js';
 import { reworkBinStore } from './reworkBinStore.js';
+import { redispatchCrate } from './reworkRedispatch.js';
 import { RIVALRY_SWEEP_INTERVAL_MS, rivalryDerivation } from './rivalryDerivation.js';
 import { rivalryStore } from './rivalryStore.js';
 import { shiftStats } from './shiftStats.js';
@@ -266,6 +269,20 @@ export async function createHttpServer(options: HttpServerOptions): Promise<Http
   standingOrderTimer.unref?.();
   app.addHook('onClose', () => clearInterval(standingOrderTimer));
 
+  // Auto-Executor tick (T3 rung 3, KICKOFF-v4 D-16) — same interval idiom
+  // as standingOrderTimer just above (no shared tick primitive exists,
+  // verified previously). Computes opsAdvisor findings (its own cached
+  // derivation, no new polling loop), filters to whitelisted +
+  // guardrail-passing proposals, fires through the SAME redispatchCrate()
+  // the human REQUEUE tap uses, and receipts the outcome. A shipped-empty
+  // whitelist makes every tick a no-op (autoExecutorStore.runTick's own
+  // deny-by-default check returns immediately).
+  const autoExecutorTimer = setInterval(() => {
+    autoExecutorStore.runTick(options.store);
+  }, AUTO_EXECUTOR_TICK_INTERVAL_MS);
+  autoExecutorTimer.unref?.();
+  app.addHook('onClose', () => clearInterval(autoExecutorTimer));
+
   // World events (v2 mechanic G4, §6.3) — the coarse "live tick" GAME-DESIGN
   // §2 introduces: only rolls while ≥1 socket is connected (checked inside
   // the callback, not by gating the interval itself, so it naturally stops
@@ -420,6 +437,9 @@ function registerBriefingRoute(app: FastifyInstance, options: HttpServerOptions)
     today: shiftStats.getReport(),
     yesterday: shiftStats.getYesterdayReport(),
     opsReview: opsReviewSummary(getOpsReview(options.store)),
+    // T3 rung 3: how many auto-actions actually fired today — the SHIFT
+    // fold's honest count, zero on a shipped-empty whitelist.
+    autoActionCount: autoExecutorStore.getTodayReceiptCount(),
   }));
   // Progression (v1 mechanic #3): XP/level/streak/unlock snapshot — same
   // trust level. Primarily consumed live over the WS plane
@@ -430,6 +450,11 @@ function registerBriefingRoute(app: FastifyInstance, options: HttpServerOptions)
   // analyze-on-demand with a short TTL cache (opsAdvisor.ts), never a new
   // polling loop.
   app.get('/api/ops/review', async () => getOpsReview(options.store));
+  // Auto-Executor status (T3 rung 3): whitelist state (honest OFF unless
+  // Greg has hand-edited the whitelist file) + the receipts ledger. Same
+  // trust level, same "no new polling loop" posture — reads the executor's
+  // own already-persisted state.
+  app.get('/api/ops/auto', async () => autoExecutorStore.getStatus());
 }
 
 // ── Hook Events ────────────────────────────────────────────────
@@ -1573,35 +1598,10 @@ function registerReworkRoutes(app: FastifyInstance): void {
   );
 
   app.post<{ Params: { id: string } }>('/api/rework/:id/redispatch', async (request, reply) => {
-    const crate = reworkBinStore.getById(request.params.id);
-    if (!crate) {
-      reply.send({ ok: false, reason: 'not-found' });
-      return;
-    }
-    if (crate.status !== 'piled') {
-      reply.send({ ok: false, reason: 'not-piled' });
-      return;
-    }
-    if (crate.source !== 'dispatch') {
-      // Crisis crates hold a dead session, not a dispatch — there is
-      // nothing to re-enqueue; dismiss is the verb for those.
-      reply.send({ ok: false, reason: 'not-redispatchable' });
-      return;
-    }
-    const input = dispatchStore.getRedispatchInput(crate.failureRef.id);
-    if (!input) {
-      reply.send({ ok: false, reason: 'original-dispatch-missing' });
-      return;
-    }
-    // The NORMAL path: every enqueue gate applies; a refusal (e.g. the
-    // ringing cap) leaves the crate piled — the gate is never bypassed.
-    const enqueued = dispatchStore.enqueue(input);
-    if (!enqueued.ok) {
-      reply.send({ ok: false, reason: enqueued.reason });
-      return;
-    }
-    reworkBinStore.markReworked(crate.id);
-    reply.send({ ok: true, dispatchId: enqueued.record.id });
+    // T3 rung 3: this is the SAME function the auto-executor's tick calls
+    // for the requeue-failed-dispatch whitelist action — see
+    // reworkRedispatch.ts's header comment.
+    reply.send(redispatchCrate(request.params.id));
   });
 }
 

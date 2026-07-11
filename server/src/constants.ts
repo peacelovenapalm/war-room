@@ -125,6 +125,26 @@ export const OPS_DISPATCH_FAILURE_REPEAT_THRESHOLD = 2;
  *  outage). */
 export const OPS_MACHINE_STALE_ALERT_MULTIPLIER = 3;
 
+// ── Auto-Executor (T3 self-healing ladder, rung 3 — auto with guardrails) ─
+/** Rides its own setInterval (repo has no shared tick primitive — see
+ *  httpServer.ts's standingOrderTimer comment); same order as the other
+ *  advisor-adjacent ticks. */
+export const AUTO_EXECUTOR_TICK_INTERVAL_MS = 60_000;
+/** Default max auto-requeues per ORIGINAL (root) dispatch id, before a
+ *  human has to act — config-overridable per action via the whitelist
+ *  file's params.maxPerId. */
+export const AUTO_REQUEUE_DEFAULT_MAX_PER_ID = 2;
+/** Default cooldown between two auto-requeues of the same lineage —
+ *  config-overridable via params.cooldownMs. */
+export const AUTO_REQUEUE_DEFAULT_COOLDOWN_MS = 10 * 60_000;
+/** Two auto-fired attempts in a row that themselves fail stops the
+ *  lineage for good (human's turn) — NOT config-overridable; this is a
+ *  hard safety ceiling, not a tuning knob. */
+export const AUTO_REQUEUE_CONSECUTIVE_FAILURE_STOP = 2;
+/** Receipts ledger retention (capped, oldest pruned) — mirrors
+ *  worldEventStore's EVENT_LOG_CAP convention. */
+export const AUTO_EXECUTOR_RECEIPT_CAP = 200;
+
 // ── Layout/Config Persistence ──────────────────────────────
 export const LAYOUT_FILE_DIR = '.pixel-agents';
 export const LAYOUT_FILE_NAME = 'layout.json';
