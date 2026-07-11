@@ -199,12 +199,19 @@ export function AgentDrawer({
         <Row label="STATE" value={`${chip.glyph} ${chip.label}`} />
         <Row label="NEEDS INPUT / PERMISSION" value={poll?.waitingFor ?? '—'} />
         <Row label="BLOCKED AGE" value={blockedAge} />
-        {/* One-tap-real: token counts come from the LOCAL transcript
-            parser only — remote (X-Machine) sessions have transcript_path
-            stripped at the ingest boundary and headless runs never report
-            usage, so their counters sit at 0 forever. A permanent
-            "0 in · 0 out" reads as a real measurement; NO DATA is the
-            honest render until the v4 per-machine tailer exists. */}
+        {/* One-tap-real: token counts are real for ANY agent whose machine
+            actually streams usage — local sessions via the JSONL tap
+            (transcriptParser.ts), remote sessions via a running
+            transcript-tailer daemon on that machine (T1 remote live-tail
+            plane: POST /api/agents/output → the same agentTokenUsage
+            broadcast, consumed here identically regardless of machine —
+            see agentStore.ts's agentTokenUsage case, which has no
+            machine branch). A remote machine with NO tailer installed
+            (per-machine opt-in) never gets usage records, so its counters
+            legitimately sit at 0 forever — a permanent "0 in · 0 out"
+            would read as a real measurement, so NO DATA stays the honest
+            render for that case. It is never a stand-in for "this plane
+            doesn't work yet". */}
         <Row
           label="TOKENS"
           value={
