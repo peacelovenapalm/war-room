@@ -784,6 +784,8 @@ export interface DispatchRequest {
   prompt?: string;
   sessionId?: string;
   pid?: number;
+  scriptId?: string;
+  args?: string[];
   model?: string;
   effort?: DispatchEffortValue;
   timeoutSec?: number;

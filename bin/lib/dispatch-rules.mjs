@@ -18,10 +18,28 @@ import * as fs from 'node:fs';
 import * as path from 'node:path';
 
 export const DISPATCH_PROVIDERS = Object.freeze(['claude', 'codex', 'gemini']);
+/** LLM providers whose dispatch requires a prompt; `shell` (T8 Mini compute,
+ *  MINI-COMPUTE-NODE.md) is a NON-LLM provider — it carries a scriptId +
+ *  args instead, resolved against the machine-local `compute` registry. */
+export const LLM_PROVIDERS = Object.freeze(['claude', 'codex', 'gemini']);
+export const ALL_PROVIDERS = Object.freeze([...DISPATCH_PROVIDERS, 'shell']);
+
+/** Per-script upper bound on the number of positional args accepted off the
+ *  wire, unless the script's own registry entry lowers it via `maxArgs`. */
+export const COMPUTE_MAX_ARGS_CEILING = 16;
+/** A scriptId is an opaque key (never a path) — same token shape as a
+ *  provider name: the wire carries intent, the local registry carries the
+ *  capability (interpreter + path). */
+const COMPUTE_SCRIPT_ID_PATTERN = /^[a-zA-Z0-9._-]{1,64}$/;
+/** Each positional arg is a plain token — no shell metacharacters, no
+ *  control chars, no path traversal into an arg. The runner spawns
+ *  shell:false so metacharacters would be inert anyway, but rejecting them
+ *  keeps a script's OWN argument parsing from being surprised. */
+const COMPUTE_ARG_PATTERN = /^[a-zA-Z0-9._/=:@,+-]{1,256}$/;
 
 /** The deny-everything template the install runbook writes when no allowlist exists. */
 export function emptyAllowlist() {
-  return { providers: [], roots: [], focus: false, sessions: false };
+  return { providers: [], roots: [], focus: false, sessions: false, compute: { scripts: {} } };
 }
 
 /**
@@ -61,8 +79,50 @@ export function parseAllowlist(raw) {
   // Deny-by-default (REMOTE-ANSWER-DESIGN.md): only the literal boolean
   // `true` grants managed-session launch — absent/false/anything-else denies.
   const sessions = parsed.sessions === true;
+  // T8 Mini compute (MINI-COMPUTE-NODE.md): the `compute.scripts` registry
+  // maps an opaque scriptId → { interpreter, path, maxArgs?, timeoutSec?,
+  // cpulimit?, nice? }. Sanitized entry-by-entry: an entry missing a string
+  // interpreter or path is DROPPED (never a partial-trust half-entry). The
+  // wire never carries interpreter/path — only the scriptId — so a machine
+  // with no registry can run no scripts (deny-by-default composes).
+  const compute = parseComputeRegistry(parsed.compute);
 
-  return { ok: true, allowlist: { providers, roots, focus, sessions } };
+  return { ok: true, allowlist: { providers, roots, focus, sessions, compute } };
+}
+
+/** Sanitize the `compute.scripts` registry into a map of validated entries.
+ *  Tolerant of a missing/wrong-typed registry (⇒ empty). Each entry keeps
+ *  only well-typed fields; a bad interpreter/path drops the whole entry. */
+function parseComputeRegistry(raw) {
+  const scripts = {};
+  if (raw === null || typeof raw !== 'object' || Array.isArray(raw)) {
+    return { scripts };
+  }
+  const rawScripts = raw.scripts;
+  if (rawScripts === null || typeof rawScripts !== 'object' || Array.isArray(rawScripts)) {
+    return { scripts };
+  }
+  for (const [id, entry] of Object.entries(rawScripts)) {
+    if (!COMPUTE_SCRIPT_ID_PATTERN.test(id)) continue;
+    if (entry === null || typeof entry !== 'object' || Array.isArray(entry)) continue;
+    if (typeof entry.interpreter !== 'string' || entry.interpreter.trim() === '') continue;
+    if (typeof entry.path !== 'string' || entry.path.trim() === '') continue;
+    const clean = { interpreter: entry.interpreter, path: entry.path };
+    if (Number.isInteger(entry.maxArgs) && entry.maxArgs >= 0) {
+      clean.maxArgs = Math.min(entry.maxArgs, COMPUTE_MAX_ARGS_CEILING);
+    }
+    if (Number.isInteger(entry.timeoutSec) && entry.timeoutSec > 0) {
+      clean.timeoutSec = entry.timeoutSec;
+    }
+    if (Number.isInteger(entry.cpulimit) && entry.cpulimit > 0 && entry.cpulimit <= 100) {
+      clean.cpulimit = entry.cpulimit;
+    }
+    if (Number.isInteger(entry.nice) && entry.nice >= -20 && entry.nice <= 19) {
+      clean.nice = entry.nice;
+    }
+    scripts[id] = clean;
+  }
+  return { scripts };
 }
 
 /**
@@ -114,6 +174,16 @@ export function validateRequest(request, allowlist) {
     return { ok: false, reason: 'unknown-action' };
   }
 
+  // T8 Mini compute: a `shell` dispatch is gated entirely by the machine-
+  // local `compute.scripts` registry — the provider carries a scriptId, NOT
+  // a cwd/prompt. Sessions are LLM-only, so `shell` is never a session.
+  if (request.provider === 'shell') {
+    if (request.action === 'session') {
+      return { ok: false, reason: 'shell-cannot-be-a-session' };
+    }
+    return validateComputeRequest(request, allowlist);
+  }
+
   if (
     !DISPATCH_PROVIDERS.includes(request.provider) ||
     !allowlist?.providers?.includes(request.provider)
@@ -136,6 +206,44 @@ export function validateRequest(request, allowlist) {
     }
   }
   return { ok: false, reason: 'path-not-allowlisted' };
+}
+
+/**
+ * Validate a `shell` (T8 Mini compute) request. The wire carries an opaque
+ * `scriptId` + optional `args[]`; ONLY the machine-local registry resolves
+ * it to a real interpreter/path (the trust boundary — the server never
+ * knows the path). Deny-by-default: an unregistered scriptId, a bad arg
+ * shape, or too many args all deny with a reason. `shell` need NOT be in
+ * `providers[]` — its capability is the registry entry existing at all.
+ */
+export function validateComputeRequest(request, allowlist) {
+  const registry = allowlist?.compute?.scripts;
+  if (registry === null || typeof registry !== 'object') {
+    return { ok: false, reason: 'script-not-allowlisted' };
+  }
+  if (typeof request.scriptId !== 'string' || !COMPUTE_SCRIPT_ID_PATTERN.test(request.scriptId)) {
+    return { ok: false, reason: 'invalid-scriptId' };
+  }
+  const entry = registry[request.scriptId];
+  if (!entry) {
+    return { ok: false, reason: 'script-not-allowlisted' };
+  }
+  const args = request.args;
+  if (args !== undefined) {
+    if (!Array.isArray(args)) {
+      return { ok: false, reason: 'invalid-args' };
+    }
+    const maxArgs = typeof entry.maxArgs === 'number' ? entry.maxArgs : COMPUTE_MAX_ARGS_CEILING;
+    if (args.length > maxArgs) {
+      return { ok: false, reason: 'too-many-args' };
+    }
+    for (const arg of args) {
+      if (typeof arg !== 'string' || !COMPUTE_ARG_PATTERN.test(arg)) {
+        return { ok: false, reason: 'invalid-arg' };
+      }
+    }
+  }
+  return { ok: true };
 }
 
 /** Providers with a real `--effort` (or equivalent) flag, verified against
@@ -206,6 +314,45 @@ export function buildArgv(request) {
     default:
       return null;
   }
+}
+
+/**
+ * Build the argv array for a validated `shell` (T8 Mini compute) request.
+ * The scriptId is resolved to {interpreter, path} against the machine-local
+ * registry HERE — the wire never carried either. Every element is a plain
+ * argv token (spawned shell:false): `[interpreter, path, ...args]`, wrapped
+ * in `nice -n <n>` and optionally `cpulimit -l <pct>` when the entry
+ * requests them (both are plain-token wrappers, never a shell string).
+ *
+ * Guardrails from the entry ride back on `meta` so the runner can arm its
+ * cap timer (timeoutSec) using the EXISTING per-dispatch-cap machinery — a
+ * compute timeout is a self-issued stop, same containment as T5.
+ *
+ * Returns null if the scriptId isn't registered (should never happen
+ * post-validateComputeRequest — defensive only, never throws).
+ *
+ * @param {{ scriptId?: string, args?: string[] }} request
+ * @param {{ compute?: { scripts?: Record<string, object> } }} allowlist
+ * @returns {{ argv: string[], meta: { timeoutSec?: number } } | null}
+ */
+export function buildComputeArgv(request, allowlist) {
+  const entry = allowlist?.compute?.scripts?.[request?.scriptId];
+  if (!entry || typeof entry.interpreter !== 'string' || typeof entry.path !== 'string') {
+    return null;
+  }
+  const args = Array.isArray(request.args)
+    ? request.args.filter((a) => typeof a === 'string' && COMPUTE_ARG_PATTERN.test(a))
+    : [];
+  // `nice` defaults to +10 (background-friendly) unless the entry overrides;
+  // clamps applied at parse time. `cpulimit` is opt-in (absent = no cap).
+  const nice = typeof entry.nice === 'number' ? entry.nice : 10;
+  let argv = ['nice', '-n', String(nice), entry.interpreter, entry.path, ...args];
+  if (typeof entry.cpulimit === 'number') {
+    // cpulimit runs the target as its own child; -- separates its flags from
+    // the command. Still all plain argv tokens, spawned shell:false.
+    argv = ['cpulimit', '-l', String(entry.cpulimit), '--', ...argv];
+  }
+  return { argv, meta: { timeoutSec: entry.timeoutSec } };
 }
 
 /**

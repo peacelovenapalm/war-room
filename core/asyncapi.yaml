@@ -2116,6 +2116,25 @@ components:
         pid:
           type: integer
           description: Process id to bring to front — action "focus" (sessionId or pid required).
+        scriptId:
+          type: string
+          pattern: '^[a-zA-Z0-9._-]{1,64}$'
+          description: >-
+            T8 Mini compute — opaque id of a registered compute script,
+            required for provider "shell" (a NON-LLM dispatch). The runner
+            resolves it to an interpreter/path against its own machine-local
+            registry; the wire never carries the path. Ignored for LLM
+            providers.
+        args:
+          type: array
+          items:
+            type: string
+          maxItems: 16
+          description: >-
+            T8 Mini compute — plain-token positional args for a "shell"
+            dispatch. Each is a single argv element (spawned shell:false);
+            the runner rejects shell metacharacters/control chars and caps
+            the count per-script. Ignored for LLM providers.
         model:
           type: string
           pattern: '^[a-zA-Z0-9._/-]{1,64}$'

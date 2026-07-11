@@ -97,6 +97,7 @@ import { promisify } from 'node:util';
 
 import {
   buildArgv,
+  buildComputeArgv,
   buildSessionArgv,
   emptyAllowlist,
   parseAllowlist,
@@ -216,6 +217,11 @@ function readAllowlist(cfg) {
 // ── Server calls ────────────────────────────────────────────────
 
 async function postDispatchPoll(cfg, allowlist, managedSessions, fetchImpl) {
+  // T8 Mini compute: advertise only the registered scriptId NAMES, never the
+  // interpreter/path/registry internals — the wire carries intent, the local
+  // registry carries the capability (MINI-COMPUTE-NODE.md trust boundary).
+  const { compute, ...capabilities } = allowlist;
+  const scriptIds = compute?.scripts ? Object.keys(compute.scripts) : [];
   return fetchImpl(`${cfg.url}/api/dispatch/poll`, {
     method: 'POST',
     headers: {
@@ -226,8 +232,9 @@ async function postDispatchPoll(cfg, allowlist, managedSessions, fetchImpl) {
     // The allowlist advertisement (providers/roots/focus/sessions) plus the
     // live managed-session list (T2 remote-answer plane) — the server's ONLY
     // source for which agents may render ANSWER. Alive-in-tmux entries only,
-    // re-derived every tick, never cached (REMOTE-ANSWER-DESIGN.md).
-    body: JSON.stringify({ ...allowlist, managedSessions }),
+    // re-derived every tick, never cached (REMOTE-ANSWER-DESIGN.md). scriptIds
+    // are names-only (T8) so the CALL tray can render a real script picker.
+    body: JSON.stringify({ ...capabilities, scriptIds, managedSessions }),
     signal: AbortSignal.timeout(POST_TIMEOUT_MS),
   });
 }
@@ -895,6 +902,28 @@ async function handleItem(cfg, item, allowlist, state, deps) {
 
   if (item.action === 'session') {
     await runSessionLaunch(cfg, item, deps);
+    return;
+  }
+
+  // action === 'dispatch', provider === 'shell' (T8 Mini compute): resolve
+  // the opaque scriptId against the machine-local registry HERE — the wire
+  // never carried an interpreter/path. The registry's own timeoutSec arms
+  // the SAME per-dispatch cap machinery T5 built (a compute timeout is a
+  // self-issued stop). cwd stays the runner's own (compute scripts run
+  // where the runner runs; the registry path is the trust boundary, not cwd).
+  if (item.provider === 'shell') {
+    const resolved = buildComputeArgv(item, allowlist);
+    if (!resolved) {
+      await postDecision(cfg, item.id, 'deny', { reason: 'script-not-allowlisted' }, fetchImpl);
+      audit(cfg, 'denied', { id: item.id, action: item.action, reason: 'script-not-allowlisted' });
+      return;
+    }
+    await postDecision(cfg, item.id, 'accept', {}, fetchImpl);
+    audit(cfg, 'accepted', { id: item.id, provider: 'shell', scriptId: item.scriptId });
+    state.handled.add(item.id);
+    // Thread the registry-derived cap through the same field runDispatch's
+    // timer reads — never trusting a wire-supplied timeoutSec for shell.
+    runDispatch(cfg, { ...item, timeoutSec: resolved.meta.timeoutSec }, resolved.argv, state, deps);
     return;
   }
 

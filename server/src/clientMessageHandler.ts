@@ -148,6 +148,12 @@ export function handleClientMessage(
         pid: typeof msg.pid === 'number' ? msg.pid : undefined,
         model: typeof msg.model === 'string' ? msg.model : undefined,
         effort: typeof msg.effort === 'string' ? msg.effort : undefined,
+        // T8 Mini compute — opaque scriptId + plain-token args for a `shell`
+        // dispatch; validated (and dropped for non-shell) inside enqueue().
+        scriptId: typeof msg.scriptId === 'string' ? msg.scriptId : undefined,
+        args: Array.isArray(msg.args)
+          ? msg.args.filter((a): a is string => typeof a === 'string')
+          : undefined,
         // T5 fleet controls, PER-DISPATCH TIME CAP — validated properly
         // inside dispatchStore.enqueue(); a non-number here is simply
         // dropped, same tolerance as every other optional field on this path.
