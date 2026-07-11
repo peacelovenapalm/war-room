@@ -273,12 +273,7 @@ export interface DispatchUpdate {
 export type DispatchActionValue = 'dispatch' | 'focus';
 
 export type DispatchStatusValue =
-  | 'ringing'
-  | 'answered'
-  | 'denied'
-  | 'expired'
-  | 'exited'
-  | 'killed';
+  'ringing' | 'answered' | 'denied' | 'expired' | 'exited' | 'killed';
 
 export interface OutputChunk {
   type: 'outputChunk';
@@ -322,13 +317,7 @@ export interface EmployeeSnapshot {
 export type EmployeeProviderValue = 'claude' | 'codex';
 
 export type EmployeeStatusValue =
-  | 'candidate'
-  | 'active'
-  | 'on_break'
-  | 'training'
-  | 'quit'
-  | 'fired'
-  | 'retired';
+  'candidate' | 'active' | 'on_break' | 'training' | 'quit' | 'fired' | 'retired';
 
 export type EmployeeRankValue = 'Junior' | 'Senior' | 'Lead' | 'Principal';
 
@@ -412,12 +401,7 @@ export interface ChainStepRun {
 }
 
 export type ChainStepStatusValue =
-  | 'pending'
-  | 'running'
-  | 'exited'
-  | 'denied'
-  | 'expired'
-  | 'killed';
+  'pending' | 'running' | 'exited' | 'denied' | 'expired' | 'killed';
 
 export interface StandingOrderUpdate {
   type: 'standingOrderUpdate';
@@ -512,11 +496,7 @@ export interface StudioContractSourceTodo {
 }
 
 export type StudioContractStatusValue =
-  | 'offered'
-  | 'accepted'
-  | 'progressing'
-  | 'completed'
-  | 'expired';
+  'offered' | 'accepted' | 'progressing' | 'completed' | 'expired';
 
 export interface StudioContractProgressEvent {
   ts: number;

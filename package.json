@@ -60,7 +60,7 @@
     "knip": "knip"
   },
   "devDependencies": {
-    "@asyncapi/cli": "^6.0.0",
+    "@asyncapi/cli": "^6.0.2",
     "@asyncapi/html-template": "^3.5.6",
     "@asyncapi/modelina": "^5.10.1",
     "@playwright/test": "^1.58.2",
@@ -71,7 +71,7 @@
     "@vscode/test-electron": "^2.5.2",
     "allure-commandline": "^2.38.1",
     "allure-playwright": "^3.7.1",
-    "esbuild": "^0.28.0",
+    "esbuild": "^0.28.1",
     "eslint": "^10.0.3",
     "eslint-config-prettier": "^10.1.8",
     "eslint-plugin-simple-import-sort": "^13.0.0",
@@ -80,10 +80,10 @@
     "lint-staged": "^16.3.2",
     "npm-run-all": "^4.1.5",
     "pngjs": "^7.0.0",
-    "prettier": "^3.8.1",
-    "tsx": "^4.21.0",
+    "prettier": "^3.9.5",
+    "tsx": "^4.23.0",
     "typescript": "^5.9.3",
-    "typescript-eslint": "^8.54.0",
+    "typescript-eslint": "^8.63.0",
     "ws": "^8.21.0"
   },
   "lint-staged": {
