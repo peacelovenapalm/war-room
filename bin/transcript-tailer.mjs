@@ -20,16 +20,32 @@
  *        runner's own posture). Idempotent for an already-active session.
  *        fromStart:true starts at offset 0; otherwise at EOF (only new
  *        output streams). A missing file keeps the tail active (a session
- *        may not have written yet) and is retried every pass.
- *      - tail-off: final per-session flush, then drop the tail.
+ *        may not have written yet) and is retried every pass. The
+ *        allowlist is RE-CHECKED on every subsequent read pass too, not
+ *        just at tail-on — a path reopened by name every pass could
+ *        otherwise be swapped for a symlink pointing outside the roots
+ *        between passes (TOCTOU); a pass that fails re-validation tears
+ *        the tail down immediately (codex review).
+ *      - tail-off: a BOUNDED final drain (reads until EOF or
+ *        MAX_FINAL_DRAIN_PASSES) forwards bytes written since the last
+ *        regular pass before the tail is removed — deleting first would
+ *        silently drop a session's final output (codex review) — then
+ *        forwarder.drop() flushes and frees that session's buffer state.
  *   3. One read pass over every active tail: offset-tracked incremental
  *      read (64KB cap per pass per file — server/src/fileWatcher.ts's
  *      readNewLines discipline, reimplemented dependency-free here; bin/
- *      never imports server code), line-buffered across partial reads.
- *      Each complete line is filtered (fast '"type":"assistant"' substring
- *      pre-check, then a real JSON.parse confirm) — only assistant records
- *      cross the wire. An oversized line (over the server's per-line cap)
- *      is skipped locally with a ⚠ log (honest bounded loss), never sent.
+ *      never imports server code). Line-buffering carries UNDECODED BYTES
+ *      (never a decoded string) across passes and splits on the 0x0A byte,
+ *      so a multibyte UTF-8 character straddling a 64KB pass boundary is
+ *      never corrupted by decoding a partial sequence (codex review). The
+ *      byte carry itself is capped (MAX_CARRY_BYTES) — a newline-free
+ *      growing file can't accumulate it without limit; past the cap it's
+ *      dropped and the reader resyncs at the next real newline (bounded,
+ *      honest loss). Each complete line is filtered (fast
+ *      '"type":"assistant"' substring pre-check in byte space, then a real
+ *      JSON.parse confirm) — only assistant records cross the wire. An
+ *      oversized line (over the server's per-line cap) is skipped locally
+ *      with a ⚠ log (honest bounded loss), never sent.
  *
  * Forwarding rides bin/lib/line-forwarder.mjs (coalesce + sequential POST
  * chain to POST /api/agents/output). A 2xx {ok:false} response is treated
@@ -77,6 +93,19 @@ const MAX_READ_BYTES_PER_PASS = 65_536;
  *  zero-dependency and never imports server code. A line over this is
  *  skipped locally (honest bounded loss) rather than sent to be 400'd. */
 const MAX_LINE_BYTES = 262_144;
+/** Cap on the unterminated-line BYTE carry (codex review: a newline-free
+ *  growing file must not accumulate carry without limit). 2x the line cap
+ *  — generous enough that a legitimate line right at MAX_LINE_BYTES never
+ *  trips it, but a pathological file wins eventually. Exceeding it drops
+ *  the carry and resyncs at the next real newline (bounded, honest loss —
+ *  see readNewAssistantLines' `resync` handling). */
+const MAX_CARRY_BYTES = MAX_LINE_BYTES * 2;
+/** Bounded final drain on tail-off (codex review: processInstruction used
+ *  to delete the tail before ever reading bytes written since the last
+ *  regular pass). Caps total final-drain reads at
+ *  MAX_FINAL_DRAIN_PASSES x MAX_READ_BYTES_PER_PASS (~1MB) so a
+ *  still-rapidly-growing file can't stall shutdown indefinitely. */
+const MAX_FINAL_DRAIN_PASSES = 16;
 
 // ── Config ──────────────────────────────────────────────────────
 
@@ -127,12 +156,33 @@ export function parseArgs(argv) {
 // ── Read discipline (server/src/fileWatcher.ts readNewLines,
 //    reimplemented dependency-free — bin/ never imports server code) ────
 
+/** Split a Buffer on 0x0A (newline) BYTES, returning complete-line byte
+ *  slices plus the trailing unterminated remainder. Splitting in byte
+ *  space (never decoding first) is the point: 0x0A is a single-byte ASCII
+ *  character that can never appear as a continuation byte of a multibyte
+ *  UTF-8 sequence, so this never misidentifies a line boundary — unlike
+ *  decoding each 64KB block independently and splitting the resulting
+ *  STRING, which corrupts (or throws away, via U+FFFD replacement) any
+ *  multibyte character whose bytes straddle a read-pass boundary (codex
+ *  review). */
+function splitOnNewline(buffer) {
+  const lines = [];
+  let start = 0;
+  for (let i = 0; i < buffer.length; i++) {
+    if (buffer[i] === 0x0a) {
+      lines.push(buffer.subarray(start, i));
+      start = i + 1;
+    }
+  }
+  return { lines, remainder: buffer.subarray(start) };
+}
+
 /**
  * One incremental read pass over a single tail. Never throws — a read
  * error other than ENOENT is logged and treated as "nothing new this
  * pass" so one bad file can't wedge the daemon.
  *
- * @param {{ path: string, offset: number, lineBuffer: string }} tail
+ * @param {{ path: string, offset: number, carry: Buffer, resync?: boolean }} tail
  * @param {typeof import('node:fs')} fsImpl
  * @param {(msg: string) => void} log
  * @returns {{ lines: string[], missing: boolean }}
@@ -151,7 +201,8 @@ export function readNewAssistantLines(tail, fsImpl, log) {
   // skipping content forever.
   if (stat.size < tail.offset) {
     tail.offset = 0;
-    tail.lineBuffer = '';
+    tail.carry = Buffer.alloc(0);
+    tail.resync = false;
   }
   if (stat.size <= tail.offset) return { lines: [], missing: false };
 
@@ -175,21 +226,44 @@ export function readNewAssistantLines(tail, fsImpl, log) {
   }
   tail.offset += bytesToRead;
 
-  const text = tail.lineBuffer + buf.toString('utf8');
-  const parts = text.split('\n');
-  tail.lineBuffer = parts.pop() || '';
+  const combined = Buffer.concat([tail.carry, buf]);
+  const { lines: rawLines, remainder } = splitOnNewline(combined);
+
+  let usableLines = rawLines;
+  if (tail.resync) {
+    // A previous pass dropped an oversized, newline-free carry (see the
+    // cap check below). The first segment here is the tail end of that
+    // ABANDONED line, not a real line — discard it. Once we've actually
+    // crossed a newline (rawLines non-empty), resync is done; otherwise
+    // still no boundary in sight, keep waiting.
+    usableLines = usableLines.slice(1);
+    if (rawLines.length > 0) tail.resync = false;
+  }
+
+  tail.carry = remainder;
+  if (tail.carry.length > MAX_CARRY_BYTES) {
+    log(
+      `⚠ dropped an oversized newline-free carry for ${tail.path} (>${MAX_CARRY_BYTES} bytes) — resyncing at the next newline`,
+    );
+    tail.carry = Buffer.alloc(0);
+    tail.resync = true;
+  }
 
   const assistantLines = [];
-  for (const line of parts) {
-    if (!line.trim()) continue;
-    // Fast pre-check before the real parse — the bulk of a transcript
-    // (tool results, progress records, file-history snapshots) never
-    // reaches JSON.parse.
-    if (!line.includes('"type":"assistant"')) continue;
-    if (Buffer.byteLength(line, 'utf8') > MAX_LINE_BYTES) {
+  for (const lineBuf of usableLines) {
+    if (lineBuf.length === 0) continue;
+    // Byte-space pre-check before ever decoding — the bulk of a
+    // transcript (tool results, progress records, file-history snapshots)
+    // never reaches JSON.parse. Buffer#includes searches in the same
+    // encoding the literal was written in (utf8), which is safe here
+    // since the search string is pure ASCII.
+    if (!lineBuf.includes('"type":"assistant"')) continue;
+    if (lineBuf.length > MAX_LINE_BYTES) {
       log(`⚠ skipped an oversized assistant line for ${tail.path} (>${MAX_LINE_BYTES} bytes)`);
       continue;
     }
+    const line = lineBuf.toString('utf8');
+    if (!line.trim()) continue;
     try {
       const record = JSON.parse(line);
       if (record && typeof record === 'object' && record.type === 'assistant') {
@@ -205,7 +279,51 @@ export function readNewAssistantLines(tail, fsImpl, log) {
 // ── Instruction processing ─────────────────────────────────────
 
 /**
- * @param {Map<string, { path: string, offset: number, lineBuffer: string, missingLogged: boolean }>} tails
+ * Re-validate `tail.path` against the LOCAL roots allowlist before every
+ * single read (codex review — TOCTOU): the tail-on check ran once, but the
+ * path is reopened BY NAME every pass; if it were swapped for a symlink
+ * pointing outside the allowlisted roots between passes, a name-only
+ * reopen would silently follow it. isPathAllowed is a realpath + prefix
+ * check — cheap enough to repeat every pass. `denied: true` on failure
+ * tells the caller to tear the tail down; it never attempts the read.
+ *
+ * @param {{ path: string, offset: number, carry: Buffer, resync?: boolean }} tail
+ * @param {string[]} roots
+ * @param {typeof import('node:fs')} fsImpl
+ * @param {(msg: string) => void} log
+ * @returns {{ lines: string[], missing: boolean, denied: boolean }}
+ */
+function readOneValidatedPass(tail, roots, fsImpl, log) {
+  if (!isPathAllowed(tail.path, roots, fsImpl)) {
+    return { lines: [], missing: false, denied: true };
+  }
+  const result = readNewAssistantLines(tail, fsImpl, log);
+  return { ...result, denied: false };
+}
+
+/**
+ * Bounded final drain before a tail-off actually removes the tail (codex
+ * review: processInstruction used to delete the tail — losing its offset
+ * state — before ever reading bytes written since the last regular pass,
+ * silently dropping the session's final output). Loops until EOF (offset
+ * stops advancing) or MAX_FINAL_DRAIN_PASSES, whichever first, so a
+ * still-rapidly-growing file can't stall a tail-off indefinitely.
+ */
+function finalDrain(tail, sessionId, forwarder, roots, fsImpl, log) {
+  for (let i = 0; i < MAX_FINAL_DRAIN_PASSES; i++) {
+    const offsetBefore = tail.offset;
+    const { lines, missing, denied } = readOneValidatedPass(tail, roots, fsImpl, log);
+    if (denied) {
+      log(`⚠ final drain skipped for ${sessionId} — path failed re-validation: ${tail.path}`);
+      break;
+    }
+    if (lines.length > 0) forwarder.push(sessionId, lines);
+    if (missing || tail.offset === offsetBefore) break; // caught up to EOF
+  }
+}
+
+/**
+ * @param {Map<string, { path: string, offset: number, carry: Buffer, resync?: boolean, missingLogged: boolean }>} tails
  * @param {ReturnType<typeof createLineForwarder>} forwarder
  * @param {string[]} roots
  * @param {typeof import('node:fs')} fsImpl
@@ -236,7 +354,7 @@ export function processInstruction(instr, tails, forwarder, roots, fsImpl, log) 
     tails.set(instr.sessionId, {
       path: instr.transcriptPath,
       offset,
-      lineBuffer: '',
+      carry: Buffer.alloc(0),
       missingLogged: false,
     });
     log(
@@ -246,9 +364,16 @@ export function processInstruction(instr, tails, forwarder, roots, fsImpl, log) 
   }
 
   if (instr.kind === 'tail-off') {
-    if (!tails.has(instr.sessionId)) return;
+    const tail = tails.get(instr.sessionId);
+    if (!tail) return;
+    // Final drain BEFORE removing the tail — bytes written after the last
+    // regular pass but before this tail-off must still reach the server.
+    finalDrain(tail, instr.sessionId, forwarder, roots, fsImpl, log);
     tails.delete(instr.sessionId);
-    void forwarder.flush(instr.sessionId);
+    // drop() flushes THEN removes the forwarder's own per-session buffer
+    // state — flush() alone would leak an empty entry for the rest of the
+    // process's life (codex review).
+    void forwarder.drop(instr.sessionId);
     log(`✓ tail-off ${instr.sessionId}`);
   }
 }
@@ -292,9 +417,21 @@ export async function pollTick(cfg, tails, forwarder, deps) {
 }
 
 /** One read pass over every active tail. Never throws. */
-export function readPass(tails, forwarder, deps) {
+export function readPass(tails, forwarder, roots, deps) {
   for (const [sessionId, tail] of tails) {
-    const { lines, missing } = readNewAssistantLines(tail, deps.fsImpl, deps.log);
+    const { lines, missing, denied } = readOneValidatedPass(tail, roots, deps.fsImpl, deps.log);
+    if (denied) {
+      // TOCTOU teardown (codex review): the path passed allowlist
+      // validation at tail-on but fails it NOW — e.g. swapped for a
+      // symlink pointing outside the roots between passes. Stop reading
+      // immediately; never open it again.
+      deps.log(
+        `⚠ tail torn down for ${sessionId} — path failed re-validation (possible symlink swap outside allowlisted roots): ${tail.path}`,
+      );
+      tails.delete(sessionId);
+      void forwarder.drop(sessionId);
+      continue;
+    }
     if (missing) {
       if (!tail.missingLogged) {
         deps.log(`⚠ transcript not found yet for session ${sessionId} — will retry`);
@@ -352,7 +489,7 @@ export async function runTailer(cfg, deps = {}) {
   try {
     for (;;) {
       await pollTick(cfg, tails, forwarder, resolvedDeps);
-      readPass(tails, forwarder, resolvedDeps);
+      readPass(tails, forwarder, cfg.roots, resolvedDeps);
       if (cfg.once) {
         await forwarder.stop();
         return;

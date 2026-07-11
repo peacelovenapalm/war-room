@@ -175,18 +175,29 @@ export function createLineForwarder({
       }
     },
 
-    /** Force-flush one session (used at tail-off — the final flush for
-     *  that session only, other sessions' buffers are untouched). Returns
-     *  the shared POST chain so a caller can await settling. */
+    /** Force-flush one session WITHOUT removing its buffer state (the
+     *  session may still be pushed to afterward). */
     flush(sessionId) {
       flushSession(sessionId);
       return chain;
     },
 
-    /** Drop a session's buffered-but-unflushed lines without posting them
-     *  (used when a tail is refused/denied — nothing to send). */
+    /** Flush a session's buffered lines, THEN remove its state entirely —
+     *  the session is done (tail-off's final flush, or a server denial's
+     *  {ok:false}). Without the delete, `sessions` retained one empty
+     *  entry per session ever tailed for the lifetime of the process (a
+     *  long-running daemon's real leak — codex review). Returns the
+     *  shared POST chain so a caller can await the final flush settling. */
     drop(sessionId) {
+      flushSession(sessionId);
       sessions.delete(sessionId);
+      return chain;
+    },
+
+    /** Test/introspection only: how many sessions currently hold buffer
+     *  state (bounds the leak this module must not have). */
+    sessionCount() {
+      return sessions.size;
     },
 
     /** Stop the flush loop and perform a final flush of every session.

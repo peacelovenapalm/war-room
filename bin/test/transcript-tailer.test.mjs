@@ -1,9 +1,10 @@
 /**
  * Unit + integration tests for bin/transcript-tailer.mjs (T1 remote
- * live-tail, S3). Read-discipline and instruction-processing tests use a
- * real temp directory (fs.realpathSync-backed containment needs real
- * paths, same rationale as tailer-roots.test.mjs); network tests use an
- * injected fetch fake — no real server.
+ * live-tail, S3 + codex cross-model review fix round). Read-discipline and
+ * instruction-processing tests use a real temp directory (fs.realpathSync-
+ * backed containment needs real paths, same rationale as
+ * tailer-roots.test.mjs); network tests use an injected fetch fake — no
+ * real server.
  */
 
 import * as fs from 'node:fs';
@@ -20,6 +21,11 @@ import {
   readPass,
   runTailer,
 } from '../transcript-tailer.mjs';
+
+/** Mirrors the source constants (not exported — same convention as
+ *  MAX_READ_BYTES_PER_PASS/MAX_LINE_BYTES, which these tests already
+ *  hardcode). */
+const MAX_CARRY_BYTES = 262_144 * 2;
 
 let tmpBase;
 
@@ -38,8 +44,6 @@ function tmpFile(name = `session-${fileCounter++}.jsonl`) {
 
 const assistantText = (text) =>
   JSON.stringify({ type: 'assistant', message: { content: [{ type: 'text', text }] } });
-
-const sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
 
 function noopLog() {}
 
@@ -95,7 +99,7 @@ test('parseArgs: roots default includes ~/.claude/projects', () => {
 // ── readNewAssistantLines ─────────────────────────────────────────
 
 test('readNewAssistantLines: returns missing:true for a file that does not exist yet', () => {
-  const tail = { path: tmpFile(), offset: 0, lineBuffer: '' };
+  const tail = { path: tmpFile(), offset: 0, carry: Buffer.alloc(0) };
   const result = readNewAssistantLines(tail, fs, noopLog);
   assert.deepEqual(result, { lines: [], missing: true });
 });
@@ -110,7 +114,7 @@ test('readNewAssistantLines: only assistant records are forwarded; non-assistant
       assistantText('world'),
     ].join('\n') + '\n';
   fs.writeFileSync(file, content);
-  const tail = { path: file, offset: 0, lineBuffer: '' };
+  const tail = { path: file, offset: 0, carry: Buffer.alloc(0) };
   const { lines, missing } = readNewAssistantLines(tail, fs, noopLog);
   assert.equal(missing, false);
   assert.equal(lines.length, 2);
@@ -121,12 +125,12 @@ test('readNewAssistantLines: only assistant records are forwarded; non-assistant
 test('readNewAssistantLines: carries a partial (unterminated) line across successive reads', () => {
   const file = tmpFile();
   fs.writeFileSync(file, ''); // start empty
-  const tail = { path: file, offset: 0, lineBuffer: '' };
+  const tail = { path: file, offset: 0, carry: Buffer.alloc(0) };
 
   fs.appendFileSync(file, assistantText('partial').slice(0, 10)); // no trailing newline
   let result = readNewAssistantLines(tail, fs, noopLog);
   assert.deepEqual(result.lines, [], 'nothing complete yet');
-  assert.notEqual(tail.lineBuffer, '', 'the partial bytes are buffered');
+  assert.ok(tail.carry.length > 0, 'the partial bytes are buffered');
 
   fs.appendFileSync(file, assistantText('partial').slice(10) + '\n');
   result = readNewAssistantLines(tail, fs, noopLog);
@@ -142,7 +146,7 @@ test('readNewAssistantLines: caps a single pass at 64KB, picking up the remainde
   const totalBytes = fs.statSync(file).size;
   assert.ok(totalBytes > 65_536, 'fixture must exceed the pass cap for this test to mean anything');
 
-  const tail = { path: file, offset: 0, lineBuffer: '' };
+  const tail = { path: file, offset: 0, carry: Buffer.alloc(0) };
   const first = readNewAssistantLines(tail, fs, noopLog);
   assert.ok(tail.offset <= 65_536, 'offset never advances past the per-pass cap');
   assert.ok(tail.offset < totalBytes, 'the whole file was NOT consumed in one pass');
@@ -161,7 +165,7 @@ test('readNewAssistantLines: skips an oversized assistant line and logs a warnin
   const file = tmpFile();
   const bigText = 'y'.repeat(300 * 1024); // the JSON line comfortably exceeds MAX_LINE_BYTES (256KB)
   fs.writeFileSync(file, assistantText(bigText) + '\n' + assistantText('short') + '\n');
-  const tail = { path: file, offset: 0, lineBuffer: '' };
+  const tail = { path: file, offset: 0, carry: Buffer.alloc(0) };
   const totalBytes = fs.statSync(file).size;
 
   const logs = [];
@@ -178,21 +182,109 @@ test('readNewAssistantLines: skips an oversized assistant line and logs a warnin
   );
 });
 
+test('readNewAssistantLines: a multibyte UTF-8 character straddling the 64KB pass boundary survives intact', () => {
+  // codex review: decoding each 64KB block independently and splitting the
+  // resulting STRING corrupts (replaces with U+FFFD) a multibyte character
+  // whose bytes straddle a read-pass boundary. Position a 4-byte emoji so
+  // its bytes span byte offset 65536 (the exact pass cap) to prove the
+  // byte-space carry survives it.
+  const file = tmpFile();
+  const PREFIX = '{"type":"assistant","message":{"content":[{"type":"text","text":"';
+  const SUFFIX = '"}]}}\n';
+  const emoji = '🎉'; // 4 bytes in UTF-8
+  const prefixBytes = Buffer.byteLength(PREFIX, 'utf8');
+  const desiredEmojiStartByte = 65_536 - 2; // straddles the pass boundary
+  const filler = 'x'.repeat(desiredEmojiStartByte - prefixBytes);
+  const content = PREFIX + filler + emoji + SUFFIX;
+  fs.writeFileSync(file, content);
+  const totalBytes = fs.statSync(file).size;
+  assert.ok(totalBytes > 65_536, 'fixture must span more than one pass');
+
+  const tail = { path: file, offset: 0, carry: Buffer.alloc(0) };
+  let allLines = [];
+  while (tail.offset < totalBytes) {
+    const { lines } = readNewAssistantLines(tail, fs, noopLog);
+    allLines = allLines.concat(lines);
+  }
+  assert.equal(allLines.length, 1);
+  const text = JSON.parse(allLines[0]).message.content[0].text;
+  assert.equal(
+    text,
+    filler + emoji,
+    'the emoji decoded intact at the pass boundary — no replacement-char corruption',
+  );
+});
+
+test('readNewAssistantLines: a newline-free growing file never grows the carry past the cap', () => {
+  const file = tmpFile();
+  fs.writeFileSync(file, '');
+  const tail = { path: file, offset: 0, carry: Buffer.alloc(0) };
+
+  // Grow the file well past MAX_CARRY_BYTES, with NO newline anywhere.
+  const chunk = 'x'.repeat(100_000);
+  for (let i = 0; i < 8; i++) {
+    fs.appendFileSync(file, chunk); // up to 800KB total, zero newlines
+    const totalBytes = fs.statSync(file).size;
+    while (tail.offset < totalBytes) {
+      readNewAssistantLines(tail, fs, noopLog);
+      assert.ok(
+        tail.carry.length <= MAX_CARRY_BYTES,
+        `carry (${tail.carry.length}) must never exceed the cap (${MAX_CARRY_BYTES})`,
+      );
+    }
+  }
+});
+
+test('readNewAssistantLines: after dropping an oversized carry, resyncs cleanly at the next newline', () => {
+  const file = tmpFile();
+  fs.writeFileSync(file, '');
+  const tail = { path: file, offset: 0, carry: Buffer.alloc(0) };
+
+  // Grow past the cap with no newline — forces at least one drop+resync.
+  fs.appendFileSync(file, 'x'.repeat(MAX_CARRY_BYTES + 100_000));
+  let totalBytes = fs.statSync(file).size;
+  const logs = [];
+  while (tail.offset < totalBytes) {
+    readNewAssistantLines(tail, fs, (m) => logs.push(m));
+  }
+  assert.ok(
+    logs.some((m) => m.includes('dropped an oversized')),
+    'the drop was logged (honest bounded loss)',
+  );
+
+  // A REAL assistant line after a newline must parse cleanly — no
+  // fragment of the abandoned garbage leaks into it.
+  fs.appendFileSync(file, '\n' + assistantText('after resync') + '\n');
+  totalBytes = fs.statSync(file).size;
+  let lines = [];
+  while (tail.offset < totalBytes) {
+    const result = readNewAssistantLines(tail, fs, (m) => logs.push(m));
+    lines = lines.concat(result.lines);
+  }
+  assert.equal(lines.length, 1);
+  assert.equal(JSON.parse(lines[0]).message.content[0].text, 'after resync');
+});
+
 // ── processInstruction ─────────────────────────────────────────────
 
 function fakeForwarder() {
+  const pushed = [];
   const flushed = [];
   const dropped = [];
   return {
+    pushed,
     flushed,
     dropped,
-    push() {},
+    push(sessionId, lines) {
+      pushed.push({ sessionId, lines });
+    },
     flush(sessionId) {
       flushed.push(sessionId);
       return Promise.resolve();
     },
     drop(sessionId) {
       dropped.push(sessionId);
+      return Promise.resolve();
     },
   };
 }
@@ -294,7 +386,7 @@ test('processInstruction: tail-on for a path outside the allowlisted roots is re
   fs.rmSync(outsideDir, { recursive: true, force: true });
 });
 
-test('processInstruction: tail-off performs a final flush and drops the tail', () => {
+test('processInstruction: tail-off drains bytes written since the last regular pass, then drops the tail (final-drain fix)', () => {
   const file = tmpFile();
   fs.writeFileSync(file, '');
   const tails = new Map();
@@ -308,16 +400,26 @@ test('processInstruction: tail-off performs a final flush and drops the tail', (
     noopLog,
   );
   assert.ok(tails.has('s6'));
+
+  // Bytes arrive AFTER tail-on with NO intervening regular readPass —
+  // exactly the scenario that used to silently drop the session's final
+  // output (codex review).
+  fs.appendFileSync(file, assistantText('final words') + '\n');
+
   processInstruction({ kind: 'tail-off', sessionId: 's6' }, tails, fwd, [tmpBase], fs, noopLog);
   assert.equal(tails.has('s6'), false);
-  assert.deepEqual(fwd.flushed, ['s6']);
+  assert.deepEqual(fwd.dropped, ['s6']);
+  assert.equal(fwd.pushed.length, 1, 'the final drain pushed the late bytes before dropping');
+  assert.equal(fwd.pushed[0].sessionId, 's6');
+  assert.equal(JSON.parse(fwd.pushed[0].lines[0]).message.content[0].text, 'final words');
 });
 
 test('processInstruction: tail-off for an unknown session is a no-op', () => {
   const tails = new Map();
   const fwd = fakeForwarder();
   processInstruction({ kind: 'tail-off', sessionId: 'ghost' }, tails, fwd, [tmpBase], fs, noopLog);
-  assert.deepEqual(fwd.flushed, []);
+  assert.deepEqual(fwd.dropped, []);
+  assert.deepEqual(fwd.pushed, []);
 });
 
 // ── pollTick ─────────────────────────────────────────────────────
@@ -380,8 +482,8 @@ test('pollTick: the request body advertises the currently-active sessionIds', as
     log: noopLog,
   };
   const tails = new Map([
-    ['s-a', { path: 'x', offset: 0, lineBuffer: '' }],
-    ['s-b', { path: 'y', offset: 0, lineBuffer: '' }],
+    ['s-a', { path: 'x', offset: 0, carry: Buffer.alloc(0) }],
+    ['s-b', { path: 'y', offset: 0, carry: Buffer.alloc(0) }],
   ]);
   await pollTick(cfgFor(), tails, fakeForwarder(), deps);
   assert.deepEqual(new Set(sentBody.active), new Set(['s-a', 's-b']));
@@ -410,24 +512,60 @@ test('pollTick: processes returned instructions (tail-on lands in the tails map)
 test('readPass: pushes newly-read assistant lines into the forwarder, keyed by sessionId', () => {
   const file = tmpFile();
   fs.writeFileSync(file, assistantText('hi') + '\n');
-  const tails = new Map([['s-x', { path: file, offset: 0, lineBuffer: '', missingLogged: false }]]);
-  const pushed = [];
-  const fwd = { push: (sessionId, lines) => pushed.push({ sessionId, lines }) };
-  readPass(tails, fwd, { fsImpl: fs, log: noopLog });
-  assert.equal(pushed.length, 1);
-  assert.equal(pushed[0].sessionId, 's-x');
-  assert.equal(pushed[0].lines.length, 1);
+  const tails = new Map([['s-x', { path: file, offset: 0, carry: Buffer.alloc(0) }]]);
+  const fwd = fakeForwarder();
+  readPass(tails, fwd, [tmpBase], { fsImpl: fs, log: noopLog });
+  assert.equal(fwd.pushed.length, 1);
+  assert.equal(fwd.pushed[0].sessionId, 's-x');
+  assert.equal(fwd.pushed[0].lines.length, 1);
 });
 
 test('readPass: a missing file logs "will retry" exactly once, never re-logs every pass', () => {
   const file = tmpFile('not-yet.jsonl');
-  const tails = new Map([['s-y', { path: file, offset: 0, lineBuffer: '', missingLogged: false }]]);
+  const tails = new Map([
+    ['s-y', { path: file, offset: 0, carry: Buffer.alloc(0), missingLogged: false }],
+  ]);
   const logs = [];
-  const fwd = { push: () => {} };
-  readPass(tails, fwd, { fsImpl: fs, log: (m) => logs.push(m) });
-  readPass(tails, fwd, { fsImpl: fs, log: (m) => logs.push(m) });
-  readPass(tails, fwd, { fsImpl: fs, log: (m) => logs.push(m) });
+  const fwd = fakeForwarder();
+  readPass(tails, fwd, [tmpBase], { fsImpl: fs, log: (m) => logs.push(m) });
+  readPass(tails, fwd, [tmpBase], { fsImpl: fs, log: (m) => logs.push(m) });
+  readPass(tails, fwd, [tmpBase], { fsImpl: fs, log: (m) => logs.push(m) });
   assert.equal(logs.filter((m) => m.includes('will retry')).length, 1);
+});
+
+test('readPass: a tail whose path is swapped for a symlink outside the roots mid-tail is torn down (TOCTOU re-validation)', () => {
+  const root = tmpBase;
+  const outsideDir = fs.mkdtempSync(path.join(os.tmpdir(), 'toctou-outside-'));
+  const secret = path.join(outsideDir, 'secret.jsonl');
+  fs.writeFileSync(secret, assistantText('should never reach the forwarder') + '\n');
+
+  const realFile = tmpFile();
+  fs.writeFileSync(realFile, assistantText('legit') + '\n');
+
+  const tails = new Map([
+    ['s-toctou', { path: realFile, offset: 0, carry: Buffer.alloc(0), missingLogged: false }],
+  ]);
+  const fwd = fakeForwarder();
+
+  // First pass: legit path, reads fine.
+  readPass(tails, fwd, [root], { fsImpl: fs, log: noopLog });
+  assert.equal(fwd.pushed.length, 1);
+  assert.ok(tails.has('s-toctou'));
+
+  // Swap the tailed path out from under the tailer: replace the real file
+  // with a symlink pointing OUTSIDE the allowlisted root.
+  fs.unlinkSync(realFile);
+  fs.symlinkSync(secret, realFile);
+
+  const logs = [];
+  readPass(tails, fwd, [root], { fsImpl: fs, log: (m) => logs.push(m) });
+
+  assert.equal(tails.has('s-toctou'), false, 'the tail was torn down');
+  assert.deepEqual(fwd.dropped, ['s-toctou']);
+  assert.ok(logs.some((m) => m.includes('torn down')));
+  assert.equal(fwd.pushed.length, 1, 'nothing from the swapped-in path ever reached the forwarder');
+
+  fs.rmSync(outsideDir, { recursive: true, force: true });
 });
 
 // ── runTailer (integration, --once) ─────────────────────────────

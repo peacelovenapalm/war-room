@@ -139,6 +139,39 @@ test("flush(sessionId) force-flushes only that session (tail-off's final flush)"
   assert.equal(calls.length, 2, 'sess-b flushed on stop()');
 });
 
+test('drop(sessionId) flushes buffered lines THEN removes the session — no leaked empty entry (codex review)', async () => {
+  const { calls, impl } = fakeFetch();
+  const fwd = createLineForwarder({
+    url: 'http://server',
+    token: 'tok',
+    machine: 'M',
+    fetchImpl: impl,
+    flushMs: 60_000,
+  });
+
+  fwd.push('sess-a', ['final-a']);
+  assert.equal(fwd.sessionCount(), 1);
+  await fwd.drop('sess-a');
+
+  // The buffered line was flushed before the entry was removed.
+  assert.equal(calls.length, 1);
+  assert.deepEqual(calls[0].body, { sessionId: 'sess-a', lines: ['final-a'] });
+  // The map entry itself is gone — a long-running daemon that tails
+  // thousands of sessions over its lifetime must not retain one empty
+  // entry per session forever.
+  assert.equal(fwd.sessionCount(), 0);
+
+  // A drop() with nothing buffered is still safe and still deletes.
+  fwd.push('sess-b', ['x']);
+  await fwd.flush('sess-b'); // flushed, but NOT dropped — entry still exists
+  assert.equal(fwd.sessionCount(), 1);
+  await fwd.drop('sess-b'); // nothing new to flush, just removes the entry
+  assert.equal(calls.length, 2, 'no extra empty POST from the second drop');
+  assert.equal(fwd.sessionCount(), 0);
+
+  await fwd.stop();
+});
+
 test('stop() performs the final flush of every session and halts the loop', async () => {
   const { calls, impl } = fakeFetch();
   const fwd = createLineForwarder({
