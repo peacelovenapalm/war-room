@@ -16,6 +16,12 @@ export interface BudgetSnapshotClient {
     sevenDayUsedPct: number | null;
     stale: boolean;
     receivedAt: number | null;
+    /** T5 fleet controls (RATE-LIMIT SCHEDULING HINTS, display-only) — Unix
+     *  MS, null/absent when the snapshot itself carried none. Optional (not
+     *  just nullable) so existing fixtures/older wire payloads without the
+     *  field still type-check as an honest "no data", not an error. */
+    fiveHourResetsAt?: number | null;
+    sevenDayResetsAt?: number | null;
   };
   codex: {
     weeklyCap: number | null;
@@ -84,4 +90,51 @@ const AUTOMATION_PAUSE_REASON_WORDS: Record<AutomationPauseReason, string> = {
  *  string for forward-compat with an unknown reason. */
 export function budgetPauseReasonWord(reason: string): string {
   return isAutomationPauseReason(reason) ? AUTOMATION_PAUSE_REASON_WORDS[reason] : reason;
+}
+
+// ── T5 fleet controls: RATE-LIMIT SCHEDULING HINTS (display-only) ───
+//
+// Mirrors server/src/budgetStore.ts's BASE pause thresholds (not the
+// Foreman-perk-raised or hard-ceiling variants — this is a DISPLAY hint,
+// not a gate, so the conservative base numbers are the honest default to
+// warn against). Same hard rule as the rest of this file: informational
+// only, never disables Send.
+
+export const BUDGET_HINT_5H_PCT_THRESHOLD = 70;
+
+/** "2h 15m" / "45m" / "<1m" / "now" — never a bare unformatted ms count. */
+export function formatResetIn(resetsAt: number, now: number = Date.now()): string {
+  const remainingMs = resetsAt - now;
+  if (remainingMs <= 0) return 'now';
+  const minutes = Math.round(remainingMs / 60_000);
+  if (minutes < 1) return '<1m';
+  if (minutes < 60) return `${String(minutes)}m`;
+  const hours = Math.floor(minutes / 60);
+  const mins = minutes % 60;
+  return mins === 0 ? `${String(hours)}h` : `${String(hours)}h ${String(mins)}m`;
+}
+
+/** "5h window 72% — resets in ~2h 15m · queue for reset?" (the "queue for
+ *  reset?" hint only appears at/past the threshold). Honest NO DATA: null
+ *  when the snapshot is stale/absent (never guess at a %), and the resets-in
+ *  clause is simply omitted (not fabricated) when the snapshot carried no
+ *  resetsAt. Codex's weekly heuristic has no resets_at concept at all — no
+ *  hint line for it. */
+export function budgetResetHintLine(
+  snapshot: BudgetSnapshotClient | null,
+  provider: string | undefined,
+  now: number = Date.now(),
+): string | null {
+  if (provider === 'codex') return null;
+  if (!snapshot) return null;
+  const { claude } = snapshot;
+  if (claude.stale || claude.fiveHourUsedPct === null) return null;
+  const pct = Math.round(claude.fiveHourUsedPct);
+  const resetsAt = claude.fiveHourResetsAt;
+  const resetPart =
+    resetsAt !== null && resetsAt !== undefined
+      ? ` — resets in ~${formatResetIn(resetsAt, now)}`
+      : '';
+  const queueHint = pct >= BUDGET_HINT_5H_PCT_THRESHOLD ? ' · queue for reset?' : '';
+  return `5h window ${String(pct)}%${resetPart}${queueHint}`;
 }

@@ -35,6 +35,16 @@ describe('dispatchChipLabel', () => {
     );
     expect(dispatchChipLabel(entry({ status: 'exited', exitCode: 0 }))).toBe('■ EXITED (code 0)');
   });
+
+  it('T5 fleet controls: capped renders the cap duration; queued-budget renders its held reason', () => {
+    expect(dispatchChipLabel(entry({ status: 'capped', timeoutSec: 300 }))).toBe('✗ CAPPED (300s)');
+    expect(dispatchChipLabel(entry({ status: 'capped' }))).toBe('✗ CAPPED'); // no timeoutSec echo — never fabricate a duration
+    expect(
+      dispatchChipLabel(
+        entry({ status: 'queued-budget', reason: 'HELD — daily ceiling 1000 reached, spend 1000' }),
+      ),
+    ).toBe('⏸ HELD — HELD — daily ceiling 1000 reached, spend 1000');
+  });
 });
 
 describe('shouldAutoClear / hasViewableResult', () => {
@@ -46,10 +56,21 @@ describe('shouldAutoClear / hasViewableResult', () => {
     expect(shouldAutoClear('exited', 60_000)).toBe(true);
   });
 
+  it('T5 fleet controls: queued-budget (HELD) never auto-clears — sticky like denied; capped clears like exited', () => {
+    expect(shouldAutoClear('queued-budget', 1_000_000)).toBe(false);
+    expect(shouldAutoClear('capped', 59_999)).toBe(false);
+    expect(shouldAutoClear('capped', 60_000)).toBe(true);
+  });
+
   it('only exited entries are viewable', () => {
     expect(hasViewableResult({ status: 'exited' })).toBe(true);
     expect(hasViewableResult({ status: 'denied' })).toBe(false);
     expect(hasViewableResult({ status: 'ringing' })).toBe(false);
+  });
+
+  it('T5 fleet controls: capped is ALSO viewable (the runner reports a resultTail alongside a cap)', () => {
+    expect(hasViewableResult({ status: 'capped' })).toBe(true);
+    expect(hasViewableResult({ status: 'queued-budget' })).toBe(false);
   });
 });
 

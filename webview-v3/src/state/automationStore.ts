@@ -29,6 +29,9 @@ export function reduceDispatchEntries(
       pid: message.pid,
       exitCode: message.exitCode,
       resultTail: message.resultTail,
+      // T5 fleet controls — lets a CAPPED chip render "(Ns)" without a
+      // second round trip.
+      timeoutSec: message.timeoutSec,
       requestId: message.requestId,
     },
     now,

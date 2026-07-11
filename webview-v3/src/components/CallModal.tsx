@@ -6,6 +6,7 @@ import {
   DISPATCH_EFFORT_VALUES,
   DISPATCH_MODEL_OPTIONS,
   DISPATCH_PROMPT_MAX_CHARS,
+  DISPATCH_TIMEOUT_MAX_SEC,
   DISPATCH_UI_PROVIDERS,
   type DispatchEffort,
   type DispatchMachine,
@@ -15,7 +16,7 @@ import {
   splitCwdIntoRootSubpath,
   type SubpathJoinResult,
 } from '../net/dispatchFacts';
-import { budgetChipLabel, type BudgetSnapshotClient } from '../state/budget';
+import { budgetChipLabel, budgetResetHintLine, type BudgetSnapshotClient } from '../state/budget';
 import { Modal } from './Modal';
 
 const REFRESH_INTERVAL_MS = 10_000;
@@ -55,6 +56,10 @@ export function CallModal({ isOpen, onClose, prefill, send, onSend, budget }: Ca
   const [prompt, setPrompt] = useState('');
   const [model, setModel] = useState('');
   const [effort, setEffort] = useState<DispatchEffort | ''>('');
+  // T5 fleet controls, PER-DISPATCH TIME CAP — free text so an empty field
+  // reads unambiguously as "no cap" (current behavior), never a fabricated
+  // default number.
+  const [timeoutSecInput, setTimeoutSecInput] = useState('');
   const [pendingPrefillCwd, setPendingPrefillCwd] = useState('');
 
   useEffect(() => {
@@ -99,6 +104,7 @@ export function CallModal({ isOpen, onClose, prefill, send, onSend, budget }: Ca
       setPrompt(prefill?.prompt ?? '');
       setModel('');
       setEffort('');
+      setTimeoutSecInput('');
       setPendingPrefillCwd(prefill?.cwd ?? '');
     }
   }
@@ -128,8 +134,25 @@ export function CallModal({ isOpen, onClose, prefill, send, onSend, budget }: Ca
       : { ok: false, reason: 'no project chosen' };
   const showEffort = provider !== '' && DISPATCH_EFFORT_PROVIDERS.includes(provider);
   const modelOptions = provider !== '' ? (DISPATCH_MODEL_OPTIONS[provider] ?? []) : [];
+  // T5 fleet controls, PER-DISPATCH TIME CAP — empty means no cap; anything
+  // else must parse as a positive integer within bounds, or Send stays
+  // disabled with an honest inline reason (never silently dropped/clamped).
+  const timeoutTrimmed = timeoutSecInput.trim();
+  const timeoutParsed = timeoutTrimmed === '' ? undefined : Number(timeoutTrimmed);
+  const timeoutValid =
+    timeoutTrimmed === '' ||
+    (Number.isInteger(timeoutParsed) &&
+      timeoutParsed !== undefined &&
+      timeoutParsed > 0 &&
+      timeoutParsed <= DISPATCH_TIMEOUT_MAX_SEC);
   const canSubmit =
-    machine.trim() !== '' && provider !== '' && joined.ok && prompt.trim() !== '' && remaining >= 0;
+    machine.trim() !== '' &&
+    provider !== '' &&
+    joined.ok &&
+    prompt.trim() !== '' &&
+    remaining >= 0 &&
+    timeoutValid;
+  const resetHint = budgetResetHintLine(budget, provider || undefined);
 
   const handleSubmit = () => {
     // canSubmit already guarantees provider !== '' (its own definition
@@ -150,6 +173,9 @@ export function CallModal({ isOpen, onClose, prefill, send, onSend, budget }: Ca
       requestId,
       ...(model.trim() !== '' ? { model: model.trim() } : {}),
       ...(showEffort && effort !== '' ? { effort } : {}),
+      ...(timeoutTrimmed !== '' && timeoutParsed !== undefined
+        ? { timeoutSec: timeoutParsed }
+        : {}),
     });
     onSend(machine, 'dispatch', requestId);
     onClose();
@@ -269,6 +295,23 @@ export function CallModal({ isOpen, onClose, prefill, send, onSend, budget }: Ca
           )}
 
           <label className="field">
+            <span className="field__label">TIME CAP (optional, seconds)</span>
+            <input
+              type="text"
+              inputMode="numeric"
+              value={timeoutSecInput}
+              onChange={(e) => setTimeoutSecInput(e.target.value)}
+              placeholder="no cap"
+              data-testid="call-timeout-input"
+            />
+            <span className={timeoutValid ? 'field__hint' : 'field__hint field__hint--warn'}>
+              {timeoutValid
+                ? 'runner SIGTERMs then SIGKILLs at the cap — absent means no cap'
+                : `⚠ enter a whole number of seconds, 1–${String(DISPATCH_TIMEOUT_MAX_SEC)}`}
+            </span>
+          </label>
+
+          <label className="field">
             <span className="field__label">PROMPT</span>
             <textarea
               value={prompt}
@@ -289,6 +332,11 @@ export function CallModal({ isOpen, onClose, prefill, send, onSend, budget }: Ca
             >
               {budgetChipLabel(budget, provider || undefined)}
             </span>
+            {resetHint && (
+              <span className="modal__muted" data-testid="call-modal-reset-hint">
+                {resetHint}
+              </span>
+            )}
             <button type="button" className="verb" onClick={onClose}>
               CANCEL
             </button>

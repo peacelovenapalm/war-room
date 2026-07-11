@@ -67,6 +67,10 @@ export const DISPATCH_STATUSES = [
   'expired',
   'exited',
   'killed',
+  // T5 fleet controls: capped (runner-timer-ended, distinct from
+  // killed/exited) and queued-budget (held, never sent to a runner).
+  'capped',
+  'queued-budget',
 ] as const;
 export type DispatchStatusValue = (typeof DISPATCH_STATUSES)[number];
 
@@ -74,6 +78,10 @@ export type DispatchActionValue = 'dispatch' | 'focus';
 
 /** Mirrors server/src/dispatchStore.ts DISPATCH_PROMPT_MAX_CHARS. */
 export const DISPATCH_PROMPT_MAX_CHARS = 4000;
+
+/** Mirrors server/src/dispatchStore.ts DISPATCH_TIMEOUT_MAX_SEC (T5 fleet
+ *  controls) — client-side hint only, the server validates for real. */
+export const DISPATCH_TIMEOUT_MAX_SEC = 3600;
 
 /** Mirrors server/src/dispatchStore.ts DISPATCH_EFFORT_VALUES. */
 export const DISPATCH_EFFORT_VALUES = ['low', 'medium', 'high', 'xhigh', 'max'] as const;
@@ -123,6 +131,8 @@ export const DISPATCH_STATUS_CHIPS: Record<DispatchStatusValue, DispatchStatusSp
   expired: { glyph: '○', word: 'EXPIRED' },
   exited: { glyph: '■', word: 'EXITED' },
   killed: { glyph: '✕', word: 'KILLED' },
+  capped: { glyph: '✗', word: 'CAPPED' },
+  'queued-budget': { glyph: '⏸', word: 'HELD' },
 };
 
 /** Mirrors core's DispatchUpdate broadcast, plus a client receipt timestamp
@@ -138,6 +148,10 @@ export interface DispatchEntry {
   pid?: number;
   exitCode?: number;
   resultTail?: string;
+  /** T5 fleet controls, PER-DISPATCH TIME CAP — echo of the request's
+   *  timeoutSec, present only when the request carried one. Lets a
+   *  `capped` chip render "(Ns)" without a second round trip. */
+  timeoutSec?: number;
   /** Echo of the requestId THIS client (or another) sent with its
    *  dispatchRequest — the send-failure detector's exact correlation key.
    *  Absent for server-originated dispatches (chains, standing orders). */
@@ -145,25 +159,41 @@ export interface DispatchEntry {
   receivedAt: number;
 }
 
-/** Only `exited` entries carry a resultTail worth viewing. */
+/** `exited` and `capped` (T5 fleet controls — the runner reports a
+ *  resultTail alongside a cap, same as any other terminal dispatch) entries
+ *  carry a resultTail worth viewing. */
 export function hasViewableResult(entry: Pick<DispatchEntry, 'status'>): boolean {
-  return entry.status === 'exited';
+  return entry.status === 'exited' || entry.status === 'capped';
 }
 
 /** Pure auto-clear rule: RINGING/ANSWERED/DENIED never auto-clear;
- *  EXPIRED/EXITED/KILLED clear once older than DISPATCH_AUTOCLEAR_MS. */
+ *  EXPIRED/EXITED/KILLED/CAPPED clear once older than DISPATCH_AUTOCLEAR_MS.
+ *  QUEUED-BUDGET (T5 fleet controls) is sticky like DENIED — it needs an
+ *  explicit release (or the date-rollover release), never a silent
+ *  disappearance while still genuinely held. */
 export function shouldAutoClear(status: DispatchStatusValue, ageMs: number): boolean {
-  if (status === 'ringing' || status === 'answered' || status === 'denied') return false;
+  if (
+    status === 'ringing' ||
+    status === 'answered' ||
+    status === 'denied' ||
+    status === 'queued-budget'
+  ) {
+    return false;
+  }
   return ageMs >= DISPATCH_AUTOCLEAR_MS;
 }
 
 /** One line of tray chip text, e.g. "◎ RINGING", "⊘ DENIED — reason",
- *  "■ EXITED (code 0)". */
+ *  "■ EXITED (code 0)", "✗ CAPPED (300s)", "⏸ HELD — reason". */
 export function dispatchChipLabel(
-  entry: Pick<DispatchEntry, 'status' | 'reason' | 'exitCode'>,
+  entry: Pick<DispatchEntry, 'status' | 'reason' | 'exitCode' | 'timeoutSec'>,
 ): string {
   const { glyph, word } = DISPATCH_STATUS_CHIPS[entry.status];
   if (entry.status === 'denied' && entry.reason) return `${glyph} ${word} — ${entry.reason}`;
+  if (entry.status === 'queued-budget' && entry.reason) return `${glyph} ${word} — ${entry.reason}`;
+  if (entry.status === 'capped' && entry.timeoutSec !== undefined) {
+    return `${glyph} ${word} (${String(entry.timeoutSec)}s)`;
+  }
   if (entry.status === 'exited' && entry.exitCode !== undefined) {
     return `${glyph} ${word} (code ${String(entry.exitCode)})`;
   }

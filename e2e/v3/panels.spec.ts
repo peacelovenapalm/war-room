@@ -167,6 +167,9 @@ interface StaticHost {
    *  OPS REVIEW panel's FOCUS/DISPATCH-NUDGE proposals fire the exact
    *  same dispatchRequest shape CallModal/AgentDrawer already send. */
   receivedMessages: Record<string, unknown>[];
+  /** HTTP POSTs the mock host received (path only) — used to assert the
+   *  T5 fleet controls RELEASE button fires the real route. */
+  receivedHttpPosts: { path: string }[];
 }
 
 async function getFreePort(): Promise<number> {
@@ -195,6 +198,15 @@ async function serveV3Dist(
     /** T3 rung 3: override REST_JSON's default AUTO-OFF fixture, e.g. an
      *  enabled whitelist with real receipts. */
     autoStatusOverride?: unknown;
+    /** T5 fleet controls — opts a test INTO a live GET /api/dispatch/machines
+     *  response (the suite default deliberately leaves it unmocked so the
+     *  CALL modal's honest "NO RUNNERS" gate is exercised for real — see
+     *  file header). Only set this for a test that needs the CALL modal's
+     *  provider form to actually render. */
+    dispatchMachinesOverride?: unknown;
+    /** T5 fleet controls — extra dispatchUpdate broadcasts pushed right
+     *  after the webviewReady script, to seed CAPPED/HELD tray chips. */
+    extraDispatchUpdates?: object[];
   } = {},
 ): Promise<StaticHost> {
   if (!fs.existsSync(path.join(V3_DIST, 'index.html'))) {
@@ -202,6 +214,7 @@ async function serveV3Dist(
   }
   const port = await getFreePort();
   const receivedMessages: Record<string, unknown>[] = [];
+  const receivedHttpPosts: { path: string }[] = [];
   const killRequestId = 'kill-req-1';
   const server = http.createServer((req, res) => {
     const requestPath = decodeURIComponent((req.url ?? '/').split('?')[0]);
@@ -252,6 +265,21 @@ async function serveV3Dist(
     if (requestPath === '/api/ops/auto' && options.autoStatusOverride !== undefined) {
       res.writeHead(200, { 'Content-Type': 'application/json' });
       res.end(JSON.stringify(options.autoStatusOverride));
+      return;
+    }
+    if (
+      requestPath === '/api/dispatch/machines' &&
+      options.dispatchMachinesOverride !== undefined
+    ) {
+      res.writeHead(200, { 'Content-Type': 'application/json' });
+      res.end(JSON.stringify(options.dispatchMachinesOverride));
+      return;
+    }
+    // T5 fleet controls, DAILY FLEET SPEND CEILING — the explicit override.
+    if (/^\/api\/dispatch\/[^/]+\/release$/.test(requestPath) && req.method === 'POST') {
+      receivedHttpPosts.push({ path: requestPath });
+      res.writeHead(200, { 'Content-Type': 'application/json' });
+      res.end(JSON.stringify({ ok: true }));
       return;
     }
     if (requestPath in REST_JSON) {
@@ -319,6 +347,9 @@ async function serveV3Dist(
             },
           ];
           for (const serverMessage of script) socket.send(JSON.stringify(serverMessage));
+          for (const extra of options.extraDispatchUpdates ?? []) {
+            socket.send(JSON.stringify(extra));
+          }
         } else {
           receivedMessages.push(message);
         }
@@ -334,6 +365,7 @@ async function serveV3Dist(
   return {
     url: `http://127.0.0.1:${String(port)}`,
     receivedMessages,
+    receivedHttpPosts,
     close: () =>
       new Promise<void>((resolve, reject) => {
         for (const client of wss.clients) client.terminate();
@@ -741,6 +773,96 @@ test.describe('stage-3 panel ports (desktop chrome model)', () => {
       const second = receipts.nth(1);
       await expect(second).toHaveAttribute('data-outcome', 'failed');
       await expect(second).toContainText('ringing cap reached');
+    } finally {
+      await context.close();
+      await host.close();
+    }
+  });
+
+  test('T5 fleet controls: CAPPED and HELD dispatch tray chips render honestly, RELEASE fires the real route, and the CALL modal shows the rate-limit reset hint', async ({
+    browser,
+  }) => {
+    const host = await serveV3Dist({
+      dispatchMachinesOverride: [
+        { machine: 'MACBOOK', providers: ['claude'], roots: ['/Users/dev/war-room'], focus: false },
+      ],
+      extraDispatchUpdates: [
+        {
+          type: 'dispatchUpdate',
+          id: 'd-capped',
+          action: 'dispatch',
+          status: 'capped',
+          machine: 'MACBOOK',
+          provider: 'claude',
+          promptPreview: 'runs too long',
+          timeoutSec: 300,
+        },
+        {
+          type: 'dispatchUpdate',
+          id: 'd-held',
+          action: 'dispatch',
+          status: 'queued-budget',
+          machine: 'MACBOOK',
+          provider: 'claude',
+          promptPreview: 'held for budget',
+          reason: 'HELD — daily ceiling 1000 reached, spend 1200',
+        },
+        // A fresher budgetUpdate than the default script's — carries a real
+        // fiveHourResetsAt so the CALL modal's hint line has data to render.
+        {
+          type: 'budgetUpdate',
+          claude: {
+            fiveHourUsedPct: 75,
+            sevenDayUsedPct: 20,
+            stale: false,
+            receivedAt: Date.now(),
+            fiveHourResetsAt: Date.now() + 45 * 60_000,
+          },
+          codex: { weeklyCap: null, weeklyUsed: 0, estimatedPct: null },
+        },
+      ],
+    });
+    const context = await browser.newContext({ viewport: VIEWPORT });
+    try {
+      const page = await context.newPage();
+      await page.goto(`${host.url}/`);
+      await expect(page.getByTestId('hud-connection')).toHaveText('● LIVE', { timeout: 20_000 });
+
+      const tray = page.getByTestId('dispatch-tray');
+      await expect(tray).toBeVisible();
+      const chips = page.getByTestId('dispatch-chip');
+      await expect(chips).toHaveCount(2);
+      await expect(tray).toContainText('✗ CAPPED (300s)');
+      await expect(tray).toContainText('⏸ HELD — HELD — daily ceiling 1000 reached, spend 1200');
+
+      // RELEASE fires the real override route — never an optimistic local
+      // flip (the chip stays HELD here since the mock host doesn't also
+      // broadcast the resulting 'ringing' dispatchUpdate back).
+      const releaseButton = page.getByTestId('dispatch-chip-release');
+      await expect(releaseButton).toBeVisible();
+      await releaseButton.click();
+      await expect
+        .poll(() => host.receivedHttpPosts.some((p) => p.path === '/api/dispatch/d-held/release'))
+        .toBe(true);
+
+      // CALL modal: with machines mocked, the provider form actually
+      // renders (unlike the suite's default NO-RUNNERS gate test above) —
+      // the real rate-limit reset hint next to the budget chip.
+      await page.getByTestId('dock-call').click();
+      await expect(page.getByTestId('call-modal')).toBeVisible();
+      await page.locator('select').first().selectOption('MACBOOK');
+      const providerSelect = page.locator('select').nth(1);
+      await providerSelect.selectOption('claude');
+      await expect(page.getByTestId('call-modal-reset-hint')).toContainText('5h window 75%');
+      await expect(page.getByTestId('call-modal-reset-hint')).toContainText('resets in ~45m');
+      await expect(page.getByTestId('call-modal-reset-hint')).toContainText('queue for reset?');
+
+      // PER-DISPATCH TIME CAP field — an invalid value disables Send with
+      // an honest inline reason, never silently dropped/clamped.
+      await page.getByTestId('call-timeout-input').fill('-5');
+      await expect(page.getByTestId('call-submit')).toBeDisabled();
+      await page.getByTestId('call-timeout-input').fill('300');
+      await expect(page.getByTestId('call-submit')).toBeDisabled(); // still needs project + prompt
     } finally {
       await context.close();
       await host.close();

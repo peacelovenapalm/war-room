@@ -17,13 +17,23 @@ export interface DispatchTrayProps {
   sendFailures: SendFailure[];
   onDismiss: (id: string) => void;
   onView: (entry: DispatchEntry) => void;
+  /** T5 fleet controls, DAILY FLEET SPEND CEILING — the explicit human
+   *  override for a HELD ('queued-budget') entry. */
+  onRelease: (id: string) => void;
 }
 
 /** Dispatch lifecycle tray (KICKOFF-v3.1 stage-3 port): one chip per
- *  in-flight or recently-terminal dispatch. GLYPH + WORD only — DENIED is
- *  sticky (dismiss only); every other terminal status auto-clears.
- *  Bottom-left strip, mirrors PinDock's always-visible placement. */
-export function DispatchTray({ entries, sendFailures, onDismiss, onView }: DispatchTrayProps) {
+ *  in-flight or recently-terminal dispatch. GLYPH + WORD only — DENIED and
+ *  HELD ('queued-budget', T5 fleet controls) are sticky (dismiss/release
+ *  only); every other terminal status auto-clears. Bottom-left strip,
+ *  mirrors PinDock's always-visible placement. */
+export function DispatchTray({
+  entries,
+  sendFailures,
+  onDismiss,
+  onView,
+  onRelease,
+}: DispatchTrayProps) {
   const [now, setNow] = useState(() => Date.now());
   useEffect(() => {
     const interval = setInterval(() => {
@@ -72,6 +82,20 @@ export function DispatchTray({ entries, sendFailures, onDismiss, onView }: Dispa
                 }}
               >
                 ✕
+              </button>
+            )}
+            {entry.status === 'queued-budget' && (
+              <button
+                type="button"
+                className="dispatch-chip__release"
+                title="Release — send to the runner now, bypassing the daily ceiling for this one request"
+                data-testid="dispatch-chip-release"
+                onClick={(e) => {
+                  e.stopPropagation();
+                  onRelease(entry.id);
+                }}
+              >
+                RELEASE
               </button>
             )}
           </div>

@@ -37,6 +37,22 @@ describe('reduceDispatchEntries', () => {
     ]);
     expect(reduceDispatchEntries(entries, { type: 'agentClosed', id: 1 })).toBe(entries);
   });
+
+  it('T5 fleet controls: threads timeoutSec through from the wire (a CAPPED chip needs it to render "(Ns)")', () => {
+    const entries = reduceDispatchEntries(
+      [],
+      {
+        type: 'dispatchUpdate',
+        id: 'd-capped',
+        action: 'dispatch',
+        status: 'capped',
+        machine: 'MACBOOK',
+        timeoutSec: 300,
+      },
+      1_000,
+    );
+    expect(entries[0].timeoutSec).toBe(300);
+  });
 });
 
 describe('reduceChainRuns / reduceChainRunReceivedAt', () => {

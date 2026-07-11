@@ -974,6 +974,12 @@ export default function App() {
           setDispatchEntries((previous) => previous.filter((e) => e.id !== id));
         }}
         onView={setViewingResult}
+        onRelease={(id) => {
+          // T5 fleet controls: the real override — dispatchStore.releaseHeld
+          // itself re-broadcasts the record as 'ringing', so no optimistic
+          // local update here; the WS dispatchUpdate is the honest source.
+          void fetch(`/api/dispatch/${id}/release`, { method: 'POST' });
+        }}
       />
       {/* Compact-dock half of the desktop chrome model — the cross-platform
           affordance (works on phone too, where PropHotspots doesn't apply). */}
