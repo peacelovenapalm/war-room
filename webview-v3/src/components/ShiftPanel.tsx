@@ -1,6 +1,7 @@
 import { useEffect, useState } from 'react';
 
 import { formatAge } from '../state/crisis';
+import { SEVERITY_GLYPHS } from '../state/opsReview';
 import {
   compactTokens,
   EFFICIENCY_WORDS,
@@ -144,6 +145,26 @@ export function ShiftPanel({ isOpen, onClose }: ShiftPanelProps) {
             Counted from real events today: hook turn-ends, JSONL token usage, poller
             blocked-episodes. Lower spend is always the better score.
           </p>
+          {snapshot?.opsReview && (
+            <div className="shift-ops-line" data-testid="shift-ops-line">
+              {snapshot.opsReview.topFinding ? (
+                <>
+                  <span>
+                    {SEVERITY_GLYPHS[snapshot.opsReview.topFinding.severity].glyph}{' '}
+                    {SEVERITY_GLYPHS[snapshot.opsReview.topFinding.severity].word}
+                  </span>
+                  <span className="modal__muted"> · {snapshot.opsReview.topFinding.summary}</span>
+                </>
+              ) : (
+                <span className="modal__muted">✓ ops: all clear</span>
+              )}
+              <span className="modal__muted">
+                {' '}
+                ({snapshot.opsReview.counts.alert} alert · {snapshot.opsReview.counts.warn} warn ·{' '}
+                {snapshot.opsReview.counts.info} info — see OPS REVIEW)
+              </span>
+            </div>
+          )}
           {snapshot?.yesterday && <YesterdayCard report={snapshot.yesterday} />}
         </>
       )}

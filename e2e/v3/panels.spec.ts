@@ -69,6 +69,27 @@ const REST_JSON: Record<string, unknown> = {
       generatedAt: '2026-07-10T00:00:00Z',
     },
     yesterday: null,
+    opsReview: {
+      generatedAt: '2026-07-10T00:00:00Z',
+      counts: { info: 0, warn: 1, alert: 0 },
+      topFinding: { summary: 'agent 2 blocked 5m on MACBOOK', severity: 'warn' },
+    },
+  },
+  '/api/ops/review': {
+    generatedAt: '2026-07-10T00:00:00Z',
+    findings: [
+      {
+        id: 'blocked-age-2',
+        kind: 'blocked-age',
+        severity: 'warn',
+        summary: 'agent 2 blocked 5m on MACBOOK',
+        detail: 'waitingFor: Approve: apply migration 0042? (y/n)',
+        receipts: [
+          { label: 'agentId', value: '2' },
+          { label: 'machine', value: 'MACBOOK' },
+        ],
+      },
+    ],
   },
   '/api/contracts': [
     {
@@ -247,6 +268,7 @@ test.describe('stage-3 panel ports (desktop chrome model)', () => {
         'contracts',
         'shift',
         'briefing',
+        'ops',
         'settings',
         'debug',
         'help',
@@ -279,10 +301,29 @@ test.describe('stage-3 panel ports (desktop chrome model)', () => {
       await expect(page.getByTestId('debug-agent-row')).toHaveCount(1);
       await page.getByTestId('modal-close').click();
 
-      // SHIFT: real /api/shift scorecard.
+      // SHIFT: real /api/shift scorecard, plus the T3 Ops Advisor's
+      // compact opsReview fold (top finding + severity counts).
       await page.getByTestId('dock-shift').click();
       await expect(page.getByTestId('shift-panel')).toContainText('4 completed');
       await expect(page.getByTestId('shift-efficiency')).toContainText('LEAN');
+      await expect(page.getByTestId('shift-ops-line')).toContainText(
+        'agent 2 blocked 5m on MACBOOK',
+      );
+      await expect(page.getByTestId('shift-ops-line')).toContainText('1 warn');
+      await page.getByTestId('modal-close').click();
+
+      // OPS REVIEW (T3 self-healing ladder, rung 1): real /api/ops/review
+      // findings list, receipts expand per-row (one-tap-real), shape+label
+      // severity glyph (colorblind rule).
+      await page.getByTestId('dock-ops').click();
+      await expect(page.getByTestId('ops-review-panel')).toBeVisible();
+      const finding = page.getByTestId('ops-finding').first();
+      await expect(finding).toContainText('WARN');
+      await expect(finding).toContainText('agent 2 blocked 5m on MACBOOK');
+      await expect(page.getByTestId('ops-finding-detail')).toHaveCount(0); // collapsed by default
+      await page.getByTestId('ops-finding-toggle').first().click();
+      await expect(page.getByTestId('ops-finding-detail')).toBeVisible();
+      await expect(page.getByTestId('ops-finding-receipts')).toContainText('agentId: 2');
       await page.getByTestId('modal-close').click();
 
       // BRIEFING: real /api/briefing todo + gate.

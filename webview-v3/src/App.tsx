@@ -14,6 +14,7 @@ import { DispatchTray } from './components/DispatchTray';
 import { FloorFeed } from './components/FloorFeed';
 import { HelpModal } from './components/HelpModal';
 import { HudStrip, type ViewMode } from './components/HudStrip';
+import { OpsReviewPanel } from './components/OpsReviewPanel';
 import { type DockPanelKind, PanelDock } from './components/PanelDock';
 import { PinDock } from './components/PinDock';
 import { PropHotspots } from './components/PropHotspots';
@@ -1029,6 +1030,7 @@ export default function App() {
         onClose={closePanel}
         onDispatchContract={handleDispatchContract}
       />
+      <OpsReviewPanel isOpen={openPanel === 'ops'} onClose={closePanel} />
       {viewingResult && (
         <div className="modal-backdrop" onClick={() => setViewingResult(null)}>
           <div className="modal" role="dialog" onClick={(e) => e.stopPropagation()}>

@@ -6,7 +6,8 @@ export type DockPanelKind =
   | 'automation'
   | 'contracts'
   | 'shift'
-  | 'briefing';
+  | 'briefing'
+  | 'ops';
 
 export interface PanelDockProps {
   onOpen: (kind: DockPanelKind) => void;
@@ -20,7 +21,7 @@ interface DockEntry {
 
 /** Every panel, always — the dock is the cross-platform affordance (works
  *  on phone, where the world has no free camera play and prop hotspots in
- *  PropHotspots.tsx don't apply). HELP/SETTINGS/DEBUG have no in-world
+ *  PropHotspots.tsx don't apply). HELP/SETTINGS/DEBUG/OPS have no in-world
  *  physical prop and live HERE ONLY; the other five are reachable both
  *  from their prop hotspot (desktop) and here (always). Collapsed strip,
  *  desktop chrome model's "compact dock" half. */
@@ -30,6 +31,7 @@ const ENTRIES: DockEntry[] = [
   { kind: 'contracts', glyph: '▤', label: 'CONTRACTS' },
   { kind: 'shift', glyph: '▦', label: 'SHIFT' },
   { kind: 'briefing', glyph: '▥', label: 'BRIEFING' },
+  { kind: 'ops', glyph: '◈', label: 'OPS REVIEW' },
   { kind: 'settings', glyph: '⚙', label: 'SETTINGS' },
   { kind: 'debug', glyph: '⌗', label: 'DEBUG' },
   { kind: 'help', glyph: '?', label: 'HELP' },

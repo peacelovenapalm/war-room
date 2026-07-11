@@ -3,6 +3,8 @@
  * webview-ui/src/shiftReport.ts (frozen fallback, read-only for WS-A).
  */
 
+import type { OpsReviewSummary } from './opsReview';
+
 export interface ShiftReport {
   date: string;
   turnsCompleted: number;
@@ -21,10 +23,13 @@ export interface ShiftReport {
 }
 
 /** GET /api/shift response shape: today's live scorecard + yesterday's
- *  closed ledger. */
+ *  closed ledger, plus the T3 Ops Advisor's compact fold ("folded into
+ *  SHIFT" — the full receipt-laden list lives at GET /api/ops/review /
+ *  the OPS REVIEW panel). */
 export interface ShiftSnapshot {
   today: ShiftReport;
   yesterday: ShiftReport | null;
+  opsReview: OpsReviewSummary;
 }
 
 export function compactTokens(n: number): string {
