@@ -226,6 +226,52 @@ describe('POST /api/agents/output', () => {
     outputRingStore.evict('agent', String(agentId));
   });
 
+  it('accepts a maximally escape-dense batch at the content caps — the old 2MB bodyLimit left almost no headroom for it (codex review fix)', async () => {
+    const config = await server.start({ embedded: false, store });
+    const machine = uniqueMachine('M');
+    const agentId = newAgentId();
+    const sessionId = crypto.randomUUID();
+    store.set(agentId, makeAgent(agentId, sessionId, machine));
+
+    // Quote/backslash-dense content: JSON.stringify escapes every `\` and
+    // `"` into two characters, so wrapping an ALREADY near-maximally-
+    // escaped line as one more string element (the tailer's actual
+    // { sessionId, lines: [...] } envelope) approaches — but, by
+    // construction, can never quite reach — 2x the raw content size. Four
+    // lines right at MAX_AGENT_OUTPUT_LINE_BYTES (256KB) summing to just
+    // under MAX_AGENT_OUTPUT_TOTAL_LINE_BYTES (1MB) is the worst case
+    // parseAgentOutputBody's own caps allow, and its wire size lands
+    // within a few hundred bytes of the OLD 2MB Fastify bodyLimit — a
+    // razor-thin margin a slightly different escape mix (real transcript
+    // content, not this idealized construction) could easily cross. The
+    // new 4MB cap gives real headroom instead.
+    const escapeHeavy = '\\"'.repeat(65_518); // pushes one line right up to ~262KB
+    const line = JSON.stringify({
+      type: 'assistant',
+      message: { content: [{ type: 'text', text: escapeHeavy }] },
+    });
+    expect(Buffer.byteLength(line, 'utf8')).toBeLessThan(262_144); // under MAX_AGENT_OUTPUT_LINE_BYTES
+    const lines = Array.from({ length: 4 }, () => line);
+    const rawBytes = lines.reduce((sum, l) => sum + Buffer.byteLength(l, 'utf8'), 0);
+    expect(rawBytes).toBeLessThan(1_048_576); // under MAX_AGENT_OUTPUT_TOTAL_LINE_BYTES
+
+    const wireBody = JSON.stringify({ sessionId, lines });
+    const wireBytes = Buffer.byteLength(wireBody, 'utf8');
+    // Within a few hundred bytes of the OLD 2MB cap (demonstrates how thin
+    // that margin was) while comfortably inside the NEW 4MB one.
+    expect(wireBytes).toBeGreaterThan(2 * 1024 * 1024 - 10_000);
+    expect(wireBytes).toBeLessThan(4 * 1024 * 1024);
+
+    const res = await postOutput(
+      config.port,
+      { sessionId, lines },
+      { token: config.token, machine },
+    );
+    expect(res.status).toBe(200);
+    expect(await res.json()).toEqual({ ok: true });
+    outputRingStore.evict('agent', String(agentId));
+  });
+
   it('unresolvable session is a 2xx deny — no ring entry created', async () => {
     const config = await server.start({ embedded: false, store });
     const machine = uniqueMachine('M');

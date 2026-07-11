@@ -70,8 +70,12 @@ export const MAX_AGENT_OUTPUT_TOTAL_LINE_BYTES = 1_048_576; // 1MB
  *  overhead (quoting/escaping every line, plus the sessionId/array
  *  syntax); Fastify 413s BEFORE this route's own parseAgentOutputBody caps
  *  ever run. Deliberately NOT the process-wide MAX_HOOK_BODY_SIZE (64KB) —
- *  that stays the default for every other route. */
-export const MAX_AGENT_OUTPUT_BODY_BYTES = 2 * 1024 * 1024; // 2MB
+ *  that stays the default for every other route. 4MB = 2x headroom over
+ *  the 1MB raw-lines cap for worst-case JSON escaping (codex review: a
+ *  transcript line dense with quotes/backslashes/control chars can nearly
+ *  double in size once escaped into a JSON string; 2MB left too little
+ *  margin for a genuinely worst-case 1MB batch). */
+export const MAX_AGENT_OUTPUT_BODY_BYTES = 4 * 1024 * 1024; // 4MB
 /** Defensive cap on the remote transcript-path retention map (registerHookRoute) —
  *  bounds a runaway/malicious remote's ability to grow server memory via
  *  distinct (machine, sessionId) pairs. Oldest entry evicted first. */
