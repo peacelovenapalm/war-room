@@ -371,13 +371,22 @@ function readResultTail(logPath) {
 function triggerCap(cfg, id, state, deps) {
   const entry = state.children.get(id);
   if (!entry || entry.capped || entry.killRequested) return;
-  entry.capped = true;
+  // Codex fix round finding 5: mark capped ONLY after the TERM actually
+  // delivered. kill() returning false (or throwing) means the child is
+  // already dead/exiting — its natural 'exited' report must stand; marking
+  // capped first would mislabel a natural exit that raced the cap timer.
+  let delivered = false;
   try {
-    entry.child.kill('SIGTERM');
-    audit(cfg, 'cap-signal-sent', { id, pid: entry.child.pid });
+    delivered = entry.child.kill('SIGTERM');
   } catch (err) {
     audit(cfg, 'cap-signal-error', { id, pid: entry.child.pid, reason: shortErr(err) });
   }
+  if (!delivered) {
+    audit(cfg, 'cap-signal-undelivered', { id, pid: entry.child.pid });
+    return;
+  }
+  entry.capped = true;
+  audit(cfg, 'cap-signal-sent', { id, pid: entry.child.pid });
   const graceMs = deps.killGraceMs ?? KILL_GRACE_MS;
   const escalationTimer = setTimeout(() => {
     const stillRunning = state.children.get(id);

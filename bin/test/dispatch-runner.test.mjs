@@ -913,9 +913,11 @@ test('T5 cap: fires SIGTERM through the SAME live-children registry, escalates t
       // Deliberately ignores SIGTERM (never emits 'exit' on its own) so the
       // escalation path is actually exercised — the SAME child object each
       // time, proving both signals go through the ONE registry entry, never
-      // a second/raw path.
+      // a second/raw path. Returns true = "delivered" (node's real kill()
+      // contract; triggerCap only marks capped on a delivered TERM).
       child.kill = (signal) => {
         signals.push(signal);
+        return true;
       };
       return child;
     },
@@ -1019,6 +1021,7 @@ test("T5 cap: a concurrent, un-capped dispatch is entirely unaffected by another
       child.stderr = new EventEmitter();
       child.kill = (signal) => {
         child.killedWith = signal;
+        return true; // delivered — triggerCap only marks capped on a delivered TERM
       };
       children[child.pid] = child;
       return child; // neither auto-exits — this test drives B explicitly
@@ -1045,6 +1048,56 @@ test("T5 cap: a concurrent, un-capped dispatch is entirely unaffected by another
       (c) => c.url === '/api/dispatch/req-cap-b/status' && c.body.event === 'exited',
     ) !== undefined,
     true,
+  );
+});
+
+test('T5 cap (codex fix round finding 5): a cap timer whose SIGTERM does NOT deliver (child already exiting) never marks capped — the natural "exited" report stands', async () => {
+  const item = {
+    id: 'req-cap-race',
+    action: 'dispatch',
+    provider: 'claude',
+    cwd: tmpDir,
+    prompt: 'exits as the cap fires',
+    timeoutSec: 0.03, // 30ms
+  };
+  const { server, captured, port } = await startStubServer(stubHandler({ pending: [item] }));
+  const cfg = baseCfg(port);
+  const allowlist = { providers: ['claude'], roots: [tmpDir], focus: false };
+  const state = { handled: new Set(), children: new Map() };
+  let child;
+  await tick(cfg, state, {
+    readAllowlist: () => allowlist,
+    killGraceMs: 20,
+    spawn: () => {
+      child = new EventEmitter();
+      child.pid = 4242;
+      child.stdout = new EventEmitter();
+      child.stderr = new EventEmitter();
+      // The exact race: the child is already dead/exiting when the cap
+      // timer fires, so kill() reports NOT delivered (node's contract) —
+      // its real 'exit' event just hasn't been processed yet.
+      child.kill = () => false;
+      return child;
+    },
+  });
+
+  // Let the cap timer fire against the not-deliverable child…
+  await new Promise((resolve) => setTimeout(resolve, 60));
+  // …then the natural exit lands.
+  child.emit('exit', 0);
+  await new Promise((resolve) => setTimeout(resolve, 50));
+  server.close();
+
+  const exited = captured.find(
+    (c) => c.url === '/api/dispatch/req-cap-race/status' && c.body.event === 'exited',
+  );
+  assert.ok(exited, 'the natural "exited" report must stand');
+  assert.equal(
+    captured.some(
+      (c) => c.url === '/api/dispatch/req-cap-race/status' && c.body.event === 'capped',
+    ),
+    false,
+    'an undelivered TERM must never mislabel a natural exit as capped',
   );
 });
 
