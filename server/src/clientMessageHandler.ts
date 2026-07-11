@@ -130,7 +130,12 @@ export function handleClientMessage(
     // on validation failure, nothing) over the same WS plane every client
     // (including this one) already listens on -- no separate ack needed.
     case 'dispatchRequest': {
-      const action = msg.action === 'dispatch' || msg.action === 'focus' ? msg.action : undefined;
+      // 'session' (v4 T2/T4): a managed interactive session launch — same
+      // queue, same runner decision plane, deny-by-default runner capability.
+      const action =
+        msg.action === 'dispatch' || msg.action === 'focus' || msg.action === 'session'
+          ? msg.action
+          : undefined;
       const machine = typeof msg.machine === 'string' ? msg.machine : undefined;
       if (!action || !machine) break;
       dispatchStore.enqueue({
@@ -311,6 +316,7 @@ function handleWebviewReady(send: WsSend, ctx: ClientMessageContext): void {
   const sessionIds: Record<number, string> = {};
   const cwds: Record<number, string> = {};
   const pids: Record<number, number> = {};
+  const managed: Record<number, boolean> = {};
   for (const [id, agent] of store) {
     agentIds.push(id);
     if (agent.folderName) {
@@ -338,6 +344,11 @@ function handleWebviewReady(send: WsSend, ctx: ClientMessageContext): void {
     if (agent.pid !== undefined) {
       pids[id] = agent.pid;
     }
+    // T2 remote-answer plane: replay the managed flag so a page refresh
+    // keeps the ANSWER verb without waiting for the next runner poll tick.
+    if (agent.managed === true) {
+      managed[id] = true;
+    }
   }
   const seats = adapter?.loadSeats() ?? {};
   send({
@@ -351,6 +362,7 @@ function handleWebviewReady(send: WsSend, ctx: ClientMessageContext): void {
     sessionIds,
     cwds,
     pids,
+    managed,
   });
 
   // 7. Replay live poll states (M4) so a page refresh keeps NEEDS INPUT badges

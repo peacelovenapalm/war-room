@@ -70,7 +70,7 @@ const REQUEST_ID_MAX_CHARS = 64;
  *  T5 fleet controls, PER-DISPATCH TIME CAP. */
 export const DISPATCH_TIMEOUT_MAX_SEC = 3600;
 
-export type DispatchAction = 'dispatch' | 'focus';
+export type DispatchAction = 'dispatch' | 'focus' | 'session';
 /** `capped` (T5 fleet controls): the dispatch hit its optional timeoutSec
  *  and was ended by the runner's own timer — a DISTINCT terminal status,
  *  never conflated with `killed` (human-initiated) or a natural `exited`.
@@ -253,8 +253,83 @@ export interface DispatchMachineAdvertisement {
   providers: string[];
   roots: string[];
   focus: boolean;
+  /** T2/T4 managed sessions — true only when the runner's allowlist carries
+   *  the literal `"sessions": true` (deny-by-default, same as focus). */
+  sessions: boolean;
   lastSeenAt: number;
 }
+
+// ── T2 remote-answer plane (REMOTE-ANSWER-DESIGN.md) ─────────────
+
+/** One managed session as advertised by its runner on every poll tick —
+ *  entries the runner just re-derived as alive-in-tmux from its own
+ *  manifest. The server NEVER invents these; the advertisement is the only
+ *  source, and it goes stale with the machine advertisement (TTL). */
+export interface ManagedSessionAd {
+  dispatchId: string;
+  tmuxSession: string;
+  panePid?: number;
+  cwd?: string;
+  provider?: string;
+  createdAt?: number;
+}
+
+/** What rides the poll response's `answer` array — the same drained
+ *  at-most-once imperative channel as stop[]. `nonce` is minted here
+ *  (one per request) and consumed exactly once runner-side. */
+export interface AnswerInstruction {
+  id: string;
+  managedSessionRef: string;
+  text: string;
+  nonce: string;
+}
+
+export type AnswerStatus = 'pending' | 'delivered' | 'denied';
+
+/** Answer request lifecycle record. In-memory only (a transient human
+ *  action, same tolerance as PidKillRecord) — but every transition ALSO
+ *  lands in the append-only audit JSONL with the VERBATIM text, which is
+ *  the durable receipt the design requires. */
+interface AnswerRecord {
+  id: string;
+  machine: string;
+  managedSessionRef: string;
+  text: string;
+  nonce: string;
+  status: AnswerStatus;
+  reason?: string;
+  createdAt: number;
+  updatedAt: number;
+}
+
+/** Wire-facing receipt (drawer render) — the verbatim text IS the receipt
+ *  (one-tap-real). Same trust plane as the rest of the tailnet read API. */
+export interface AnswerReceipt {
+  id: string;
+  machine: string;
+  managedSessionRef: string;
+  text: string;
+  status: AnswerStatus;
+  reason?: string;
+  createdAt: number;
+  updatedAt: number;
+}
+
+/** Answer text cap — matches the runner's own ANSWER_TEXT_MAX_CHARS
+ *  (bin/lib/managed-sessions.mjs); twice-enforced is a limit actually held. */
+export const ANSWER_TEXT_MAX_CHARS = 4000;
+/** A pending answer never drained/reported within this window sweeps to a
+ *  terminal denied/'expired' — the board must never show DELIVERING…
+ *  forever for a runner that vanished. Same TTL as ringing dispatches. */
+export const ANSWER_TTL_MS = DISPATCH_TTL_MS;
+/** Receipts kept per machine (in-memory ring; the audit JSONL is the
+ *  unbounded durable record). */
+const ANSWER_RECEIPTS_MAX = 50;
+
+/** Control characters are rejected server-side too (the runner re-checks) —
+ *  Enter is delivered separately by the runner, never embedded. */
+
+const ANSWER_CONTROL_CHARS = /[\x00-\x1F\x7F]/;
 
 function defaultDispatchFile(): string {
   return path.join(os.homedir(), LAYOUT_FILE_DIR, DISPATCH_FILE_NAME);
@@ -265,7 +340,7 @@ function defaultAuditFile(): string {
 }
 
 function isValidAction(value: unknown): value is DispatchAction {
-  return value === 'dispatch' || value === 'focus';
+  return value === 'dispatch' || value === 'focus' || value === 'session';
 }
 
 function isValidProvider(value: unknown): value is DispatchProvider {
@@ -283,6 +358,17 @@ export class DispatchStore {
   /** Observed-session pid-kill requests, keyed by their own generated id
    *  (there is no dispatch record to key against) — in-memory only. */
   private readonly pidKillRequests = new Map<string, PidKillRecord>();
+
+  /** T2 remote-answer plane: per-machine advertised managed sessions
+   *  (refreshed every poll tick, TTL'd like the machine ad), the per-machine
+   *  answer instruction queue (drained at-most-once), and the answer
+   *  lifecycle records (in-memory; the audit JSONL is the durable receipt). */
+  private readonly managedSessions = new Map<
+    string,
+    { sessions: ManagedSessionAd[]; lastSeenAt: number }
+  >();
+  private readonly answerQueue = new Map<string, AnswerInstruction[]>();
+  private readonly answerRequests = new Map<string, AnswerRecord>();
 
   private explicitPath: string | undefined;
   private resolvedPath: string | undefined;
@@ -341,15 +427,22 @@ export class DispatchStore {
       return { ok: false, reason: 'missing-machine' };
     }
 
-    if (input.action === 'dispatch') {
+    if (input.action === 'dispatch' || input.action === 'session') {
       if (!isValidProvider(input.provider)) return { ok: false, reason: 'invalid-provider' };
       if (typeof input.cwd !== 'string' || input.cwd.trim() === '') {
         return { ok: false, reason: 'missing-cwd' };
       }
-      if (typeof input.prompt !== 'string' || input.prompt.trim() === '') {
-        return { ok: false, reason: 'missing-prompt' };
+      // 'session' (T2/T4): the prompt is the OPTIONAL opening brief — a bare
+      // interactive session is a legitimate launch. 'dispatch' keeps its
+      // required prompt (a headless run without one does nothing).
+      if (input.action === 'dispatch') {
+        if (typeof input.prompt !== 'string' || input.prompt.trim() === '') {
+          return { ok: false, reason: 'missing-prompt' };
+        }
+      } else if (input.prompt !== undefined && typeof input.prompt !== 'string') {
+        return { ok: false, reason: 'invalid-prompt' };
       }
-      if (input.prompt.length > DISPATCH_PROMPT_MAX_CHARS) {
+      if (typeof input.prompt === 'string' && input.prompt.length > DISPATCH_PROMPT_MAX_CHARS) {
         return { ok: false, reason: 'prompt-too-long' };
       }
       if (input.model !== undefined && !DISPATCH_MODEL_PATTERN.test(input.model)) {
@@ -362,6 +455,12 @@ export class DispatchStore {
         return { ok: false, reason: 'invalid-effort' };
       }
       if (input.timeoutSec !== undefined) {
+        // Sessions are interactive — the runner's cap timer only exists on
+        // the headless spawn path, so accepting a cap here would silently
+        // lie. Reject rather than drop (honesty over tolerance).
+        if (input.action === 'session') {
+          return { ok: false, reason: 'timeout-unsupported-for-session' };
+        }
         if (
           !Number.isInteger(input.timeoutSec) ||
           input.timeoutSec <= 0 ||
@@ -379,18 +478,21 @@ export class DispatchStore {
 
     const records = this.ensureLoaded();
 
+    // 'session' carries the same CLI-run identity fields as 'dispatch'
+    // (provider/cwd/prompt/model/effort) — timeoutSec stays dispatch-only
+    // (rejected above for sessions).
+    const isCliRun = input.action === 'dispatch' || input.action === 'session';
     const commonFields = {
       id: randomUUID(),
       action: input.action,
       machine: input.machine,
-      provider: input.action === 'dispatch' ? (input.provider as DispatchProvider) : undefined,
-      cwd: input.action === 'dispatch' ? input.cwd : undefined,
-      prompt: input.action === 'dispatch' ? input.prompt : undefined,
+      provider: isCliRun ? (input.provider as DispatchProvider) : undefined,
+      cwd: isCliRun ? input.cwd : undefined,
+      prompt: isCliRun ? input.prompt : undefined,
       sessionId: input.sessionId,
       pid: input.action === 'focus' ? input.pid : undefined,
-      model: input.action === 'dispatch' ? input.model : undefined,
-      effort:
-        input.action === 'dispatch' ? (input.effort as DispatchEffort | undefined) : undefined,
+      model: isCliRun ? input.model : undefined,
+      effort: isCliRun ? (input.effort as DispatchEffort | undefined) : undefined,
       timeoutSec: input.action === 'dispatch' ? input.timeoutSec : undefined,
       chainRunId: input.chainRunId,
       chainStep: input.chainStep,
@@ -524,10 +626,12 @@ export class DispatchStore {
    *  ages out of `getMachines()` after DISPATCH_MACHINE_AD_TTL_MS. */
   recordAdvertisement(
     machine: string,
-    ad: { providers: string[]; roots: string[]; focus: boolean },
+    ad: { providers: string[]; roots: string[]; focus: boolean; sessions?: boolean },
     now: number = Date.now(),
   ): void {
-    this.machines.set(machine, { machine, ...ad, lastSeenAt: now });
+    // sessions defaults false (deny-by-default) — an older runner that
+    // doesn't send the flag simply can't launch managed sessions.
+    this.machines.set(machine, { machine, ...ad, sessions: ad.sessions === true, lastSeenAt: now });
   }
 
   /** Live machines only — a machine without a recent runner poll is
@@ -546,6 +650,189 @@ export class DispatchStore {
    *  advisor needs the STALE ones getMachines() deliberately hides. */
   getAllMachineAdvertisements(): DispatchMachineAdvertisement[] {
     return [...this.machines.values()];
+  }
+
+  // ── T2 remote-answer plane (REMOTE-ANSWER-DESIGN.md) ────────────
+
+  /** Refresh a machine's advertised managed-session list — called on every
+   *  poll tick alongside recordAdvertisement. The runner already pruned
+   *  dead sessions; the server stores it verbatim (sanitized upstream by
+   *  the route) and lets it go stale with the same TTL as the machine ad. */
+  recordManagedSessions(
+    machine: string,
+    sessions: ManagedSessionAd[],
+    now: number = Date.now(),
+  ): void {
+    this.managedSessions.set(machine, { sessions, lastSeenAt: now });
+  }
+
+  /** A machine's live managed sessions — [] when the runner's advertisement
+   *  is stale (a silent runner's sessions are honestly NOT answerable,
+   *  same posture as getMachines' TTL filter). */
+  getManagedFor(
+    machine: string,
+    now: number = Date.now(),
+    ttlMs: number = DISPATCH_MACHINE_AD_TTL_MS,
+  ): ManagedSessionAd[] {
+    const entry = this.managedSessions.get(machine);
+    if (!entry || now - entry.lastSeenAt > ttlMs) return [];
+    return entry.sessions;
+  }
+
+  /** Machines whose managed advertisement went stale are removed outright
+   *  (piggybacked on the dispatch sweep timer) so the agent managed-flag
+   *  propagation observes the transition and clears ANSWER honestly. */
+  sweepStaleManaged(
+    now: number = Date.now(),
+    ttlMs: number = DISPATCH_MACHINE_AD_TTL_MS,
+  ): string[] {
+    const stale: string[] = [];
+    for (const [machine, entry] of this.managedSessions) {
+      if (now - entry.lastSeenAt > ttlMs && entry.sessions.length > 0) {
+        this.managedSessions.set(machine, { sessions: [], lastSeenAt: entry.lastSeenAt });
+        stale.push(machine);
+      }
+    }
+    return stale;
+  }
+
+  /**
+   * Queue an answer to a managed session, targeted the way the board
+   * actually addresses agents: (machine, pid) — the same addressing the
+   * observed-session kill path uses. The server resolves the pid to a
+   * managed-session ref via the machine's LIVE advertisement; no live
+   * advertisement covering that pid = honest deny (`not-managed`). The
+   * one-shot nonce is minted HERE, one per request — the runner consumes it
+   * exactly once and the first outcome report terminalizes the record
+   * (belt and braces on both ends, per design).
+   */
+  requestAnswer(
+    machine: string,
+    pid: number,
+    text: string,
+    now: number = Date.now(),
+  ): { ok: true; id: string } | { ok: false; reason: string } {
+    if (typeof machine !== 'string' || machine.trim() === '') {
+      return { ok: false, reason: 'missing-machine' };
+    }
+    if (!Number.isInteger(pid) || pid <= 0) {
+      return { ok: false, reason: 'invalid-pid' };
+    }
+    if (typeof text !== 'string' || text.trim() === '') {
+      return { ok: false, reason: 'invalid-text' };
+    }
+    if (text.length > ANSWER_TEXT_MAX_CHARS) {
+      return { ok: false, reason: 'text-too-long' };
+    }
+    if (ANSWER_CONTROL_CHARS.test(text)) {
+      return { ok: false, reason: 'control-chars-rejected' };
+    }
+    const managed = this.getManagedFor(machine, now).find((s) => s.panePid === pid);
+    if (!managed) {
+      return { ok: false, reason: 'not-managed' };
+    }
+    const record: AnswerRecord = {
+      id: randomUUID(),
+      machine,
+      managedSessionRef: managed.dispatchId,
+      text,
+      nonce: randomUUID(),
+      status: 'pending',
+      createdAt: now,
+      updatedAt: now,
+    };
+    this.answerRequests.set(record.id, record);
+    const queue = this.answerQueue.get(machine) ?? [];
+    queue.push({
+      id: record.id,
+      managedSessionRef: record.managedSessionRef,
+      text: record.text,
+      nonce: record.nonce,
+    });
+    this.answerQueue.set(machine, queue);
+    this.auditAnswer('answer-requested', record);
+    return { ok: true, id: record.id };
+  }
+
+  /** Drain (pop + clear) this machine's queued answer instructions —
+   *  at-most-once, exactly drainStopsFor's contract. An undelivered answer
+   *  simply stays answerable; the human retries (design). */
+  drainAnswersFor(machine: string): AnswerInstruction[] {
+    const queue = this.answerQueue.get(machine);
+    if (!queue || queue.length === 0) return [];
+    this.answerQueue.delete(machine);
+    return queue;
+  }
+
+  /** Runner-reported outcome. First report wins — a duplicate arriving
+   *  after the record is terminal is DROPPED (audited, never re-applied):
+   *  the server-side half of the replay defense. Unknown ids are a safe
+   *  no-op (2xx decision plane). */
+  reportAnswerStatus(
+    id: string,
+    event: 'delivered' | 'denied',
+    reason: string | undefined,
+    now: number = Date.now(),
+  ): { ok: true } {
+    const record = this.answerRequests.get(id);
+    if (!record) return { ok: true };
+    if (record.status !== 'pending') {
+      this.auditAnswer('answer-duplicate-outcome-dropped', record);
+      return { ok: true };
+    }
+    record.status = event;
+    record.reason = reason;
+    record.updatedAt = now;
+    this.auditAnswer('answer-status', record);
+    return { ok: true };
+  }
+
+  /** Webview-facing lookup for the drawer's answer-outcome poll. */
+  getAnswerStatus(
+    id: string,
+  ): { found: true; status: AnswerStatus; reason?: string } | { found: false } {
+    const record = this.answerRequests.get(id);
+    if (!record) return { found: false };
+    return { found: true, status: record.status, reason: record.reason };
+  }
+
+  /** Receipts for the drawer (one-tap-real: the VERBATIM text is the
+   *  receipt). Most recent last, capped — the audit JSONL is the unbounded
+   *  durable record. Optional ref filter scopes to one managed session. */
+  getAnswerReceipts(machine: string, managedSessionRef?: string): AnswerReceipt[] {
+    const out: AnswerReceipt[] = [];
+    for (const r of this.answerRequests.values()) {
+      if (r.machine !== machine) continue;
+      if (managedSessionRef !== undefined && r.managedSessionRef !== managedSessionRef) continue;
+      out.push({
+        id: r.id,
+        machine: r.machine,
+        managedSessionRef: r.managedSessionRef,
+        text: r.text,
+        status: r.status,
+        reason: r.reason,
+        createdAt: r.createdAt,
+        updatedAt: r.updatedAt,
+      });
+    }
+    return out.sort((a, b) => a.createdAt - b.createdAt).slice(-ANSWER_RECEIPTS_MAX);
+  }
+
+  /** Sweep pending answers past the TTL to a terminal denied/'expired' —
+   *  the board must never render DELIVERING… forever for a vanished
+   *  runner. Piggybacked on the dispatch sweep timer. */
+  sweepExpiredAnswers(now: number = Date.now(), ttlMs: number = ANSWER_TTL_MS): number {
+    let count = 0;
+    for (const record of this.answerRequests.values()) {
+      if (record.status === 'pending' && now - record.createdAt > ttlMs) {
+        record.status = 'denied';
+        record.reason = 'expired';
+        record.updatedAt = now;
+        this.auditAnswer('answer-expired', record);
+        count++;
+      }
+    }
+    return count;
   }
 
   /** Requests still ringing for a machine, WITH the full prompt — the only
@@ -966,6 +1253,22 @@ export class DispatchStore {
   }
 
   private audit(event: string, record: DispatchRecord): void {
+    if (process.env.VITEST && this.explicitAuditPath === undefined) return;
+    try {
+      const line = JSON.stringify({ ts: new Date().toISOString(), event, ...record });
+      const target = this.auditPath();
+      fs.mkdirSync(path.dirname(target), { recursive: true });
+      fs.appendFileSync(target, `${line}\n`, 'utf8');
+    } catch {
+      /* audit-log loss must never crash the server */
+    }
+  }
+
+  /** Same append-only audit log, for answer lifecycle events (T2 remote-
+   *  answer plane). Carries the VERBATIM text + nonce — this line is the
+   *  durable receipt the design requires ("every answer … a receipt with
+   *  verbatim text + source"). */
+  private auditAnswer(event: string, record: AnswerRecord): void {
     if (process.env.VITEST && this.explicitAuditPath === undefined) return;
     try {
       const line = JSON.stringify({ ts: new Date().toISOString(), event, ...record });

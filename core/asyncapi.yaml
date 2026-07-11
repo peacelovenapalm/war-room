@@ -101,6 +101,8 @@ components:
         - $ref: '#/components/schemas/AgentTeamInfo'
         - $ref: '#/components/schemas/AgentTokenUsage'
         - $ref: '#/components/schemas/AgentPidUpdate'
+        # Remote-answer plane (v4 T2 — managed sessions)
+        - $ref: '#/components/schemas/AgentManagedUpdate'
         # Progression (v1 mechanic #3)
         - $ref: '#/components/schemas/ProgressionUpdate'
         # Dispatch (v1 mechanic #6b — call a coworker)
@@ -317,6 +319,35 @@ components:
           description: Map of agent ID (string) to OS process id (see AgentCreated.pid).
           additionalProperties:
             type: integer
+        managed:
+          type: object
+          description: >-
+            Map of agent ID (string) to managed flag (T2 remote-answer plane).
+            True ONLY for sessions launched via War Room that a runner is
+            currently advertising as alive in its own tmux — the client's
+            ONLY license to render the ANSWER verb. Absent/false agents keep
+            the honest DESK-only explainer.
+          additionalProperties:
+            type: boolean
+
+    AgentManagedUpdate:
+      description: >-
+        Live managed-flag transition for one agent (T2 remote-answer plane,
+        REMOTE-ANSWER-DESIGN.md). Emitted when a runner's poll advertisement
+        starts (managed true) or stops (managed false — session died or the
+        runner went silent) covering the agent. The flag is derived
+        server-side from the runner's manifest+alive advertisement, never
+        client-asserted.
+      type: object
+      additionalProperties: false
+      required: [type, id, managed]
+      properties:
+        type:
+          const: agentManagedUpdate
+        id:
+          type: integer
+        managed:
+          type: boolean
 
     AgentPidUpdate:
       description: >-
@@ -690,9 +721,14 @@ components:
             send-failure detector matches on this exactly.
 
     DispatchActionValue:
-      description: Dispatch queue entry kind.
+      description: >-
+        Dispatch queue entry kind. `session` (T2/T4, REMOTE-ANSWER-DESIGN.md)
+        launches an INTERACTIVE provider CLI inside a runner-owned tmux
+        session — gated runner-side on its own deny-by-default
+        `"sessions": true` allowlist capability, same decision plane as
+        `dispatch`.
       type: string
-      enum: [dispatch, focus]
+      enum: [dispatch, focus, session]
 
     DispatchStatusValue:
       description: >-
@@ -2041,15 +2077,18 @@ components:
 
     DispatchRequest:
       description: >-
-        Ask a machine's dispatch runner to either start a real headless CLI
-        run (action "dispatch") or bring a session's terminal to front
-        (action "focus"). The server never shells out — this is a queue
-        entry; a per-machine runner (opt-in, runbook-installed) polls it
-        over the authed channel and decides locally against its own
-        allowlist (`~/.war-room/dispatch.json`), which the server cannot
-        override. `prompt` travels only as far as the server's queue and
-        the runner's authed poll — it is never echoed back over this
-        WebSocket plane (see DispatchUpdate.promptPreview).
+        Ask a machine's dispatch runner to start a real headless CLI run
+        (action "dispatch"), bring a session's terminal to front (action
+        "focus"), or launch a MANAGED interactive session inside a
+        runner-owned tmux (action "session" — T2/T4,
+        REMOTE-ANSWER-DESIGN.md; prompt optional, the opening brief). The
+        server never shells out — this is a queue entry; a per-machine
+        runner (opt-in, runbook-installed) polls it over the authed channel
+        and decides locally against its own allowlist
+        (`~/.war-room/dispatch.json`), which the server cannot override.
+        `prompt` travels only as far as the server's queue and the runner's
+        authed poll — it is never echoed back over this WebSocket plane
+        (see DispatchUpdate.promptPreview).
       type: object
       additionalProperties: false
       required: [type, action, machine]

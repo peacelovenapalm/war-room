@@ -51,6 +51,12 @@ export interface AgentState {
    *  header (mechanic #6b FOCUS target). Absent until the first hook event
    *  carrying pid telemetry arrives for this session. */
   pid?: number;
+  /** T2 remote-answer plane (REMOTE-ANSWER-DESIGN.md): true while a runner's
+   *  live poll advertisement covers this agent's pid (session launched via
+   *  War Room AND alive in the runner's own tmux). Server-derived only
+   *  (httpServer.ts applyManagedFlags) — the client's ONLY license to render
+   *  ANSWER. Cleared when the session dies or the runner goes silent. */
+  managed?: boolean;
   /** Latest state from the per-machine needs-input poller (`claude agents --json`).
    *  `at` = receipt time (ms epoch) for staleness sweeps. `since` = when the
    *  CURRENT state value was first reported (preserved across refresh ticks) —

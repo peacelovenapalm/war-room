@@ -27,6 +27,7 @@ import {
 } from './constants.js';
 import { contractStore } from './contractStore.js';
 import { renderDigest } from './digest.js';
+import type { ManagedSessionAd } from './dispatchStore.js';
 import { dispatchStore } from './dispatchStore.js';
 import { dispatchTemplateStore } from './dispatchTemplateStore.js';
 import { dossierDerivation } from './dossierDerivation.js';
@@ -165,6 +166,7 @@ export async function createHttpServer(options: HttpServerOptions): Promise<Http
   registerTailerPollRoute(app, options);
   registerDispatchRoutes(app, options);
   registerAgentKillRoutes(app, options);
+  registerAgentAnswerRoutes(app, options);
   registerEmployeeRoutes(app);
   registerEconomyRoutes(app);
   registerBuildingRoutes(app, options);
@@ -860,6 +862,38 @@ function pickRandomEmployeeId(): string | undefined {
 }
 
 /**
+ * T2 remote-answer plane: derive each of `machine`'s agents' managed flag
+ * from the runner's just-recorded advertisement (pid correlation — the
+ * session's tmux pane pid IS the CLI's pid, which is the same pid the
+ * hook/poller planes report for the agent) and broadcast transitions.
+ * The flag is server-derived, never client-asserted, and clears honestly
+ * when the session dies or the runner goes silent (sweep below).
+ */
+function applyManagedFlags(
+  options: HttpServerOptions,
+  machine: string,
+  managedSessions: ManagedSessionAd[],
+): void {
+  // The type says store is required, but PixelAgentsServer.start() can be
+  // (and in tests is) called without one — flag propagation is telemetry,
+  // never worth a 500 on the runner's poll.
+  if (!options.store) return;
+  const managedPids = new Set(
+    managedSessions.map((s) => s.panePid).filter((p): p is number => p !== undefined),
+  );
+  const serverMachine = options.machineLabel;
+  for (const [id, agent] of options.store) {
+    const agentMachine = agent.machine ?? serverMachine;
+    if (agentMachine !== machine) continue;
+    const managed = agent.pid !== undefined && managedPids.has(agent.pid);
+    if ((agent.managed === true) !== managed) {
+      agent.managed = managed || undefined;
+      options.store.broadcast({ type: 'agentManagedUpdate', id, managed });
+    }
+  }
+}
+
+/**
  * Dispatch queue routes. The server never shells out — these routes only
  * read/write dispatchStore.ts's in-memory (persisted) queue; the actual CLI
  * spawn happens on a per-machine runner (bin/dispatch-runner.mjs) that polls
@@ -874,6 +908,14 @@ function registerDispatchRoutes(app: FastifyInstance, options: HttpServerOptions
     // a HELD dispatch auto-releases once the local date rolls over past the
     // day it was held on.
     dispatchStore.sweepHeldRollover();
+    // T2 remote-answer plane: pending answers whose runner vanished sweep
+    // to an honest terminal 'expired', and agents whose machine's managed
+    // advertisement went stale drop their ANSWER verb (flag clears +
+    // broadcast) rather than rendering a plane that no longer exists.
+    dispatchStore.sweepExpiredAnswers();
+    for (const staleMachine of dispatchStore.sweepStaleManaged()) {
+      applyManagedFlags(options, staleMachine, []);
+    }
   }, DISPATCH_SWEEP_INTERVAL_MS);
   sweepTimer.unref?.();
   app.addHook('onClose', () => clearInterval(sweepTimer));
@@ -910,7 +952,36 @@ function registerDispatchRoutes(app: FastifyInstance, options: HttpServerOptions
         ? body.roots.filter((r): r is string => typeof r === 'string')
         : [];
       const focus = body.focus === true;
-      dispatchStore.recordAdvertisement(machine, { providers, roots, focus });
+      // T2/T4 managed sessions: capability flag + the runner's live
+      // manifest advertisement (sanitized — dispatchId/tmuxSession strings
+      // required, panePid a positive integer when present; anything else
+      // is dropped entry-by-entry, never trusted off the wire).
+      const sessions = body.sessions === true;
+      const managedSessions = (Array.isArray(body.managedSessions) ? body.managedSessions : [])
+        .filter(
+          (s): s is Record<string, unknown> =>
+            s !== null &&
+            typeof s === 'object' &&
+            typeof (s as Record<string, unknown>).dispatchId === 'string' &&
+            typeof (s as Record<string, unknown>).tmuxSession === 'string',
+        )
+        .map((s) => ({
+          dispatchId: s.dispatchId as string,
+          tmuxSession: s.tmuxSession as string,
+          panePid:
+            typeof s.panePid === 'number' && Number.isInteger(s.panePid) && s.panePid > 0
+              ? s.panePid
+              : undefined,
+          cwd: typeof s.cwd === 'string' ? s.cwd : undefined,
+          provider: typeof s.provider === 'string' ? s.provider : undefined,
+          createdAt: typeof s.createdAt === 'number' ? s.createdAt : undefined,
+        }));
+      dispatchStore.recordAdvertisement(machine, { providers, roots, focus, sessions });
+      dispatchStore.recordManagedSessions(machine, managedSessions);
+      // Propagate the managed flag onto matching agents (pid correlation)
+      // and broadcast transitions — the board's ONLY license to render
+      // ANSWER (REMOTE-ANSWER-DESIGN.md UI contract).
+      applyManagedFlags(options, machine, managedSessions);
       reply.send({
         pending: dispatchStore.pendingFor(machine),
         // KICKOFF v1.1 item 3 — the first server->runner IMPERATIVE channel
@@ -919,6 +990,10 @@ function registerDispatchRoutes(app: FastifyInstance, options: HttpServerOptions
         // tick and report the outcome back (see StopInstruction's doc for
         // the two distinct, never-conflated targeting kinds).
         stop: dispatchStore.drainStopsFor(machine),
+        // T2 remote-answer plane — the same drained at-most-once channel.
+        // An undelivered answer stays pending server-side and sweeps to an
+        // honest 'expired' if no runner ever reports (never a fake state).
+        answer: dispatchStore.drainAnswersFor(machine),
       });
     },
   );
@@ -1139,6 +1214,78 @@ function registerAgentKillRoutes(app: FastifyInstance, options: HttpServerOption
       }
       const reason = typeof body.reason === 'string' ? body.reason : undefined;
       reply.send(dispatchStore.reportPidKillStatus(request.params.id, event, reason));
+    },
+  );
+}
+
+// ── Remote answer (v4 T2 — REMOTE-ANSWER-DESIGN.md) ─────────────
+
+/**
+ * Answer plane routes. The board addresses the target the same way the
+ * observed-session kill path does — (machine, pid) — and the SERVER
+ * resolves it to a managed-session ref against the machine's LIVE runner
+ * advertisement (no live coverage = honest `not-managed` deny; the server
+ * cannot conjure answerability the runner didn't advertise, and even a
+ * queued instruction is re-checked runner-side against manifest + tmux
+ * liveness + a one-shot nonce). Player-action routes are unauthenticated
+ * (tailnet-only precedent, same tier as /api/agents/kill); the runner
+ * outcome route is Bearer-authed like every other runner report.
+ */
+function registerAgentAnswerRoutes(app: FastifyInstance, options: HttpServerOptions): void {
+  // POST /api/agents/answer -- queue an answer { machine, pid, text }.
+  app.post<{ Body: Record<string, unknown> }>('/api/agents/answer', async (request, reply) => {
+    const body = request.body ?? {};
+    const machine = sanitizeMachineLabel(body.machine);
+    const pid = typeof body.pid === 'number' ? body.pid : undefined;
+    const text = typeof body.text === 'string' ? body.text : undefined;
+    if (!machine || pid === undefined || text === undefined) {
+      reply.send({ ok: false, reason: 'missing-machine-pid-or-text' });
+      return;
+    }
+    reply.send(dispatchStore.requestAnswer(machine, pid, text));
+  });
+
+  // GET /api/agents/answer/:id -- the drawer's delivery-outcome poll
+  // (pending = "DELIVERING…", denied renders ✗ with the runner's reason).
+  app.get<{ Params: { id: string } }>('/api/agents/answer/:id', async (request, reply) => {
+    const result = dispatchStore.getAnswerStatus(request.params.id);
+    if (!result.found) {
+      reply.code(404).send({ found: false });
+      return;
+    }
+    reply.send(result);
+  });
+
+  // GET /api/agents/answers?machine=&ref= -- receipts for the drawer
+  // (one-tap-real: the VERBATIM text is the receipt). Same unauthenticated
+  // tailnet read plane as /api/dispatch/recent.
+  app.get<{ Querystring: { machine?: string; ref?: string } }>(
+    '/api/agents/answers',
+    async (request, reply) => {
+      const machine = sanitizeMachineLabel(request.query.machine);
+      if (!machine) {
+        reply.send({ answers: [] });
+        return;
+      }
+      const ref = typeof request.query.ref === 'string' ? request.query.ref : undefined;
+      reply.send({ answers: dispatchStore.getAnswerReceipts(machine, ref) });
+    },
+  );
+
+  // POST /api/answers/:id/status -- runner-reported outcome (Bearer, same
+  // tier as /api/pid-kills/:id/status). First report wins; duplicates drop.
+  app.post<{ Params: { id: string }; Body: Record<string, unknown> }>(
+    '/api/answers/:id/status',
+    { preHandler: bearerAuth(options.token) },
+    async (request, reply) => {
+      const body = request.body ?? {};
+      const event = body.event === 'delivered' || body.event === 'denied' ? body.event : undefined;
+      if (!event) {
+        reply.code(400).send({ error: 'expected body { event: "delivered" | "denied" }' });
+        return;
+      }
+      const reason = typeof body.reason === 'string' ? body.reason : undefined;
+      reply.send(dispatchStore.reportAnswerStatus(request.params.id, event, reason));
     },
   );
 }

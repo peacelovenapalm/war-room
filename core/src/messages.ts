@@ -27,6 +27,7 @@ export type ServerMessage =
   | AgentTeamInfo
   | AgentTokenUsage
   | AgentPidUpdate
+  | AgentManagedUpdate
   | ProgressionUpdate
   | DispatchUpdate
   | OutputChunk
@@ -119,6 +120,7 @@ export interface ExistingAgents {
   sessionIds?: Record<string, string>;
   cwds?: Record<string, string>;
   pids?: Record<string, number>;
+  managed?: Record<string, boolean>;
 }
 
 export interface AgentSeatMeta {
@@ -228,6 +230,12 @@ export interface AgentPidUpdate {
   pid: number;
 }
 
+export interface AgentManagedUpdate {
+  type: 'agentManagedUpdate';
+  id: number;
+  managed: boolean;
+}
+
 export interface ProgressionUpdate {
   type: 'progressionUpdate';
   xp: number;
@@ -271,7 +279,7 @@ export interface DispatchUpdate {
   requestId?: string;
 }
 
-export type DispatchActionValue = 'dispatch' | 'focus';
+export type DispatchActionValue = 'dispatch' | 'focus' | 'session';
 
 export type DispatchStatusValue =
   'ringing' | 'answered' | 'denied' | 'expired' | 'exited' | 'killed' | 'capped' | 'queued-budget';
