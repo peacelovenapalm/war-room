@@ -24,7 +24,7 @@ Sonnet; verifies stayed Fable).
 
 ---
 
-## [KICKOFF v3.1] No remote-answer API for interactive sessions — board APPROVE is honest-explainer — REVIEW-ON-RETURN
+## [KICKOFF v3.1] No remote-answer API for interactive sessions — board APPROVE is honest-explainer — RATIFIED by Greg 2026-07-10
 
 WS-A stage 2 verified the wire has NO remote approve gate for blocked
 interactive sessions (no ClientMessage, no HTTP route; the needs-input
@@ -35,6 +35,10 @@ rows the verb explains itself ("⊘ NO REMOTE GATE — ▸ DESK → COPY ID /
 KILL") instead of faking success; debris ACK has a real 5s undo. **Greg:**
 ratify this treatment or fund a remote-answer plane as its own future
 project (it is not a panel — it is a new containment surface).
+
+**RATIFIED 2026-07-10 (interactive session):** honest-explainer treatment
+stands. Remote-answer plane not funded — remains parked as a possible
+future project, not queued.
 
 ---
 
@@ -66,7 +70,7 @@ latch is future scope.
 
 ---
 
-## [KICKOFF v3.1] Economy items awaiting Greg review (hard-rule-adjacent) — REVIEW-ON-RETURN
+## [KICKOFF v3.1] Economy items awaiting Greg review (hard-rule-adjacent) — APPROVED by Greg 2026-07-10 (both, as shipped)
 
 Two shipped-but-gated designs need Greg's eyes before they count as
 settled: (1) studio-contract reward wiring (bonus-only +25 CASH via
@@ -76,6 +80,10 @@ honest mapping (documented in matchDayDerivation.ts: W = completed +
 all-exit-0, L = run failed, D = terminal-not-failed; burn axis always
 NO_DATA — no per-dispatch token attribution exists). Both live behind
 v3Flags source-data gating; neither touches real functionality.
+
+**APPROVED 2026-07-10 (interactive session):** both designs approved as
+shipped — +25 CASH bonus-only contract rewards and the W/D/L mapping
+(burn axis NO_DATA) are settled numbers now.
 
 ---
 
@@ -177,9 +185,12 @@ never a stall"). Three items, all need Greg at a keyboard:
 2. **FOCUS/osascript TCC consent** — see the "[KICKOFF v1.1 item 9]" entry
    below for the exact System Settings path + diagnostic (unchanged, still
    open).
-3. **NEXUS backup-v2 include** — the state volume makes War Room state real
-   and durable; add `~/apps/war-room/state` to the backup-v2 include list on
-   NEXUS so economy/employees/chains survive disk loss, not just recreates.
+3. **NEXUS backup-v2 include** — ✓ DONE 2026-07-10: `~/apps/war-room/state`
+   added to nightly-backup.sh tar list (canonical copy Brain2
+   scripts/nexus-health/, commit 5eb6e85; installed on NEXUS), `server.json`
+   excluded (root-owned 600 + restoring a stale pid registry is the exact
+   blank-deploy bug). Verified: manual run rc=0, 16 state files in the
+   2026-07-11 tarball.
 
 ---
 
