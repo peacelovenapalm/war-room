@@ -165,6 +165,14 @@ export function ShiftPanel({ isOpen, onClose }: ShiftPanelProps) {
               </span>
             </div>
           )}
+          {snapshot && (
+            <div className="shift-auto-line" data-testid="shift-auto-line">
+              <span className="modal__muted">
+                ⚙ {snapshot.autoActionCount} auto-action{snapshot.autoActionCount === 1 ? '' : 's'}{' '}
+                today
+              </span>
+            </div>
+          )}
           {snapshot?.yesterday && <YesterdayCard report={snapshot.yesterday} />}
         </>
       )}

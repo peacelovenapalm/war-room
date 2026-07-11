@@ -54,3 +54,28 @@ export const SEVERITY_GLYPHS: Record<OpsFindingSeverity, { glyph: string; word: 
   warn: { glyph: '⚠', word: 'WARN' },
   alert: { glyph: '✗', word: 'ALERT' },
 };
+
+/** RUNG 3: auto-executor status. Mirrors server/src/autoExecutor.ts's
+ *  AutoStatus/AutoActionReceipt exactly — GET /api/ops/auto's response,
+ *  verbatim. `whitelistLine` is server-generated so it's always consistent
+ *  with the availability check that produced it (colorblind shape+label —
+ *  "AUTO: OFF — whitelist empty" / "AUTO: <kind> ON (cap N, cooldown Nm)"). */
+export interface AutoActionReceipt {
+  ts: number;
+  actionKind: string;
+  cause: { findingId: string; receipts: OpsReceipt[] };
+  outcome: { ok: boolean; detail: string };
+  undo: string;
+}
+
+export interface AutoActionStatus {
+  enabled: boolean;
+  params?: Record<string, unknown>;
+}
+
+export interface AutoStatus {
+  actions: Record<string, AutoActionStatus>;
+  /** Newest first. */
+  receipts: AutoActionReceipt[];
+  whitelistLine: string;
+}

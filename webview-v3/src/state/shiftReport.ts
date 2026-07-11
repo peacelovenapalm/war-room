@@ -30,6 +30,9 @@ export interface ShiftSnapshot {
   today: ShiftReport;
   yesterday: ShiftReport | null;
   opsReview: OpsReviewSummary;
+  /** T3 rung 3: how many auto-actions actually fired today (real receipts,
+   *  zero on a shipped-empty whitelist). */
+  autoActionCount: number;
 }
 
 export function compactTokens(n: number): string {

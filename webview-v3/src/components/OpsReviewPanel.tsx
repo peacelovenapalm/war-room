@@ -21,6 +21,7 @@ import {
   tapFires,
 } from '../net/opsProposals';
 import {
+  type AutoStatus,
   type OpsFinding,
   type OpsProposalVerb,
   type OpsProposedAction,
@@ -180,6 +181,44 @@ function FindingRow({
   );
 }
 
+function formatReceiptTs(ts: number): string {
+  const d = new Date(ts);
+  return `${String(d.getHours()).padStart(2, '0')}:${String(d.getMinutes()).padStart(2, '0')}`;
+}
+
+/** RUNG 3: read-only render of the auto-executor's real state — the
+ *  honest whitelist line (server-generated, "AUTO: OFF — whitelist empty"
+ *  unless Greg has hand-edited the whitelist file) plus every receipt
+ *  that has actually fired, shape+label per outcome (colorblind rule).
+ *  This section never taps anything — auto-actions are Greg's hand-edit
+ *  to enable, not a button here. */
+function AutoSection({ status }: { status: AutoStatus }) {
+  return (
+    <div className="ops-auto" data-testid="ops-auto-section">
+      <div className="ops-auto__whitelist-line" data-testid="ops-auto-whitelist-line">
+        {status.whitelistLine}
+      </div>
+      {status.receipts.length > 0 && (
+        <ul className="ops-auto__receipts" data-testid="ops-auto-receipts">
+          {status.receipts.map((r, i) => (
+            <li
+              key={i}
+              data-testid="ops-auto-receipt"
+              data-outcome={r.outcome.ok ? 'ok' : 'failed'}
+            >
+              <span className="ops-auto__receipt-glyph">{r.outcome.ok ? '✓' : '✗'}</span>{' '}
+              <span>{formatReceiptTs(r.ts)}</span> <strong>{r.actionKind}</strong>{' '}
+              <span className="modal__muted">— {r.outcome.detail}</span>
+              <div className="modal__muted">cause: {r.cause.findingId}</div>
+              <div className="modal__muted">undo: {r.undo}</div>
+            </li>
+          ))}
+        </ul>
+      )}
+    </div>
+  );
+}
+
 /** OPS REVIEW panel (T3 self-healing ladder): Ops Advisor findings list —
  *  GET /api/ops/review on open + every 60s while open. RUNG 1 (read-only):
  *  every finding cites its raw receipts, expandable per row. RUNG 2 (gated
@@ -200,6 +239,7 @@ export function OpsReviewPanel({
 }: OpsReviewPanelProps) {
   const [review, setReview] = useState<OpsReview | null>(null);
   const [error, setError] = useState(false);
+  const [autoStatus, setAutoStatus] = useState<AutoStatus | null>(null);
   const [proposals, setProposals] = useState<Record<string, ProposalState>>({});
   const cancelledRef = useRef(false);
 
@@ -224,6 +264,29 @@ export function OpsReviewPanel({
         }
       } catch {
         if (!cancelled) setError(true);
+      }
+    };
+    void load();
+    const interval = setInterval(() => void load(), REFRESH_INTERVAL_MS);
+    return () => {
+      cancelled = true;
+      clearInterval(interval);
+    };
+  }, [isOpen]);
+
+  // RUNG 3: the auto-executor's real status — same open + 60s-refresh
+  // cadence as the findings fetch above, its own independent endpoint.
+  useEffect(() => {
+    if (!isOpen) return;
+    let cancelled = false;
+    const load = async () => {
+      try {
+        const res = await fetch('/api/ops/auto');
+        if (!res.ok) throw new Error(`HTTP ${String(res.status)}`);
+        const data = (await res.json()) as AutoStatus;
+        if (!cancelled) setAutoStatus(data);
+      } catch {
+        /* honest omission: the AUTO section simply doesn't render this cycle */
       }
     };
     void load();
@@ -353,6 +416,16 @@ export function OpsReviewPanel({
         only appear where the action is honestly available right now — nothing executes without a
         two-tap confirm. System proposes, Greg disposes.
       </p>
+      {autoStatus && (
+        <>
+          <h3 className="ops-auto__heading">AUTO</h3>
+          <AutoSection status={autoStatus} />
+          <p className="modal__footnote">
+            Rung 3: guardrailed auto-execution, whitelist ships empty — only Greg's own hand-edit
+            turns an action on. Every fire leaves the receipt above; nothing here taps anything.
+          </p>
+        </>
+      )}
     </Modal>
   );
 }

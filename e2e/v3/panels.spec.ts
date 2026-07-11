@@ -74,6 +74,9 @@ const REST_JSON: Record<string, unknown> = {
       counts: { info: 0, warn: 1, alert: 0 },
       topFinding: { summary: 'agent 2 blocked 5m on MACBOOK', severity: 'warn' },
     },
+    // T3 rung 3: SHIFT fold's auto-action count — real receipts, zero on a
+    // shipped-empty whitelist (this fixture's default world).
+    autoActionCount: 0,
   },
   '/api/ops/review': {
     generatedAt: '2026-07-10T00:00:00Z',
@@ -132,6 +135,13 @@ const REST_JSON: Record<string, unknown> = {
       },
     ],
   },
+  // T3 rung 3: default fixture world is a shipped-empty whitelist —
+  // exercised as its own honest OFF-state assertion below.
+  '/api/ops/auto': {
+    actions: { 'requeue-failed-dispatch': { enabled: false } },
+    receipts: [],
+    whitelistLine: 'AUTO: OFF — whitelist empty',
+  },
   '/api/contracts': [
     {
       id: 'ct-1',
@@ -182,6 +192,9 @@ async function serveV3Dist(
     stopAllFails?: boolean;
     killOutcome?: 'killed' | 'denied';
     redispatchFails?: boolean;
+    /** T3 rung 3: override REST_JSON's default AUTO-OFF fixture, e.g. an
+     *  enabled whitelist with real receipts. */
+    autoStatusOverride?: unknown;
   } = {},
 ): Promise<StaticHost> {
   if (!fs.existsSync(path.join(V3_DIST, 'index.html'))) {
@@ -234,6 +247,11 @@ async function serveV3Dist(
       } else {
         res.end(JSON.stringify({ ok: true, dispatchId: 'd-99' }));
       }
+      return;
+    }
+    if (requestPath === '/api/ops/auto' && options.autoStatusOverride !== undefined) {
+      res.writeHead(200, { 'Content-Type': 'application/json' });
+      res.end(JSON.stringify(options.autoStatusOverride));
       return;
     }
     if (requestPath in REST_JSON) {
@@ -393,6 +411,9 @@ test.describe('stage-3 panel ports (desktop chrome model)', () => {
         'agent 2 blocked 5m on MACBOOK',
       );
       await expect(page.getByTestId('shift-ops-line')).toContainText('1 warn');
+      // T3 rung 3: SHIFT fold's honest auto-action count — zero on this
+      // fixture's shipped-empty whitelist.
+      await expect(page.getByTestId('shift-auto-line')).toContainText('0 auto-actions today');
       await page.getByTestId('modal-close').click();
 
       // OPS REVIEW (T3 self-healing ladder, rung 1): real /api/ops/review
@@ -407,6 +428,12 @@ test.describe('stage-3 panel ports (desktop chrome model)', () => {
       await page.getByTestId('ops-finding-toggle').first().click();
       await expect(page.getByTestId('ops-finding-detail')).toBeVisible();
       await expect(page.getByTestId('ops-finding-receipts')).toContainText('agentId: 2');
+      // T3 rung 3: AUTO section renders the honest OFF state — a fresh
+      // deploy's shipped-empty whitelist, never a fabricated "on".
+      await expect(page.getByTestId('ops-auto-whitelist-line')).toHaveText(
+        'AUTO: OFF — whitelist empty',
+      );
+      await expect(page.getByTestId('ops-auto-receipts')).toHaveCount(0);
       await page.getByTestId('modal-close').click();
 
       // BRIEFING: real /api/briefing todo + gate.
@@ -656,6 +683,64 @@ test.describe('stage-3 panel ports (desktop chrome model)', () => {
       await page.getByTestId('ops-proposal-confirm-kill').click();
       // The runner denies it — never rendered as success.
       await expect(killTap).toHaveText(/✗ FAILED — no runner replied/, { timeout: 5_000 });
+    } finally {
+      await context.close();
+      await host.close();
+    }
+  });
+
+  test('OPS REVIEW AUTO section: an enabled whitelist with real receipts renders the exact server-provided line and receipt content honestly', async ({
+    browser,
+  }) => {
+    const host = await serveV3Dist({
+      autoStatusOverride: {
+        actions: {
+          'requeue-failed-dispatch': {
+            enabled: true,
+            params: { maxPerId: 2, cooldownMs: 600_000 },
+          },
+        },
+        whitelistLine: 'AUTO: requeue-failed-dispatch ON (cap 2, cooldown 10m)',
+        receipts: [
+          {
+            ts: Date.parse('2026-07-10T12:00:00Z'),
+            actionKind: 'requeue-failed-dispatch',
+            cause: {
+              findingId: 'dispatch-waste-failed',
+              receipts: [{ label: 'dispatch abc12345', value: 'MACBOOK · claude · exit 1' }],
+            },
+            outcome: { ok: true, detail: 'requeued as dispatch d-42' },
+            undo: 'none — the new dispatch can be killed like any manual dispatch once it starts',
+          },
+          {
+            ts: Date.parse('2026-07-10T12:05:00Z'),
+            actionKind: 'requeue-failed-dispatch',
+            cause: { findingId: 'dispatch-waste-failed', receipts: [] },
+            outcome: { ok: false, detail: 'ringing cap reached' },
+            undo: 'none — the new dispatch can be killed like any manual dispatch once it starts',
+          },
+        ],
+      },
+    });
+    const context = await browser.newContext({ viewport: VIEWPORT });
+    try {
+      const page = await context.newPage();
+      await page.goto(`${host.url}/`);
+      await expect(page.getByTestId('hud-connection')).toHaveText('● LIVE', { timeout: 20_000 });
+
+      await page.getByTestId('dock-ops').click();
+      await expect(page.getByTestId('ops-auto-whitelist-line')).toHaveText(
+        'AUTO: requeue-failed-dispatch ON (cap 2, cooldown 10m)',
+      );
+      const receipts = page.getByTestId('ops-auto-receipt');
+      await expect(receipts).toHaveCount(2);
+      const first = receipts.nth(0);
+      await expect(first).toHaveAttribute('data-outcome', 'ok');
+      await expect(first).toContainText('requeued as dispatch d-42');
+      await expect(first).toContainText('dispatch-waste-failed');
+      const second = receipts.nth(1);
+      await expect(second).toHaveAttribute('data-outcome', 'failed');
+      await expect(second).toContainText('ringing cap reached');
     } finally {
       await context.close();
       await host.close();
