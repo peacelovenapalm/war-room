@@ -178,11 +178,52 @@ describe('POST /api/agents/output', () => {
       { sessionId: 's', lines: 'not-an-array' },
       { sessionId: 's', lines: [1, 2] }, // non-string line
       { sessionId: 's', lines: Array.from({ length: 201 }, () => 'x') }, // over MAX_AGENT_OUTPUT_LINES_PER_POST
-      { sessionId: 's', lines: ['x'.repeat(16_385)] }, // over MAX_AGENT_OUTPUT_LINE_BYTES
+      { sessionId: 's', lines: ['x'.repeat(262_145)] }, // over MAX_AGENT_OUTPUT_LINE_BYTES (256KB)
     ]) {
       const res = await postOutput(config.port, body, { token: config.token, machine });
       expect(res.status).toBe(400);
     }
+  });
+
+  it('rejects a batch whose lines individually pass the per-line cap but sum past the total-bytes cap', async () => {
+    const config = await server.start({ embedded: false, store });
+    const machine = uniqueMachine('M');
+
+    // 5 lines x 220KB each = 1.1MB > MAX_AGENT_OUTPUT_TOTAL_LINE_BYTES (1MB),
+    // each individually well under MAX_AGENT_OUTPUT_LINE_BYTES (256KB).
+    const bigLine = 'x'.repeat(220 * 1024);
+    const res = await postOutput(
+      config.port,
+      { sessionId: 's', lines: Array.from({ length: 5 }, () => bigLine) },
+      { token: config.token, machine },
+    );
+    expect(res.status).toBe(400);
+  });
+
+  it('accepts a single line near the new 256KB per-line cap (the S3 Write-tool_use fix)', async () => {
+    const config = await server.start({ embedded: false, store });
+    const machine = uniqueMachine('M');
+    const agentId = newAgentId();
+    const sessionId = crypto.randomUUID();
+    store.set(agentId, makeAgent(agentId, sessionId, machine));
+
+    // A big assistant tool_use line — realistic shape for a Write call
+    // carrying a large file's content, well over the OLD 16KB cap.
+    const bigInput = 'y'.repeat(200 * 1024);
+    const bigToolUseLine = JSON.stringify({
+      type: 'assistant',
+      message: {
+        content: [{ type: 'tool_use', id: 'toolu_1', name: 'Write', input: { content: bigInput } }],
+      },
+    });
+    const res = await postOutput(
+      config.port,
+      { sessionId, lines: [bigToolUseLine] },
+      { token: config.token, machine },
+    );
+    expect(res.status).toBe(200);
+    expect(await res.json()).toEqual({ ok: true });
+    outputRingStore.evict('agent', String(agentId));
   });
 
   it('unresolvable session is a 2xx deny — no ring entry created', async () => {

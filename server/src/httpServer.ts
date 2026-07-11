@@ -17,8 +17,10 @@ import type { AssetCache, SetHooksEnabledSideEffect } from './clientMessageHandl
 import { handleClientMessage } from './clientMessageHandler.js';
 import {
   HOOK_API_PREFIX,
+  MAX_AGENT_OUTPUT_BODY_BYTES,
   MAX_AGENT_OUTPUT_LINE_BYTES,
   MAX_AGENT_OUTPUT_LINES_PER_POST,
+  MAX_AGENT_OUTPUT_TOTAL_LINE_BYTES,
   MAX_HOOK_BODY_SIZE,
 } from './constants.js';
 import { contractStore } from './contractStore.js';
@@ -591,7 +593,8 @@ interface AgentOutputBody {
 
 /** Validate a POST /api/agents/output body. Returns null when the body
  *  shape is unusable (→ 400) — a defensively-capped batch (too many lines,
- *  a too-long line) is unusable shape too, not a resolution question. */
+ *  a too-long line, or lines summing past MAX_AGENT_OUTPUT_TOTAL_LINE_BYTES)
+ *  is unusable shape too, not a resolution question. */
 function parseAgentOutputBody(body: unknown): AgentOutputBody | null {
   if (body === null || typeof body !== 'object') return null;
   const b = body as Record<string, unknown>;
@@ -606,10 +609,13 @@ function parseAgentOutputBody(body: unknown): AgentOutputBody | null {
     return null;
   }
   const lines: string[] = [];
+  let totalBytes = 0;
   for (const line of rawLines) {
-    if (typeof line !== 'string' || Buffer.byteLength(line, 'utf8') > MAX_AGENT_OUTPUT_LINE_BYTES) {
-      return null;
-    }
+    if (typeof line !== 'string') return null;
+    const bytes = Buffer.byteLength(line, 'utf8');
+    if (bytes > MAX_AGENT_OUTPUT_LINE_BYTES) return null;
+    totalBytes += bytes;
+    if (totalBytes > MAX_AGENT_OUTPUT_TOTAL_LINE_BYTES) return null;
     lines.push(line);
   }
   return { sessionId, lines };
@@ -649,7 +655,11 @@ function parseAgentOutputBody(body: unknown): AgentOutputBody | null {
 function registerAgentOutputRoute(app: FastifyInstance, options: HttpServerOptions): void {
   app.post<{ Body: Record<string, unknown> }>(
     '/api/agents/output',
-    { preHandler: bearerAuth(options.token) },
+    // Route-level bodyLimit override (S3): a Write tool_use line can
+    // legitimately approach MAX_AGENT_OUTPUT_LINE_BYTES, and the process-wide
+    // default (MAX_HOOK_BODY_SIZE, 64KB) would 413 a real batch before this
+    // route's own caps ever run. Every other route keeps the 64KB default.
+    { preHandler: bearerAuth(options.token), bodyLimit: MAX_AGENT_OUTPUT_BODY_BYTES },
     async (request, reply) => {
       const machine = sanitizeMachineLabel(request.headers['x-machine']);
       if (!machine) {

@@ -48,12 +48,30 @@ export {
 
 export const HOOK_EVENT_BUFFER_MS = 5_000;
 
-// ── Remote agent output ingest (T1 remote live-tail, S1) ────
+// ── Remote agent output ingest (T1 remote live-tail, S1/S3) ─
 /** POST /api/agents/output body caps (mirrors the poll route's ingest-cap
- *  style): a batch larger than this, or a line longer than this, is an
- *  unusable body shape (400), not a resolution question. */
+ *  style): a batch larger than this, a line longer than this, or a batch
+ *  whose lines sum past MAX_AGENT_OUTPUT_TOTAL_LINE_BYTES, is an unusable
+ *  body shape (400), not a resolution question.
+ *
+ *  MAX_AGENT_OUTPUT_LINE_BYTES was 16KB at S1; bumped to 256KB at S3 — a
+ *  single assistant record carrying a Write tool_use's full file content
+ *  routinely exceeds 16KB, and the old cap 400'd the WHOLE batch for one
+ *  such line, silently killing a remote tail on legitimate traffic. The new
+ *  MAX_AGENT_OUTPUT_TOTAL_LINE_BYTES cap (independent of the per-line cap)
+ *  is what actually bounds a single POST's worst case, since
+ *  MAX_AGENT_OUTPUT_LINES_PER_POST x MAX_AGENT_OUTPUT_LINE_BYTES alone
+ *  would allow ~50MB. */
 export const MAX_AGENT_OUTPUT_LINES_PER_POST = 200;
-export const MAX_AGENT_OUTPUT_LINE_BYTES = 16_384;
+export const MAX_AGENT_OUTPUT_LINE_BYTES = 262_144; // 256KB
+export const MAX_AGENT_OUTPUT_TOTAL_LINE_BYTES = 1_048_576; // 1MB
+/** Fastify route-level bodyLimit for POST /api/agents/output — must exceed
+ *  MAX_AGENT_OUTPUT_TOTAL_LINE_BYTES to leave room for JSON framing
+ *  overhead (quoting/escaping every line, plus the sessionId/array
+ *  syntax); Fastify 413s BEFORE this route's own parseAgentOutputBody caps
+ *  ever run. Deliberately NOT the process-wide MAX_HOOK_BODY_SIZE (64KB) —
+ *  that stays the default for every other route. */
+export const MAX_AGENT_OUTPUT_BODY_BYTES = 2 * 1024 * 1024; // 2MB
 /** Defensive cap on the remote transcript-path retention map (registerHookRoute) —
  *  bounds a runaway/malicious remote's ability to grow server memory via
  *  distinct (machine, sessionId) pairs. Oldest entry evicted first. */
