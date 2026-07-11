@@ -854,3 +854,26 @@ user-initiated "adopt into tmux" flow (Greg himself re-parents a session he
 started, e.g. relaunching via a war-room wrapper alias so ALL his sessions
 are born managed); never pty injection (rejected class, stands). No build
 work until a real mechanism exists — this is a watch-item, not a task.
+
+## [v4 Phase 2B] Self-review notes — T2/T4/T8 seams (2026-07-11, orchestrator)
+
+Recorded during the orchestrator's own adversarial pass (reconciled with
+codex cross-model review — see below). Accepted-as-is unless promoted:
+
+- **Runner consumed-nonce set is unbounded per process lifetime**
+  (dispatch-runner.mjs `state.consumedNonces`). Nonces are UUIDs; the set
+  grows one entry per answer attempt until the runner restarts (periodic,
+  launchd). Not a leak in practice (answers are human-paced, restarts
+  frequent), but if answer volume ever climbs, bound it with an LRU/TTL.
+  Accepted for v4.
+- **`cpulimit` is not installed on macOS by default** (buildComputeArgv
+  wraps it only when a script's registry entry sets `cpulimit`). An
+  unset-by-default field, so the deny-empty template never hits it; but a
+  script that sets cpulimit without `brew install cpulimit` fails at spawn
+  (ENOENT → audited spawn-error, no crash, no security hole). FOLD INTO
+  Mini onboarding (MINI-COMPUTE-NODE.md step 2): note the brew dep beside
+  python@3.12. `nice` is BSD-native, always present.
+- **Answer TTL = dispatch TTL (10m)**: a pending answer whose runner
+  vanishes sweeps to denied/'expired' on the dispatch sweep timer. Honest
+  (board shows ✗ FAILED — expired), never a permanent DELIVERING…. Correct
+  by construction; noted for completeness.
