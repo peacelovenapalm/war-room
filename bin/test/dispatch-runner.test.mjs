@@ -117,7 +117,9 @@ test('tick: advertises the current allowlist on every poll', async () => {
   server.close();
 
   const pollReq = captured.find((c) => c.url === '/api/dispatch/poll');
-  assert.deepEqual(pollReq.body, allowlist);
+  // managedSessions rides every poll (T2 remote-answer plane) — empty here
+  // since this allowlist has no sessions capability.
+  assert.deepEqual(pollReq.body, { ...allowlist, managedSessions: [] });
   assert.equal(pollReq.headers['x-machine'], 'TESTMACHINE');
   assert.equal(pollReq.headers.authorization, 'Bearer test-token');
 });

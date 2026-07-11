@@ -45,13 +45,14 @@ test('parseAllowlist: valid file parses providers/roots/focus', () => {
     providers: ['claude', 'codex'],
     roots: ['/x'],
     focus: true,
+    sessions: false,
   });
 });
 
 test('parseAllowlist: the deny-everything template parses to all-empty/false', () => {
   const result = parseAllowlist(JSON.stringify(emptyAllowlist()));
   assert.equal(result.ok, true);
-  assert.deepEqual(result.allowlist, { providers: [], roots: [], focus: false });
+  assert.deepEqual(result.allowlist, { providers: [], roots: [], focus: false, sessions: false });
 });
 
 test('parseAllowlist: corrupt JSON denies (ok:false), never throws', () => {
@@ -65,8 +66,8 @@ test('parseAllowlist: corrupt JSON denies (ok:false), never throws', () => {
 test('parseAllowlist: wrong-typed fields sanitize to safe defaults instead of failing', () => {
   const result = parseAllowlist(JSON.stringify({ providers: 'claude', roots: 123, focus: 'yes' }));
   assert.equal(result.ok, true);
-  // Non-array providers/roots -> empty; focus must be the LITERAL boolean true.
-  assert.deepEqual(result.allowlist, { providers: [], roots: [], focus: false });
+  // Non-array providers/roots -> empty; focus/sessions must be the LITERAL boolean true.
+  assert.deepEqual(result.allowlist, { providers: [], roots: [], focus: false, sessions: false });
 });
 
 test('parseAllowlist: focus only true for the literal boolean true (deny-by-default)', () => {

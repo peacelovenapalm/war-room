@@ -21,7 +21,7 @@ export const DISPATCH_PROVIDERS = Object.freeze(['claude', 'codex', 'gemini']);
 
 /** The deny-everything template the install runbook writes when no allowlist exists. */
 export function emptyAllowlist() {
-  return { providers: [], roots: [], focus: false };
+  return { providers: [], roots: [], focus: false, sessions: false };
 }
 
 /**
@@ -58,8 +58,11 @@ export function parseAllowlist(raw) {
     : [];
   // Deny-by-default: only the literal boolean `true` grants focus.
   const focus = parsed.focus === true;
+  // Deny-by-default (REMOTE-ANSWER-DESIGN.md): only the literal boolean
+  // `true` grants managed-session launch — absent/false/anything-else denies.
+  const sessions = parsed.sessions === true;
 
-  return { ok: true, allowlist: { providers, roots, focus } };
+  return { ok: true, allowlist: { providers, roots, focus, sessions } };
 }
 
 /**
@@ -89,8 +92,8 @@ function isContained(root, child) {
  * exceptions — the design's "deny is a decision, not an error" rule extends
  * all the way down to this pure check.
  *
- * @param {{ action: 'dispatch' | 'focus', provider?: string, cwd?: string }} request
- * @param {{ providers: string[], roots: string[], focus: boolean }} allowlist
+ * @param {{ action: 'dispatch' | 'focus' | 'session', provider?: string, cwd?: string }} request
+ * @param {{ providers: string[], roots: string[], focus: boolean, sessions?: boolean }} allowlist
  * @returns {{ ok: true } | { ok: false, reason: string }}
  */
 export function validateRequest(request, allowlist) {
@@ -99,7 +102,15 @@ export function validateRequest(request, allowlist) {
       ? { ok: true }
       : { ok: false, reason: 'focus-not-allowlisted' };
   }
-  if (request?.action !== 'dispatch') {
+  // Managed-session launch (REMOTE-ANSWER-DESIGN.md): gated on ITS OWN
+  // capability flag first (deny-by-default, same as focus), then the exact
+  // provider + root-containment checks a dispatch gets — a machine that can
+  // run headless dispatches cannot launch interactive sessions until Greg
+  // hand-edits `"sessions": true` into its dispatch.json.
+  if (request?.action === 'session' && allowlist?.sessions !== true) {
+    return { ok: false, reason: 'sessions-not-allowlisted' };
+  }
+  if (request?.action !== 'dispatch' && request?.action !== 'session') {
     return { ok: false, reason: 'unknown-action' };
   }
 
@@ -190,6 +201,68 @@ export function buildArgv(request) {
       const argv = ['gemini'];
       if (model) argv.push('--model', model);
       argv.push('-p', request.prompt);
+      return argv;
+    }
+    default:
+      return null;
+  }
+}
+
+/**
+ * Build the argv array for a validated MANAGED-SESSION launch (T2/T4,
+ * REMOTE-ANSWER-DESIGN.md) — the INTERACTIVE counterpart of buildArgv: no
+ * `-p`/`exec` headless flags, so the CLI runs its normal interactive TUI
+ * inside the runner-owned tmux session. Same argv-element discipline: the
+ * optional brief/prompt is ALWAYS one argv element, never a shell string
+ * (the runner passes this array to `tmux new-session -d -s <name> -- …`,
+ * which execs it directly — no shell anywhere, enforced by the runner's
+ * tmux-version gate).
+ *
+ * Per-provider interactive shapes (verified against each CLI's --help,
+ * 2026-07-11):
+ *   - claude: optional trailing positional prompt; --model/--effort as in
+ *     buildArgv.
+ *   - codex: bare `codex [PROMPT]` is the interactive TUI; `-m/--model`
+ *     takes a value; no effort flag.
+ *   - gemini: `-i/--prompt-interactive <prompt>` starts interactive WITH a
+ *     first prompt (plain `-p` would run headless); without a prompt the
+ *     bare TUI launches. `-m/--model` takes a value; no effort flag.
+ *
+ * @param {{ provider: string, prompt?: string, model?: string, effort?: string }} request
+ * @returns {string[] | null} argv, or null for an unknown provider.
+ */
+export function buildSessionArgv(request) {
+  const model =
+    typeof request?.model === 'string' && request.model.trim() !== '' ? request.model : undefined;
+  const effort =
+    typeof request?.effort === 'string' && request.effort.trim() !== ''
+      ? request.effort
+      : undefined;
+  const prompt =
+    typeof request?.prompt === 'string' && request.prompt.trim() !== ''
+      ? request.prompt
+      : undefined;
+
+  switch (request?.provider) {
+    case 'claude': {
+      const argv = ['claude'];
+      if (model) argv.push('--model', model);
+      if (effort !== undefined && PROVIDERS_WITH_EFFORT.has('claude')) {
+        argv.push('--effort', effort);
+      }
+      if (prompt) argv.push(prompt);
+      return argv;
+    }
+    case 'codex': {
+      const argv = ['codex'];
+      if (model) argv.push('--model', model);
+      if (prompt) argv.push(prompt);
+      return argv;
+    }
+    case 'gemini': {
+      const argv = ['gemini'];
+      if (model) argv.push('--model', model);
+      if (prompt) argv.push('-i', prompt);
       return argv;
     }
     default:

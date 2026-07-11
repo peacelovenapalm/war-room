@@ -55,6 +55,22 @@
  *     whether the pid happens to also be in the dispatch registry (the two
  *     containment rules are never cross-shortcut).
  *
+ * T2/T4 managed sessions (REMOTE-ANSWER-DESIGN.md, approved 2026-07-11):
+ *   - `action: 'session'` launches an INTERACTIVE provider CLI inside a
+ *     runner-owned tmux session (`war-room-<dispatchId>`), gated on its own
+ *     deny-by-default `"sessions": true` allowlist flag plus the same
+ *     provider/root checks a dispatch gets. Recorded in the machine-local
+ *     manifest (~/.war-room/managed-sessions.json); liveness re-derived
+ *     from tmux every tick (dead sessions report `exited` and drop out).
+ *   - Every poll advertises the live managed-session list — the server's
+ *     ONLY license to mark agents answerable.
+ *   - `answer: AnswerInstruction[]` rides the poll response (same drained
+ *     at-most-once channel as stop[]): one-shot nonce, manifest+alive
+ *     re-checked at delivery time, literal `send-keys -l` + separate Enter,
+ *     verbatim-text audit line per outcome. Sessions the runner never
+ *     launched are unreachable BY CONSTRUCTION — there is no code path to
+ *     any other pty.
+ *
  * T5 fleet controls, PER-DISPATCH TIME CAP — a `dispatch` item optionally
  * carries `timeoutSec`; when present, runDispatch() arms a timer at spawn
  * (see `triggerCap`). At the cap: SIGTERM through the SAME live-children
@@ -73,7 +89,7 @@
  * Flags: --url <u> --machine <m> --interval <ms> --allowlist <path> --once --help
  */
 
-import { exec, spawn } from 'node:child_process';
+import { exec, execFile, spawn } from 'node:child_process';
 import * as fs from 'node:fs';
 import * as os from 'node:os';
 import * as path from 'node:path';
@@ -81,13 +97,24 @@ import { promisify } from 'node:util';
 
 import {
   buildArgv,
+  buildSessionArgv,
   emptyAllowlist,
   parseAllowlist,
   validateRequest,
 } from './lib/dispatch-rules.mjs';
+import {
+  createManagedSession,
+  defaultManifestPath,
+  deliverAnswer,
+  listTmuxSessions,
+  readManifest,
+  validateAnswerText,
+  writeManifest,
+} from './lib/managed-sessions.mjs';
 import { createOutputForwarder } from './lib/output-forwarder.mjs';
 
 const execAsync = promisify(exec);
+const execFileAsync = promisify(execFile);
 
 const POST_TIMEOUT_MS = 10_000;
 const FOCUS_TIMEOUT_MS = 5_000;
@@ -141,6 +168,7 @@ export function parseArgs(argv) {
     auditLog:
       process.env.WAR_ROOM_DISPATCH_AUDIT_LOG ||
       path.join(os.homedir(), 'Library', 'Logs', 'war-room-dispatch.log'),
+    manifestPath: process.env.WAR_ROOM_MANAGED_MANIFEST || defaultManifestPath(),
     once: false,
   };
   for (let i = 0; i < argv.length; i++) {
@@ -187,7 +215,7 @@ function readAllowlist(cfg) {
 
 // ── Server calls ────────────────────────────────────────────────
 
-async function postDispatchPoll(cfg, allowlist, fetchImpl) {
+async function postDispatchPoll(cfg, allowlist, managedSessions, fetchImpl) {
   return fetchImpl(`${cfg.url}/api/dispatch/poll`, {
     method: 'POST',
     headers: {
@@ -195,7 +223,11 @@ async function postDispatchPoll(cfg, allowlist, fetchImpl) {
       authorization: `Bearer ${cfg.token}`,
       'x-machine': cfg.machine,
     },
-    body: JSON.stringify(allowlist),
+    // The allowlist advertisement (providers/roots/focus/sessions) plus the
+    // live managed-session list (T2 remote-answer plane) — the server's ONLY
+    // source for which agents may render ANSWER. Alive-in-tmux entries only,
+    // re-derived every tick, never cached (REMOTE-ANSWER-DESIGN.md).
+    body: JSON.stringify({ ...allowlist, managedSessions }),
     signal: AbortSignal.timeout(POST_TIMEOUT_MS),
   });
 }
@@ -248,6 +280,25 @@ async function postPidKillStatus(cfg, id, event, reason, fetchImpl) {
     });
   } catch (err) {
     log(`⚠ pid-kill status POST failed for ${id} (${shortErr(err)})`);
+  }
+}
+
+/** Report an answer-delivery outcome (T2 remote-answer plane — its own
+ *  lifecycle, keyed by the AnswerInstruction id, mirroring pid-kills).
+ *  Best-effort, same tolerance as postStatus. */
+async function postAnswerStatus(cfg, id, event, reason, fetchImpl) {
+  try {
+    await fetchImpl(`${cfg.url}/api/answers/${id}/status`, {
+      method: 'POST',
+      headers: {
+        'content-type': 'application/json',
+        authorization: `Bearer ${cfg.token}`,
+      },
+      body: JSON.stringify({ event, reason }),
+      signal: AbortSignal.timeout(POST_TIMEOUT_MS),
+    });
+  } catch (err) {
+    log(`⚠ answer status POST failed for ${id} (${shortErr(err)})`);
   }
 }
 
@@ -633,6 +684,186 @@ async function processStopInstructions(cfg, state, stopInstructions, deps) {
   }
 }
 
+// ── Managed sessions (T2 remote-answer plane + T4 session launch) ─
+
+/**
+ * Per-tick manifest sweep: re-derive liveness from tmux itself (the design's
+ * "a runner restart re-derives liveness from tmux" rule — tmux is the
+ * supervisor, this runner is the gatekeeper). Entries whose tmux session is
+ * gone get a terminal `exited` status POST (the server's reportStatus is
+ * duplicate-tolerant) and drop out of the manifest; what survives IS this
+ * tick's advertisement. Any failure returns an EMPTY advertisement — a
+ * machine that can't prove its sessions are alive advertises none
+ * (deny-by-default composes all the way up to the board's ANSWER verb).
+ */
+async function sweepManagedSessions(cfg, deps) {
+  const execFileImpl = deps.execFileImpl ?? execFileAsync;
+  const fetchImpl = deps.fetch ?? fetch;
+  try {
+    const entries = readManifest(cfg.manifestPath);
+    if (entries.length === 0) return [];
+    const alive = await listTmuxSessions(execFileImpl);
+    const live = [];
+    let pruned = false;
+    for (const entry of entries) {
+      if (alive.has(entry.tmuxSession)) {
+        live.push(entry);
+        continue;
+      }
+      pruned = true;
+      await postStatus(cfg, entry.dispatchId, { event: 'exited' }, fetchImpl);
+      audit(cfg, 'session-ended', {
+        id: entry.dispatchId,
+        tmuxSession: entry.tmuxSession,
+        panePid: entry.panePid,
+      });
+    }
+    if (pruned) writeManifest(cfg.manifestPath, live);
+    return live;
+  } catch (err) {
+    log(`⚠ managed-session sweep failed (${shortErr(err)}) — advertising none this tick`);
+    return [];
+  }
+}
+
+/**
+ * Honor a VALIDATED `action: 'session'` request (allowlist.sessions === true
+ * + provider + root containment already checked by validateRequest): create
+ * the runner-owned tmux session, record it in the manifest, report the
+ * decision. The tmux session name is derived from the dispatch id and the
+ * pane pid (= the CLI's own pid) rides the accept decision so the server
+ * can correlate this session to its hook/poller-observed agent.
+ */
+async function runSessionLaunch(cfg, item, deps) {
+  const fetchImpl = deps.fetch ?? fetch;
+  const execFileImpl = deps.execFileImpl ?? execFileAsync;
+
+  const argv = buildSessionArgv(item);
+  if (!argv) {
+    await postDecision(cfg, item.id, 'deny', { reason: 'unknown-provider' }, fetchImpl);
+    audit(cfg, 'denied', { id: item.id, action: item.action, reason: 'unknown-provider' });
+    return;
+  }
+
+  const created = await createManagedSession(
+    { dispatchId: item.id, cwd: item.cwd, argv },
+    execFileImpl,
+  );
+  if (!created.ok) {
+    await postDecision(cfg, item.id, 'deny', { reason: created.reason }, fetchImpl);
+    audit(cfg, 'session-denied', { id: item.id, reason: created.reason });
+    return;
+  }
+
+  const entries = readManifest(cfg.manifestPath);
+  entries.push({
+    dispatchId: item.id,
+    tmuxSession: created.tmuxSession,
+    panePid: created.panePid,
+    cwd: item.cwd,
+    provider: item.provider,
+    createdAt: Date.now(),
+  });
+  if (!writeManifest(cfg.manifestPath, entries)) {
+    // A session the manifest can't record is NOT answerable (manifest
+    // membership is half the answerability check) — but it DID launch.
+    // Report honestly: accepted (it's running), audit the manifest failure.
+    audit(cfg, 'session-manifest-write-failed', { id: item.id, tmuxSession: created.tmuxSession });
+  }
+
+  await postDecision(cfg, item.id, 'accept', { pid: created.panePid }, fetchImpl);
+  audit(cfg, 'session-started', {
+    id: item.id,
+    tmuxSession: created.tmuxSession,
+    panePid: created.panePid,
+    provider: item.provider,
+    cwd: item.cwd,
+  });
+  // 'started' status attaches the pane pid the same way runDispatch's does —
+  // the drawer's FOCUS/KILL verbs key off it.
+  void postStatus(cfg, item.id, { event: 'started', pid: created.panePid }, fetchImpl);
+}
+
+/**
+ * Process one poll tick's `answer` array (T2 remote-answer plane — the same
+ * drained at-most-once imperative channel as stop[]). Per instruction, in
+ * order, every gate re-checked HERE at delivery time, never cached:
+ *   1. shape + text validation (control chars rejected, length cap);
+ *   2. one-shot nonce — consumed-set membership denies `nonce-replayed`;
+ *      consumed AT ATTEMPT time (after validation, before send) so even a
+ *      failed send burns the nonce (one shot means one shot);
+ *   3. manifest membership (`session-not-managed`) AND tmux liveness
+ *      (`session-dead`) — both checks at answer time (design rule);
+ *   4. literal send-keys delivery, Enter as a separate send.
+ * Every outcome: status POST (delivered/denied + reason) + an audit line
+ * with the VERBATIM text + nonce (the design's audit-trail requirement).
+ */
+async function processAnswerInstructions(cfg, state, answers, deps) {
+  const fetchImpl = deps.fetch ?? fetch;
+  const execFileImpl = deps.execFileImpl ?? execFileAsync;
+  for (const instr of answers) {
+    try {
+      if (
+        !instr ||
+        typeof instr.id !== 'string' ||
+        typeof instr.managedSessionRef !== 'string' ||
+        typeof instr.nonce !== 'string' ||
+        instr.nonce === ''
+      ) {
+        continue; // unusable shape — nothing to report against
+      }
+      const deny = async (reason) => {
+        await postAnswerStatus(cfg, instr.id, 'denied', reason, fetchImpl);
+        audit(cfg, 'answer-denied', {
+          id: instr.id,
+          sessionRef: instr.managedSessionRef,
+          text: instr.text,
+          nonce: instr.nonce,
+          reason,
+        });
+      };
+
+      const textCheck = validateAnswerText(instr.text);
+      if (!textCheck.ok) {
+        await deny(textCheck.reason);
+        continue;
+      }
+      if (state.consumedNonces.has(instr.nonce)) {
+        await deny('nonce-replayed');
+        continue;
+      }
+      state.consumedNonces.add(instr.nonce);
+      audit(cfg, 'answer-nonce-consumed', { id: instr.id, nonce: instr.nonce });
+
+      const entry = readManifest(cfg.manifestPath).find(
+        (e) => e.dispatchId === instr.managedSessionRef,
+      );
+      if (!entry) {
+        await deny('session-not-managed');
+        continue;
+      }
+      const delivery = await deliverAnswer(
+        { tmuxSession: entry.tmuxSession, text: instr.text },
+        execFileImpl,
+      );
+      if (!delivery.ok) {
+        await deny(delivery.reason);
+        continue;
+      }
+      await postAnswerStatus(cfg, instr.id, 'delivered', undefined, fetchImpl);
+      audit(cfg, 'answer-delivered', {
+        id: instr.id,
+        sessionRef: instr.managedSessionRef,
+        tmuxSession: entry.tmuxSession,
+        text: instr.text,
+        nonce: instr.nonce,
+      });
+    } catch (err) {
+      log(`⚠ answer instruction ${instr?.id ?? '?'} failed: ${shortErr(err)}`);
+    }
+  }
+}
+
 // ── One item ─────────────────────────────────────────────────────
 
 async function handleItem(cfg, item, allowlist, state, deps) {
@@ -662,6 +893,11 @@ async function handleItem(cfg, item, allowlist, state, deps) {
     return;
   }
 
+  if (item.action === 'session') {
+    await runSessionLaunch(cfg, item, deps);
+    return;
+  }
+
   // action === 'dispatch'
   const argv = buildArgv(item);
   if (!argv) {
@@ -687,9 +923,15 @@ export async function tick(cfg, state, deps = {}) {
   const fetchImpl = deps.fetch ?? fetch;
   const allowlist = (deps.readAllowlist ?? readAllowlist)(cfg);
 
+  // Managed-session sweep BEFORE the poll (T2/T4): prune dead sessions
+  // (posting their terminal status) and advertise only what tmux itself
+  // confirms alive this tick. Advertising nothing when the capability is
+  // off keeps the wire honest (the flag alone already denies launches).
+  const managedSessions = allowlist.sessions === true ? await sweepManagedSessions(cfg, deps) : [];
+
   let res;
   try {
-    res = await postDispatchPoll(cfg, allowlist, fetchImpl);
+    res = await postDispatchPoll(cfg, allowlist, managedSessions, fetchImpl);
   } catch (err) {
     log(`⚠ skip tick — poll POST failed: ${shortErr(err)}`);
     return;
@@ -730,6 +972,14 @@ export async function tick(cfg, state, deps = {}) {
   if (stopInstructions.length > 0) {
     await processStopInstructions(cfg, state, stopInstructions, deps);
   }
+
+  // T2 remote-answer plane — the SAME drained at-most-once imperative
+  // channel as stop[], processed after it (an answer to a session a stop
+  // just ended denies honestly on the liveness check).
+  const answerInstructions = Array.isArray(body?.answer) ? body.answer : [];
+  if (answerInstructions.length > 0) {
+    await processAnswerInstructions(cfg, state, answerInstructions, deps);
+  }
 }
 
 // ── Main loop ───────────────────────────────────────────────────
@@ -764,7 +1014,7 @@ async function main() {
   process.on('unhandledRejection', (err) => log(`⚠ unhandled rejection: ${shortErr(err)}`));
   process.on('uncaughtException', (err) => log(`⚠ uncaught exception: ${shortErr(err)}`));
 
-  const state = { handled: new Set(), children: new Map() };
+  const state = { handled: new Set(), children: new Map(), consumedNonces: new Set() };
   // setTimeout chain (not setInterval) so slow ticks never overlap.
   for (;;) {
     await tick(cfg, state);
