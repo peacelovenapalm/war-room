@@ -57,7 +57,7 @@ import { standingOrderStore } from './standingOrderStore.js';
 import { STUDIO_CONTRACT_SWEEP_INTERVAL_MS, studioContractIngest } from './studioContractIngest.js';
 import { studioContractStore } from './studioContractStore.js';
 import { renderTranscriptLine } from './transcriptOutputTap.js';
-import { applyTokenUsage } from './transcriptParser.js';
+import { applyTokenUsage, isRecentEnoughForShiftSpend } from './transcriptParser.js';
 import type { AgentState } from './types.js';
 import { v3StoreEnabled } from './v3Flags.js';
 import { worldEventStore } from './worldEventStore.js';
@@ -677,6 +677,13 @@ function parseAgentOutputBody(body: unknown): AgentOutputBody | null {
  * straggler POST for an agent removed mid-request can't resurrect a ring
  * entry — the same guarantee /api/dispatch/:id/output gives by re-checking
  * dispatchStore status right before appending.
+ *
+ * Token usage: each resolved assistant-type line's message.usage is applied
+ * via the SAME applyTokenUsage the local tap uses (transcriptParser.ts), and
+ * replay-guarded by isRecentEnoughForShiftSpend — S2's fromStart=true
+ * (first-ever tail of a session) replays the whole transcript from offset 0,
+ * so historical usage records arriving here get the identical treatment
+ * /resume and adopt-from-start get locally.
  */
 function registerAgentOutputRoute(app: FastifyInstance, options: HttpServerOptions): void {
   app.post<{ Body: Record<string, unknown> }>(
@@ -709,15 +716,28 @@ function registerAgentOutputRoute(app: FastifyInstance, options: HttpServerOptio
         // gets its own try so one bad line can't drop the rest of the batch.
         try {
           const record = JSON.parse(line) as Record<string, unknown>;
+          // Match the local tap: only assistant records carry billable
+          // usage. A non-assistant record with a usage-shaped field is not
+          // real usage telemetry.
+          if (record.type !== 'assistant') continue;
           const message = record.message as Record<string, unknown> | undefined;
           const usage = message?.usage as
             { input_tokens?: number; output_tokens?: number } | undefined;
           if (usage && typeof usage === 'object') {
-            // Contract: replayed-historical-usage protection for this route
-            // is protocol-level in S2 (fromStart issued at most once per
-            // agent) — unlike the local tap's timestamp replay-cutoff guard,
-            // S1 counts every usage record it receives.
-            applyTokenUsage(agentId, agent, usage, options.store, true);
+            // Replay guard: S2's fromStart=true (first-ever tail of a
+            // session) replays the WHOLE file from offset 0, so this route
+            // sees the same historical-usage-record shape /resume and
+            // adopt-from-start produce locally. Every transcript record
+            // carries its own `timestamp` regardless of machine, so the
+            // SAME cutoff check applies here — see
+            // isRecentEnoughForShiftSpend's doc.
+            applyTokenUsage(
+              agentId,
+              agent,
+              usage,
+              options.store,
+              isRecentEnoughForShiftSpend(record),
+            );
           }
         } catch {
           // Swallow: telemetry only, matches renderTranscriptLine/tapTranscriptLine's posture.

@@ -18,8 +18,31 @@ import type { AgentState } from './types.js';
 const EMPTY_EXEMPT_TOOLS: ReadonlySet<string> = new Set();
 
 /** Usage records older than this are treated as transcript REPLAY (resume /
- *  adopt-from-start) and excluded from the shift report's token spend. */
-const SHIFT_TOKEN_REPLAY_CUTOFF_MS = 5 * 60_000;
+ *  adopt-from-start locally, or S2's fromStart tail replay remotely) and
+ *  excluded from the shift report's token spend. Exported so every usage
+ *  call site derives countForShift from the SAME cutoff — see
+ *  isRecentEnoughForShiftSpend below. */
+export const SHIFT_TOKEN_REPLAY_CUTOFF_MS = 5 * 60_000;
+
+/**
+ * Whether a transcript record's `timestamp` field is recent enough to count
+ * toward today's shift spend. Transcript JSONL records carry their own
+ * `timestamp` regardless of which machine produced them, so this ONE
+ * implementation replay-guards both the local tap (processTranscriptLine)
+ * and the remote ingest route (POST /api/agents/output, httpServer.ts):
+ * /resume, adopt-from-start, and S2's fromStart=true tail (first-ever tail
+ * of a session replays the whole file from offset 0) all re-stream
+ * historical usage records, and counting those would double the day's
+ * "money spent". A record with no parseable timestamp is never counted —
+ * absence of a timestamp is not evidence of freshness.
+ */
+export function isRecentEnoughForShiftSpend(
+  record: Record<string, unknown>,
+  now: number = Date.now(),
+): boolean {
+  const recordTs = Date.parse(typeof record.timestamp === 'string' ? record.timestamp : '');
+  return Number.isFinite(recordTs) && now - recordTs < SHIFT_TOKEN_REPLAY_CUTOFF_MS;
+}
 
 /**
  * Apply one assistant record's token usage to the agent's running totals and
@@ -27,16 +50,8 @@ const SHIFT_TOKEN_REPLAY_CUTOFF_MS = 5 * 60_000;
  * (processTranscriptLine below) and the remote ingest route
  * (POST /api/agents/output, httpServer.ts) so there is exactly one place
  * that accumulates agent.inputTokens/outputTokens — never two competing
- * implementations.
- *
- * `countForShift` decides whether this record's tokens count toward today's
- * shift spend (shiftStats.recordTokens). The local caller only counts
- * records stamped within SHIFT_TOKEN_REPLAY_CUTOFF_MS of now (resume /
- * adopt-from-start rewinds the file offset and re-streams historical usage
- * records; counting those would double the day's spend). The remote route
- * has no such local timestamp signal to replay-guard with — that protection
- * is protocol-level in S2 (fromStart issued at most once per agent) — so
- * its caller always passes true.
+ * implementations. `countForShift` is normally derived from
+ * isRecentEnoughForShiftSpend — see both call sites.
  */
 export function applyTokenUsage(
   agentId: number,
@@ -136,12 +151,9 @@ export function processTranscriptLine(
       // Shift report (v1 mechanic #2): accumulate today's real token spend.
       // Replay guard (review finding): /resume and adopt-from-start REWIND the
       // file offset and re-stream historical usage records — counting those
-      // would double the day's "money spent". Only count records stamped
-      // within the last few minutes (live records arrive within seconds).
-      const recordTs = Date.parse((record as { timestamp?: string }).timestamp ?? '');
-      const countForShift =
-        Number.isFinite(recordTs) && Date.now() - recordTs < SHIFT_TOKEN_REPLAY_CUTOFF_MS;
-      applyTokenUsage(agentId, agent, usage, agents, countForShift);
+      // would double the day's "money spent". See isRecentEnoughForShiftSpend's
+      // doc for the shared (local + remote) replay-cutoff contract.
+      applyTokenUsage(agentId, agent, usage, agents, isRecentEnoughForShiftSpend(record));
     }
 
     // Resilient content extraction: support both record.message.content and record.content

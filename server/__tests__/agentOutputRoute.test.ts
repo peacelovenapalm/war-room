@@ -82,9 +82,15 @@ function makeAgent(id: number, sessionId: string, machine: string): AgentStateTy
 const assistantText = (text: string) =>
   JSON.stringify({ type: 'assistant', message: { content: [{ type: 'text', text }] } });
 
-const assistantUsage = (text: string, inputTokens: number, outputTokens: number) =>
+const assistantUsage = (
+  text: string,
+  inputTokens: number,
+  outputTokens: number,
+  opts: { timestamp?: string; type?: string } = {},
+) =>
   JSON.stringify({
-    type: 'assistant',
+    type: opts.type ?? 'assistant',
+    ...(opts.timestamp !== undefined ? { timestamp: opts.timestamp } : {}),
     message: {
       content: [{ type: 'text', text }],
       usage: { input_tokens: inputTokens, output_tokens: outputTokens },
@@ -263,7 +269,10 @@ describe('POST /api/agents/output', () => {
 
     const res = await postOutput(
       config.port,
-      { sessionId, lines: [assistantUsage('remote usage', 100, 40)] },
+      {
+        sessionId,
+        lines: [assistantUsage('remote usage', 100, 40, { timestamp: new Date().toISOString() })],
+      },
       { token: config.token, machine },
     );
     expect(await res.json()).toEqual({ ok: true });
@@ -281,6 +290,67 @@ describe('POST /api/agents/output', () => {
       inputTokens: 100,
       outputTokens: 40,
     });
+
+    outputRingStore.evict('agent', String(agentId));
+  });
+
+  it('replay guard: a historically-stamped usage record updates agent totals but NOT shiftStats (fromStart replay must not inflate spend)', async () => {
+    const config = await server.start({ embedded: false, store });
+    const machine = uniqueMachine('M');
+    const agentId = newAgentId();
+    const sessionId = crypto.randomUUID();
+    const agent = makeAgent(agentId, sessionId, machine);
+    store.set(agentId, agent);
+
+    const before = shiftStats.getReport();
+    const hoursAgo = new Date(Date.now() - 3 * 60 * 60_000).toISOString();
+
+    const res = await postOutput(
+      config.port,
+      { sessionId, lines: [assistantUsage('historical replay', 250, 90, { timestamp: hoursAgo })] },
+      { token: config.token, machine },
+    );
+    expect(await res.json()).toEqual({ ok: true });
+
+    // Agent's running totals (the drawer/HUD's real usage) always reflect
+    // the full session, replayed or not.
+    expect(agent.inputTokens).toBe(250);
+    expect(agent.outputTokens).toBe(90);
+
+    // shiftStats (today's spend) must NOT move: this line looks exactly
+    // like what S2's fromStart=true first-tail replay would ship.
+    const after = shiftStats.getReport();
+    expect(after.tokensIn - before.tokensIn).toBe(0);
+    expect(after.tokensOut - before.tokensOut).toBe(0);
+
+    outputRingStore.evict('agent', String(agentId));
+  });
+
+  it("hardening: a non-assistant record with a usage-shaped field is ignored (matches the local tap's assistant-only gate)", async () => {
+    const config = await server.start({ embedded: false, store });
+    const machine = uniqueMachine('M');
+    const agentId = newAgentId();
+    const sessionId = crypto.randomUUID();
+    const agent = makeAgent(agentId, sessionId, machine);
+    store.set(agentId, agent);
+
+    const res = await postOutput(
+      config.port,
+      {
+        sessionId,
+        lines: [
+          assistantUsage('not really assistant', 500, 500, {
+            type: 'user',
+            timestamp: new Date().toISOString(),
+          }),
+        ],
+      },
+      { token: config.token, machine },
+    );
+    expect(await res.json()).toEqual({ ok: true });
+
+    expect(agent.inputTokens).toBe(0);
+    expect(agent.outputTokens).toBe(0);
 
     outputRingStore.evict('agent', String(agentId));
   });
