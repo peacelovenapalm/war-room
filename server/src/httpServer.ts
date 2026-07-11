@@ -976,7 +976,12 @@ function registerDispatchRoutes(app: FastifyInstance, options: HttpServerOptions
           provider: typeof s.provider === 'string' ? s.provider : undefined,
           createdAt: typeof s.createdAt === 'number' ? s.createdAt : undefined,
         }));
-      dispatchStore.recordAdvertisement(machine, { providers, roots, focus, sessions });
+      // T8 Mini compute — the runner advertises its registered script NAMES
+      // only (never interpreter/paths); the CALL tray renders a picker.
+      const scriptIds = (Array.isArray(body.scriptIds) ? body.scriptIds : []).filter(
+        (s): s is string => typeof s === 'string',
+      );
+      dispatchStore.recordAdvertisement(machine, { providers, roots, focus, sessions, scriptIds });
       dispatchStore.recordManagedSessions(machine, managedSessions);
       // Propagate the managed flag onto matching agents (pid correlation)
       // and broadcast transitions — the board's ONLY license to render

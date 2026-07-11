@@ -48,8 +48,21 @@ export const DISPATCH_PROMPT_PREVIEW_MAX_CHARS = 120;
  *  queue file bounded regardless of what a runner sends. */
 export const DISPATCH_RESULT_TAIL_MAX_CHARS = 8192;
 
+/** LLM providers — a `dispatch` with one of these requires a prompt. */
 export const DISPATCH_PROVIDERS = ['claude', 'codex', 'gemini'] as const;
-export type DispatchProvider = (typeof DISPATCH_PROVIDERS)[number];
+/** `shell` (T8 Mini compute, MINI-COMPUTE-NODE.md) is a NON-LLM provider:
+ *  it carries a scriptId + args instead of a prompt/cwd, resolved entirely
+ *  against the runner's machine-local `compute` registry (the server never
+ *  knows the interpreter/path — the wire carries intent, not capability). */
+export const ALL_DISPATCH_PROVIDERS = [...DISPATCH_PROVIDERS, 'shell'] as const;
+export type DispatchProvider = (typeof ALL_DISPATCH_PROVIDERS)[number];
+/** An opaque compute scriptId (never a path) — same token shape the runner's
+ *  dispatch-rules.mjs enforces. */
+const COMPUTE_SCRIPT_ID_PATTERN = /^[a-zA-Z0-9._-]{1,64}$/;
+/** Server-side arg-count ceiling for a `shell` dispatch — the runner's
+ *  registry may lower it per-script (COMPUTE_MAX_ARGS_CEILING in
+ *  dispatch-rules.mjs); this is the outer backstop before it ever rings. */
+const COMPUTE_MAX_ARGS_CEILING = 16;
 
 /** Providers a runner actually has an `--effort`-equivalent flag for
  *  (bin/lib/dispatch-rules.mjs buildArgv is the enforcement point) — the
@@ -133,6 +146,11 @@ interface DispatchRecord {
   pid?: number;
   model?: string;
   effort?: DispatchEffort;
+  /** T8 Mini compute — opaque scriptId + plain-token args for a `shell`
+   *  dispatch (resolved to interpreter/path ONLY by the runner's local
+   *  registry; the server never knows the path). */
+  scriptId?: string;
+  args?: string[];
   /** T5 fleet controls, PER-DISPATCH TIME CAP — optional wall-clock cap in
    *  seconds, threaded to the runner via pendingFor()'s DispatchRunnerItem. */
   timeoutSec?: number;
@@ -179,6 +197,9 @@ export interface DispatchEnqueueInput {
   pid?: number;
   model?: string;
   effort?: string;
+  /** T8 Mini compute — opaque scriptId + plain-token args (shell provider). */
+  scriptId?: string;
+  args?: string[];
   /** T5 fleet controls, PER-DISPATCH TIME CAP — validated against
    *  DISPATCH_TIMEOUT_MAX_SEC in enqueue(). */
   timeoutSec?: number;
@@ -242,6 +263,10 @@ export interface DispatchRunnerItem {
   pid?: number;
   model?: string;
   effort?: DispatchEffort;
+  /** T8 Mini compute — the runner resolves scriptId + args against its own
+   *  registry (buildComputeArgv); the wire never carries interpreter/path. */
+  scriptId?: string;
+  args?: string[];
   /** T5 fleet controls, PER-DISPATCH TIME CAP — the runner arms its own
    *  timer on spawn when present. */
   timeoutSec?: number;
@@ -256,6 +281,10 @@ export interface DispatchMachineAdvertisement {
   /** T2/T4 managed sessions — true only when the runner's allowlist carries
    *  the literal `"sessions": true` (deny-by-default, same as focus). */
   sessions: boolean;
+  /** T8 Mini compute — the NAMES of the machine's registered compute scripts
+   *  (never the interpreter/path). Drives the CALL tray's script picker so a
+   *  shell dispatch is always a pick, never free-text. */
+  scriptIds: string[];
   lastSeenAt: number;
 }
 
@@ -344,6 +373,10 @@ function isValidAction(value: unknown): value is DispatchAction {
 }
 
 function isValidProvider(value: unknown): value is DispatchProvider {
+  return typeof value === 'string' && (ALL_DISPATCH_PROVIDERS as readonly string[]).includes(value);
+}
+/** LLM providers only — a `shell` dispatch takes a scriptId, not a prompt. */
+function isLlmProvider(value: unknown): boolean {
   return typeof value === 'string' && (DISPATCH_PROVIDERS as readonly string[]).includes(value);
 }
 
@@ -427,8 +460,29 @@ export class DispatchStore {
       return { ok: false, reason: 'missing-machine' };
     }
 
-    if (input.action === 'dispatch' || input.action === 'session') {
-      if (!isValidProvider(input.provider)) return { ok: false, reason: 'invalid-provider' };
+    if (input.provider === 'shell') {
+      // T8 Mini compute: a NON-LLM dispatch. No cwd/prompt/model/effort — the
+      // wire carries only an opaque scriptId + plain-token args; the runner's
+      // machine-local registry resolves and guards the rest. `shell` is
+      // dispatch-only (never an interactive session).
+      if (input.action !== 'dispatch') {
+        return { ok: false, reason: 'shell-must-be-dispatch' };
+      }
+      if (typeof input.scriptId !== 'string' || !COMPUTE_SCRIPT_ID_PATTERN.test(input.scriptId)) {
+        return { ok: false, reason: 'invalid-scriptId' };
+      }
+      if (input.args !== undefined) {
+        if (!Array.isArray(input.args) || input.args.some((a) => typeof a !== 'string')) {
+          return { ok: false, reason: 'invalid-args' };
+        }
+        if (input.args.length > COMPUTE_MAX_ARGS_CEILING) {
+          return { ok: false, reason: 'too-many-args' };
+        }
+      }
+    } else if (input.action === 'dispatch' || input.action === 'session') {
+      if (!isValidProvider(input.provider) || !isLlmProvider(input.provider)) {
+        return { ok: false, reason: 'invalid-provider' };
+      }
       if (typeof input.cwd !== 'string' || input.cwd.trim() === '') {
         return { ok: false, reason: 'missing-cwd' };
       }
@@ -480,20 +534,27 @@ export class DispatchStore {
 
     // 'session' carries the same CLI-run identity fields as 'dispatch'
     // (provider/cwd/prompt/model/effort) — timeoutSec stays dispatch-only
-    // (rejected above for sessions).
+    // (rejected above for sessions). A `shell` (compute) run carries NONE of
+    // the LLM identity fields — only scriptId + args (the wire never even
+    // carried a cwd/prompt for it).
     const isCliRun = input.action === 'dispatch' || input.action === 'session';
+    const isShell = input.provider === 'shell';
+    const isLlmRun = isCliRun && !isShell;
     const commonFields = {
       id: randomUUID(),
       action: input.action,
       machine: input.machine,
       provider: isCliRun ? (input.provider as DispatchProvider) : undefined,
-      cwd: isCliRun ? input.cwd : undefined,
-      prompt: isCliRun ? input.prompt : undefined,
+      cwd: isLlmRun ? input.cwd : undefined,
+      prompt: isLlmRun ? input.prompt : undefined,
       sessionId: input.sessionId,
       pid: input.action === 'focus' ? input.pid : undefined,
-      model: isCliRun ? input.model : undefined,
-      effort: isCliRun ? (input.effort as DispatchEffort | undefined) : undefined,
-      timeoutSec: input.action === 'dispatch' ? input.timeoutSec : undefined,
+      model: isLlmRun ? input.model : undefined,
+      effort: isLlmRun ? (input.effort as DispatchEffort | undefined) : undefined,
+      // T8 Mini compute — carried only for a `shell` dispatch.
+      scriptId: isShell ? input.scriptId : undefined,
+      args: isShell ? input.args : undefined,
+      timeoutSec: input.action === 'dispatch' && !isShell ? input.timeoutSec : undefined,
       chainRunId: input.chainRunId,
       chainStep: input.chainStep,
       employeeId: input.employeeId,
@@ -626,12 +687,27 @@ export class DispatchStore {
    *  ages out of `getMachines()` after DISPATCH_MACHINE_AD_TTL_MS. */
   recordAdvertisement(
     machine: string,
-    ad: { providers: string[]; roots: string[]; focus: boolean; sessions?: boolean },
+    ad: {
+      providers: string[];
+      roots: string[];
+      focus: boolean;
+      sessions?: boolean;
+      scriptIds?: string[];
+    },
     now: number = Date.now(),
   ): void {
     // sessions defaults false (deny-by-default) — an older runner that
-    // doesn't send the flag simply can't launch managed sessions.
-    this.machines.set(machine, { machine, ...ad, sessions: ad.sessions === true, lastSeenAt: now });
+    // doesn't send the flag simply can't launch managed sessions. scriptIds
+    // defaults [] — a runner with no compute registry advertises no scripts.
+    this.machines.set(machine, {
+      machine,
+      providers: ad.providers,
+      roots: ad.roots,
+      focus: ad.focus,
+      sessions: ad.sessions === true,
+      scriptIds: Array.isArray(ad.scriptIds) ? ad.scriptIds.filter((s) => typeof s === 'string') : [],
+      lastSeenAt: now,
+    });
   }
 
   /** Live machines only — a machine without a recent runner poll is
@@ -852,6 +928,8 @@ export class DispatchStore {
         pid: r.pid,
         model: r.model,
         effort: r.effort,
+        scriptId: r.scriptId,
+        args: r.args,
         timeoutSec: r.timeoutSec,
       });
     }
