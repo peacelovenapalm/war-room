@@ -1,15 +1,23 @@
 /**
- * Ops Advisor (T3 self-healing ladder, RUNG 1 — KICKOFF-v4 T3; D-12/D-15).
- * A pure, read-only derivation over telemetry EVERY other store already
- * tracks: agent poll state, dispatch machine advertisements + ledger,
- * budget snapshots, shift stats. No new polling loop, no new persistence,
- * no LLM calls this rung — this module never acts, gates, or spawns
- * anything; it only OBSERVES and reports.
+ * Ops Advisor (T3 self-healing ladder, RUNG 1 read-only + RUNG 2 gated
+ * proposals — KICKOFF-v4 T3; D-12/D-15). A pure derivation over telemetry
+ * EVERY other store already tracks: agent poll state, dispatch machine
+ * advertisements + ledger, budget snapshots, shift stats, the rework bin.
+ * No new polling loop, no new persistence, no LLM calls, and — rung 2's
+ * hard rule — ZERO new server MUTATION capability: `proposedActions` on a
+ * finding only ever names a verb + params for an EXISTING route (kill,
+ * focus, dispatch enqueue, rework redispatch), derived ONLY where that
+ * route is actually available right now (honest availability, mirroring
+ * the UI's own gates — canKillAgent/machineSupportsFocus/a real piled
+ * rework crate). This module itself never calls those routes; it only
+ * proposes. System proposes, Greg disposes.
  *
  * One-tap-real: every finding's `receipts` field cites the raw event(s)
  * behind it (agent id + pollState.since, a dispatch ledger entry's id +
  * exitCode, a budget snapshot's fiveHourUsedPct, …) — never a synthesized
- * or inferred number with nothing underneath it.
+ * or inferred number with nothing underneath it. A `proposedActions`
+ * entry's `label` is the confirm-step text — EXACTLY what tapping confirm
+ * will do, e.g. "KILL agent 4 (pid 812) on MACBOOK".
  *
  * Analyze-on-demand with a short TTL cache, the exact pattern
  * briefingProvider.ts already established for the same reason (GET
@@ -30,6 +38,7 @@ import {
   OPS_RECEIPT_SAMPLE_LIMIT,
 } from './constants.js';
 import { DISPATCH_MACHINE_AD_TTL_MS, dispatchStore } from './dispatchStore.js';
+import { reworkBinStore } from './reworkBinStore.js';
 import { shiftStats } from './shiftStats.js';
 
 export type OpsFindingSeverity = 'info' | 'warn' | 'alert';
@@ -41,6 +50,19 @@ export interface OpsReceipt {
   value: string;
 }
 
+/** RUNG 2: a one-tap proposal wrapping an EXISTING, already-live route —
+ *  never a new mutation capability. `verb` selects which existing client
+ *  path the webview calls; `params` carries exactly what that call needs.
+ *  `label` is the confirm-step text, generated server-side so it's
+ *  consistent with the availability check that produced it. */
+export type OpsProposalVerb = 'kill' | 'focus' | 'dispatch-nudge' | 'requeue';
+
+export interface OpsProposedAction {
+  verb: OpsProposalVerb;
+  label: string;
+  params: Record<string, string | number>;
+}
+
 export interface OpsFinding {
   id: string;
   kind: OpsFindingKind;
@@ -50,6 +72,10 @@ export interface OpsFinding {
   summary: string;
   detail: string;
   receipts: OpsReceipt[];
+  /** Absent (never an empty array) when this finding has nothing real to
+   *  propose — dead-telemetry/budget-burn/efficiency/all-clear never
+   *  fabricate a verb. */
+  proposedActions?: OpsProposedAction[];
 }
 
 export interface OpsReview {
@@ -80,12 +106,54 @@ function formatDuration(ms: number): string {
 
 function blockedAgeFindings(store: AgentStateStore, now: number): OpsFinding[] {
   const findings: OpsFinding[] = [];
+  // Live-only advertisements (getMachines' TTL filter) — the SAME source
+  // dispatchFacts.ts's canKillAgent/machineSupportsFocus read on the
+  // client, so a proposal is only ever offered when the drawer's own
+  // verbs would actually be enabled too.
+  const liveMachines = dispatchStore.getMachines(now);
+
   for (const [id, agent] of store.entries()) {
     const poll = agent.pollState;
     if (!poll || poll.state !== 'blocked') continue;
     const ageMs = now - poll.since;
     if (ageMs < OPS_BLOCKED_WARN_MS) continue;
     const machine = agent.machine ?? 'LOCAL';
+
+    const proposedActions: OpsProposedAction[] = [];
+    const machineAd = liveMachines.find((m) => m.machine === machine);
+    // KILL: pid known AND any live runner on this machine — mirrors
+    // canKillAgent exactly (not gated on the focus flag).
+    if (agent.pid !== undefined && machineAd !== undefined) {
+      proposedActions.push({
+        verb: 'kill',
+        label: `KILL agent ${String(id)} (pid ${String(agent.pid)}) on ${machine}`,
+        params: { machine, pid: agent.pid },
+      });
+    }
+    // FOCUS: pid known AND that machine's runner specifically advertises
+    // focus — mirrors machineSupportsFocus exactly.
+    if (agent.pid !== undefined && machineAd?.focus === true) {
+      proposedActions.push({
+        verb: 'focus',
+        label: `FOCUS agent ${String(id)} (pid ${String(agent.pid)}) on ${machine}`,
+        params: { machine, pid: agent.pid },
+      });
+    }
+    // DISPATCH-NUDGE: only when there's a verbatim waitingFor to reference
+    // — never fabricate a prompt about a decision we don't actually know.
+    if (poll.waitingFor !== undefined && agent.projectDir !== '') {
+      proposedActions.push({
+        verb: 'dispatch-nudge',
+        label: `DISPATCH NUDGE on ${machine}: check agent ${String(id)}, blocked on: ${poll.waitingFor}`,
+        params: {
+          machine,
+          cwd: agent.projectDir,
+          provider: agent.providerId ?? 'claude',
+          prompt: `Agent ${String(id)} on ${machine} (${agent.projectDir}) has been blocked ${formatDuration(ageMs)}, waiting for: "${poll.waitingFor}". Please check on it, make the requested decision if you safely can, and unblock it.`,
+        },
+      });
+    }
+
     findings.push({
       id: `blocked-age-${String(id)}`,
       kind: 'blocked-age',
@@ -101,6 +169,7 @@ function blockedAgeFindings(store: AgentStateStore, now: number): OpsFinding[] {
         { label: 'pollState.since', value: new Date(poll.since).toISOString() },
         { label: 'pollState.waitingFor', value: poll.waitingFor ?? '(none)' },
       ],
+      ...(proposedActions.length > 0 ? { proposedActions } : {}),
     });
   }
   return findings;
@@ -180,6 +249,28 @@ function dispatchWasteFindings(): OpsFinding[] {
     (r) => r.status === 'exited' && r.exitCode !== undefined && r.exitCode !== 0,
   );
   if (failed.length > 0) {
+    // REQUEUE is only proposed for a failure that already has a PILED
+    // rework crate (reworkBinIngest.ts auto-piles exactly these: exited
+    // nonzero or killed) — honest availability, and it means the proposal
+    // reuses the EXISTING POST /api/rework/:id/redispatch route verbatim,
+    // zero new server capability. 'expired' never piles a crate (nothing
+    // ran to fail), so it never gets a REQUEUE proposal.
+    const piledByDispatchId = new Map(
+      reworkBinStore
+        .getPiled()
+        .filter((item) => item.source === 'dispatch')
+        .map((item) => [item.failureRef.id, item]),
+    );
+    const proposedActions: OpsProposedAction[] = [];
+    for (const r of failed.slice(0, OPS_RECEIPT_SAMPLE_LIMIT)) {
+      const crate = piledByDispatchId.get(r.id);
+      if (!crate) continue;
+      proposedActions.push({
+        verb: 'requeue',
+        label: `REQUEUE: ${r.promptPreview ?? '(no prompt)'} on ${r.machine}`,
+        params: { reworkId: crate.id },
+      });
+    }
     findings.push({
       id: 'dispatch-waste-failed',
       kind: 'dispatch-waste',
@@ -190,6 +281,7 @@ function dispatchWasteFindings(): OpsFinding[] {
         label: `dispatch ${r.id.slice(0, 8)}`,
         value: `${r.machine} · ${r.provider ?? '?'} · exit ${String(r.exitCode)}`,
       })),
+      ...(proposedActions.length > 0 ? { proposedActions } : {}),
     });
   }
 

@@ -42,6 +42,7 @@ beforeEach(async () => {
     dispatchStoreMod,
     budgetStoreMod,
     shiftStatsMod,
+    reworkBinStoreMod,
     opsAdvisorMod,
     serverMod,
   ] = await Promise.all([
@@ -49,6 +50,7 @@ beforeEach(async () => {
     import('../src/dispatchStore.js'),
     import('../src/budgetStore.js'),
     import('../src/shiftStats.js'),
+    import('../src/reworkBinStore.js'),
     import('../src/opsAdvisor.js'),
     import('../src/server.js'),
   ]);
@@ -57,6 +59,7 @@ beforeEach(async () => {
     ...dispatchStoreMod,
     ...budgetStoreMod,
     ...shiftStatsMod,
+    ...reworkBinStoreMod,
     ...opsAdvisorMod,
     ...serverMod,
   };
@@ -203,6 +206,142 @@ describe('getOpsReview — BLOCKED-AGE', () => {
     const review = mods.getOpsReview(store, now);
     expect(review.findings.some((f: { kind: string }) => f.kind === 'blocked-age')).toBe(false);
   });
+
+  // ── RUNG 2: proposedActions availability gates ──────────────────
+
+  it('KILL + FOCUS proposals appear only when pid is known AND the machine advertises a live runner (+ focus for FOCUS)', () => {
+    const store = new mods.AgentStateStore();
+    const now = Date.now();
+    mods.dispatchStore.recordAdvertisement(
+      'FOCUSBOX',
+      { providers: ['claude'], roots: ['/tmp'], focus: true },
+      now,
+    );
+    store.set(
+      10,
+      makeAgent(10, {
+        machine: 'FOCUSBOX',
+        pid: 812,
+        pollState: { state: 'blocked', at: now, since: now - 100_000, lastBroadcastAt: now },
+      }),
+    );
+    const review = mods.getOpsReview(store, now);
+    const finding = review.findings.find((f: { id: string }) => f.id === 'blocked-age-10');
+    expect(finding.proposedActions).toContainEqual({
+      verb: 'kill',
+      label: 'KILL agent 10 (pid 812) on FOCUSBOX',
+      params: { machine: 'FOCUSBOX', pid: 812 },
+    });
+    expect(finding.proposedActions).toContainEqual({
+      verb: 'focus',
+      label: 'FOCUS agent 10 (pid 812) on FOCUSBOX',
+      params: { machine: 'FOCUSBOX', pid: 812 },
+    });
+  });
+
+  it('KILL is proposed (no FOCUS) when the runner is live but does not advertise focus', () => {
+    const store = new mods.AgentStateStore();
+    const now = Date.now();
+    mods.dispatchStore.recordAdvertisement(
+      'NOFOCUSBOX',
+      { providers: ['claude'], roots: ['/tmp'], focus: false },
+      now,
+    );
+    store.set(
+      11,
+      makeAgent(11, {
+        machine: 'NOFOCUSBOX',
+        pid: 100,
+        pollState: { state: 'blocked', at: now, since: now - 100_000, lastBroadcastAt: now },
+      }),
+    );
+    const review = mods.getOpsReview(store, now);
+    const finding = review.findings.find((f: { id: string }) => f.id === 'blocked-age-11');
+    const verbs = (finding.proposedActions ?? []).map((a: { verb: string }) => a.verb);
+    expect(verbs).toContain('kill');
+    expect(verbs).not.toContain('focus');
+  });
+
+  it('no KILL/FOCUS proposal when there is no pid, or the machine has no live runner advertisement', () => {
+    const store = new mods.AgentStateStore();
+    const now = Date.now();
+    // Agent 12: pid known, but NO advertisement at all for its machine.
+    store.set(
+      12,
+      makeAgent(12, {
+        machine: 'DARKBOX',
+        pid: 200,
+        pollState: { state: 'blocked', at: now, since: now - 100_000, lastBroadcastAt: now },
+      }),
+    );
+    // Agent 13: a live runner exists, but this agent has no pid.
+    mods.dispatchStore.recordAdvertisement(
+      'NOPIDBOX',
+      { providers: ['claude'], roots: ['/tmp'], focus: true },
+      now,
+    );
+    store.set(
+      13,
+      makeAgent(13, {
+        machine: 'NOPIDBOX',
+        pollState: { state: 'blocked', at: now, since: now - 100_000, lastBroadcastAt: now },
+      }),
+    );
+    const review = mods.getOpsReview(store, now);
+    for (const id of [12, 13]) {
+      const finding = review.findings.find(
+        (f: { id: string }) => f.id === `blocked-age-${String(id)}`,
+      );
+      const verbs = (finding.proposedActions ?? []).map((a: { verb: string }) => a.verb);
+      expect(verbs).not.toContain('kill');
+      expect(verbs).not.toContain('focus');
+    }
+  });
+
+  it('DISPATCH-NUDGE is proposed only when a verbatim waitingFor exists, and its params carry the exact prompt/machine/cwd', () => {
+    const store = new mods.AgentStateStore();
+    const now = Date.now();
+    store.set(
+      14,
+      makeAgent(14, {
+        machine: 'MACBOOK',
+        projectDir: '/Users/dev/proj',
+        providerId: 'codex',
+        pollState: {
+          state: 'blocked',
+          waitingFor: 'Approve: apply migration 0042? (y/n)',
+          at: now,
+          since: now - 100_000,
+          lastBroadcastAt: now,
+        },
+      }),
+    );
+    // Agent 15: blocked, but no waitingFor text — never fabricate a prompt.
+    store.set(
+      15,
+      makeAgent(15, {
+        machine: 'MACBOOK',
+        projectDir: '/Users/dev/other',
+        pollState: { state: 'blocked', at: now, since: now - 100_000, lastBroadcastAt: now },
+      }),
+    );
+    const review = mods.getOpsReview(store, now);
+
+    const finding14 = review.findings.find((f: { id: string }) => f.id === 'blocked-age-14');
+    const nudge = finding14.proposedActions.find(
+      (a: { verb: string }) => a.verb === 'dispatch-nudge',
+    );
+    expect(nudge).toBeDefined();
+    expect(nudge.params.machine).toBe('MACBOOK');
+    expect(nudge.params.cwd).toBe('/Users/dev/proj');
+    expect(nudge.params.provider).toBe('codex');
+    expect(nudge.params.prompt).toContain('Approve: apply migration 0042? (y/n)');
+    expect(nudge.params.prompt).toContain('Agent 14');
+
+    const finding15 = review.findings.find((f: { id: string }) => f.id === 'blocked-age-15');
+    const verbs15 = (finding15.proposedActions ?? []).map((a: { verb: string }) => a.verb);
+    expect(verbs15).not.toContain('dispatch-nudge');
+  });
 });
 
 // ── DEAD-TELEMETRY ───────────────────────────────────────────────
@@ -341,6 +480,74 @@ describe('getOpsReview — DISPATCH-WASTE', () => {
     const review = mods.getOpsReview(store, Date.now());
     expect(review.findings.some((f: { kind: string }) => f.kind === 'dispatch-waste')).toBe(false);
   });
+
+  // ── RUNG 2: REQUEUE proposal — honest availability via a real piled crate ──
+
+  it('REQUEUE is proposed for a failed dispatch that already has a piled rework crate, params carry the reworkId', () => {
+    const store = new mods.AgentStateStore();
+    const result = mods.dispatchStore.enqueue({
+      action: 'dispatch',
+      machine: 'MACBOOK',
+      provider: 'claude',
+      cwd: '/tmp',
+      prompt: 'fails then gets reworked',
+    });
+    mods.dispatchStore.decide(result.record.id, 'accept', { pid: 333 });
+    mods.dispatchStore.reportStatus(result.record.id, { event: 'exited', exitCode: 1 });
+    // Simulates what reworkBinIngest.ts's real subscription does on a
+    // nonzero exit — this test constructs the crate directly rather than
+    // starting the ingest module, but the crate SHAPE (source:'dispatch',
+    // failureRef.id === the dispatch id) is identical either way.
+    const pileResult = mods.reworkBinStore.pile('dispatch', {
+      id: result.record.id,
+      excerpt: 'boom',
+    });
+    expect(pileResult.ok).toBe(true);
+
+    const review = mods.getOpsReview(store, Date.now());
+    const finding = review.findings.find((f: { id: string }) => f.id === 'dispatch-waste-failed');
+    const requeue = finding.proposedActions.find((a: { verb: string }) => a.verb === 'requeue');
+    expect(requeue).toBeDefined();
+    expect(requeue.params.reworkId).toBe(pileResult.item.id);
+    expect(requeue.label).toContain('fails then gets reworked');
+  });
+
+  it('no REQUEUE proposal for a failed dispatch with no piled crate (e.g. already reworked/dismissed)', () => {
+    const store = new mods.AgentStateStore();
+    const result = mods.dispatchStore.enqueue({
+      action: 'dispatch',
+      machine: 'MACBOOK',
+      provider: 'claude',
+      cwd: '/tmp',
+      prompt: 'fails, never piled',
+    });
+    mods.dispatchStore.decide(result.record.id, 'accept', { pid: 444 });
+    mods.dispatchStore.reportStatus(result.record.id, { event: 'exited', exitCode: 1 });
+    const review = mods.getOpsReview(store, Date.now());
+    const finding = review.findings.find((f: { id: string }) => f.id === 'dispatch-waste-failed');
+    const verbs = (finding.proposedActions ?? []).map((a: { verb: string }) => a.verb);
+    expect(verbs).not.toContain('requeue');
+  });
+
+  it('an expired (never-run) dispatch never gets a REQUEUE proposal — reworkBinIngest never piles expired entries', () => {
+    const store = new mods.AgentStateStore();
+    const now = Date.now();
+    const result = mods.dispatchStore.enqueue({
+      action: 'dispatch',
+      machine: 'MACBOOK',
+      provider: 'claude',
+      cwd: '/tmp',
+      prompt: 'never answered',
+    });
+    mods.dispatchStore.sweepExpired(now + 24 * 60 * 60_000);
+    // Even if something HAD piled a crate keyed to this id (shouldn't
+    // happen in practice — expired never triggers pile()), the expired
+    // finding itself never derives proposedActions at all.
+    mods.reworkBinStore.pile('dispatch', { id: result.record.id, excerpt: 'n/a' });
+    const review = mods.getOpsReview(store, now + 24 * 60 * 60_000);
+    const finding = review.findings.find((f: { id: string }) => f.id === 'dispatch-waste-expired');
+    expect(finding.proposedActions).toBeUndefined();
+  });
 });
 
 // ── BUDGET-BURN ──────────────────────────────────────────────────
@@ -399,6 +606,59 @@ describe('getOpsReview — EFFICIENCY', () => {
     const store = new mods.AgentStateStore();
     const review = mods.getOpsReview(store, Date.now());
     expect(review.findings.some((f: { kind: string }) => f.kind === 'efficiency')).toBe(false);
+  });
+});
+
+// ── RUNG 2: kinds that must NEVER fabricate a proposedActions verb ──
+
+describe('getOpsReview — proposedActions absent on kinds with no gated verb', () => {
+  it('dead-telemetry, budget-burn, efficiency, and the all-clear placeholder never carry proposedActions', () => {
+    const store = new mods.AgentStateStore();
+    const now = Date.now();
+
+    // dead-telemetry (dispatch machine ad)
+    mods.dispatchStore.recordAdvertisement(
+      'DEADBOX',
+      { providers: [], roots: [], focus: false },
+      now - mods.DISPATCH_MACHINE_AD_TTL_MS * 4,
+    );
+    // dead-telemetry (budget)
+    mods.budgetStore.reportClaudeSnapshot(
+      { five_hour: { used_percentage: 10 }, seven_day: { used_percentage: 5 } },
+      now - mods.BUDGET_STALE_MS - 60_000,
+    );
+    // budget-burn
+    mods.budgetStore.reportClaudeSnapshot(
+      { five_hour: { used_percentage: 75 }, seven_day: { used_percentage: 20 } },
+      now,
+    );
+    // efficiency
+    mods.shiftStats.recordTokens(0, mods.EFFICIENCY_STEADY_MAX + 5_000, now);
+    mods.shiftStats.recordTurnEnd(now);
+
+    const review = mods.getOpsReview(store, now);
+    const gatedKinds = new Set(['dead-telemetry', 'budget-burn', 'efficiency']);
+    const relevant = review.findings.filter((f: { kind: string }) => gatedKinds.has(f.kind));
+    expect(relevant.length).toBeGreaterThan(0);
+    for (const f of relevant) {
+      expect((f as { proposedActions?: unknown }).proposedActions).toBeUndefined();
+    }
+  });
+
+  it('the all-clear placeholder finding never carries proposedActions', () => {
+    const store = new mods.AgentStateStore();
+    const now = Date.now();
+    // A fresh budget snapshot is required for a genuine all-clear world —
+    // see the "all-clear" describe block above for why a totally untouched
+    // world is NOT all-clear (it's two absence findings instead).
+    mods.budgetStore.reportClaudeSnapshot(
+      { five_hour: { used_percentage: 5 }, seven_day: { used_percentage: 5 } },
+      now,
+    );
+    const review = mods.getOpsReview(store, now);
+    const allClear = review.findings.find((f: { kind: string }) => f.kind === 'all-clear');
+    expect(allClear).toBeDefined();
+    expect((allClear as { proposedActions?: unknown }).proposedActions).toBeUndefined();
   });
 });
 
