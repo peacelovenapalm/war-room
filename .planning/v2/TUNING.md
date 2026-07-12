@@ -1011,3 +1011,20 @@ managed flag not client-assertable; auth tiers correct; no 500-paths).
 - **Meta**: worth keeping — codex's BLOCK calibration assumes an
   internet-facing server; reconciler must re-weigh findings against the
   actual tailnet trust tier every phase, in BOTH directions.
+
+## Phase-6 (face-merge) review reconcile (2026-07-12)
+
+- codex SHIP-WITH-FIXES → reconciled SHIP-WITH-FIXES; all 4 confirmed
+  findings FIXED same pass (882c6d1): open redirect in the /v3 301,
+  installed-PWA /v3 deep-link swallow (SW denylist), touchcancel tooltip
+  stick, toolActivity map pruning.
+- **TICKET (pre-existing)**: server never re-validates
+  `dispatchRequest{action:'focus'}` against the target machine's advertised
+  `focus:true` capability — runner-decides architecture holds today, but a
+  server-side check would close the forged-message path. Not introduced by
+  this phase (zero focus-related server hits in a92be72..57c9d90).
+- Lane isolation lesson: Agent worktree isolation keyed off the SESSION's
+  repo, not the target repo — 2 of 3 lanes edited the shared checkout
+  concurrently. Caught by build cross-contamination. Next time: tell lanes
+  to `git worktree add` the TARGET repo themselves as step 1, and verify
+  `git -C /Users/greg/code/war-room status` stays clean after lane launch.
