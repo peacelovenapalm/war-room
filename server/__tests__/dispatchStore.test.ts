@@ -236,7 +236,7 @@ describe('DispatchStore.enqueue', () => {
 
   it('P5: a session WITH a brief gets the SESSION preamble variant, preview strips it', () => {
     const s = new DispatchStore(statePath, auditPath);
-    let seen: DispatchBroadcast | undefined;
+    let seen: { promptPreview?: string } | undefined;
     s.onUpdate((b) => {
       seen = b;
     });

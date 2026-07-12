@@ -1,6 +1,8 @@
 import { describe, expect, it } from 'vitest';
 
 import {
+  COMPUTE_MAX_ARGS_CEILING,
+  parseComputeArgs,
   applySkillPrefix,
   buildCopyIdLine,
   canKillAgent,
@@ -102,5 +104,32 @@ describe('applySkillPrefix (4B SKILL picker mechanic)', () => {
 
   it('is a no-op pass-through when neither prevSkill nor nextSkill is set', () => {
     expect(applySkillPrefix('just a prompt', undefined, undefined)).toBe('just a prompt');
+  });
+});
+
+describe('parseComputeArgs (T8 compute — client-side arg-token hints)', () => {
+  it('empty / whitespace-only input parses to zero args', () => {
+    expect(parseComputeArgs('')).toEqual({ ok: true, args: [] });
+    expect(parseComputeArgs('   ')).toEqual({ ok: true, args: [] });
+  });
+
+  it('splits on any whitespace run into plain tokens', () => {
+    expect(parseComputeArgs(' --limit=50  /data/in.csv batch,2 ')).toEqual({
+      ok: true,
+      args: ['--limit=50', '/data/in.csv', 'batch,2'],
+    });
+  });
+
+  it('rejects shell metacharacters and control chars token-by-token', () => {
+    for (const bad of ['a;b', '$(x)', 'a|b', 'a"b', "a'b", 'a\tstillonetoken?`']) {
+      const parsed = parseComputeArgs(bad);
+      expect(parsed.ok).toBe(false);
+    }
+  });
+
+  it('rejects more than the ceiling and overlong tokens', () => {
+    const many = Array.from({ length: COMPUTE_MAX_ARGS_CEILING + 1 }, (_, i) => `a${String(i)}`);
+    expect(parseComputeArgs(many.join(' ')).ok).toBe(false);
+    expect(parseComputeArgs('x'.repeat(257)).ok).toBe(false);
   });
 });

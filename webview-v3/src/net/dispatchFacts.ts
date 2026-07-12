@@ -69,6 +69,39 @@ export type DispatchProvider = (typeof DISPATCH_PROVIDERS)[number];
  *  2026-07-08 scope change: Google killed the CLI's free tier). */
 export const DISPATCH_UI_PROVIDERS: readonly DispatchProvider[] = ['claude', 'codex'];
 
+/** T8 Mini compute — the non-LLM provider value (server ALL_DISPATCH_PROVIDERS).
+ *  Offered in the CALL modal only when the machine advertises scriptIds, and
+ *  only for one-shot dispatch — the server rejects a shell session outright
+ *  ('shell-cannot-be-a-session'). */
+export const DISPATCH_COMPUTE_PROVIDER = 'shell' as const;
+/** What the CALL modal's PROVIDER picker can actually hold. */
+export type CallProvider = DispatchProvider | typeof DISPATCH_COMPUTE_PROVIDER;
+
+/** Client-side mirrors of bin/lib/dispatch-rules.mjs COMPUTE_ARG_PATTERN and
+ *  COMPUTE_MAX_ARGS_CEILING — inline-hint validation only; the server and
+ *  the runner's machine-local allowlist re-validate for real. */
+export const COMPUTE_ARG_PATTERN = /^[a-zA-Z0-9._/=:@,+-]{1,256}$/;
+export const COMPUTE_MAX_ARGS_CEILING = 16;
+
+export type ComputeArgsParse = { ok: true; args: string[] } | { ok: false; reason: string };
+
+/** Split the ARGS field into plain argv tokens (whitespace-separated).
+ *  Quoting is deliberately unsupported: every token must already be a safe
+ *  plain token, so a quote could only add ambiguity about what rides argv. */
+export function parseComputeArgs(input: string): ComputeArgsParse {
+  const trimmed = input.trim();
+  const tokens = trimmed === '' ? [] : trimmed.split(/\s+/);
+  if (tokens.length > COMPUTE_MAX_ARGS_CEILING) {
+    return { ok: false, reason: `too many args (max ${String(COMPUTE_MAX_ARGS_CEILING)})` };
+  }
+  for (const token of tokens) {
+    if (!COMPUTE_ARG_PATTERN.test(token)) {
+      return { ok: false, reason: `unsafe arg token: ${token.slice(0, 32)}` };
+    }
+  }
+  return { ok: true, args: tokens };
+}
+
 export const DISPATCH_STATUSES = [
   'ringing',
   'answered',

@@ -3,6 +3,8 @@ import { useEffect, useState } from 'react';
 import type { ClientMessage } from '../../../core/src/messages.js';
 import {
   applySkillPrefix,
+  type CallProvider,
+  DISPATCH_COMPUTE_PROVIDER,
   DISPATCH_EFFORT_PROVIDERS,
   DISPATCH_EFFORT_VALUES,
   DISPATCH_MODEL_OPTIONS,
@@ -16,6 +18,7 @@ import {
   type DispatchPermissionMode,
   type DispatchProvider,
   joinRootSubpath,
+  parseComputeArgs,
   promptRemaining,
   splitCwdIntoRootSubpath,
   type SubpathJoinResult,
@@ -60,10 +63,15 @@ export function CallModal({ isOpen, onClose, prefill, send, onSend, budget }: Ca
   const [machines, setMachines] = useState<DispatchMachine[]>([]);
   const [fetchFailed, setFetchFailed] = useState(false);
   const [machine, setMachine] = useState('');
-  const [provider, setProvider] = useState<DispatchProvider | ''>('');
+  const [provider, setProvider] = useState<CallProvider | ''>('');
   const [root, setRoot] = useState('');
   const [subpath, setSubpath] = useState('');
   const [prompt, setPrompt] = useState('');
+  // T8 Mini compute — SCRIPT pick + plain-token ARGS (shell provider only).
+  // The wire carries the opaque scriptId; only the machine-local allowlist
+  // resolves it to an interpreter + path.
+  const [scriptId, setScriptId] = useState('');
+  const [argsInput, setArgsInput] = useState('');
   const [model, setModel] = useState('');
   const [effort, setEffort] = useState<DispatchEffort | ''>('');
   // 4B SKILL picker (claude provider only) — '' means "— none —"; the
@@ -125,6 +133,8 @@ export function CallModal({ isOpen, onClose, prefill, send, onSend, budget }: Ca
       setSkill('');
       setPermissionMode('default');
       setTimeoutSecInput('');
+      setScriptId('');
+      setArgsInput('');
       setPendingPrefillCwd(prefill?.cwd ?? '');
     }
   }
@@ -152,8 +162,18 @@ export function CallModal({ isOpen, onClose, prefill, send, onSend, budget }: Ca
     root.trim() !== ''
       ? joinRootSubpath(root, subpath)
       : { ok: false, reason: 'no project chosen' };
-  const showEffort = provider !== '' && DISPATCH_EFFORT_PROVIDERS.includes(provider);
-  const modelOptions = provider !== '' ? (DISPATCH_MODEL_OPTIONS[provider] ?? []) : [];
+  // T8: `!== DISPATCH_COMPUTE_PROVIDER` first so TS narrows CallProvider back
+  // to DispatchProvider for the LLM-only lookups below.
+  const isShell = provider === DISPATCH_COMPUTE_PROVIDER;
+  const argsParse = parseComputeArgs(argsInput);
+  const showEffort =
+    provider !== '' &&
+    provider !== DISPATCH_COMPUTE_PROVIDER &&
+    DISPATCH_EFFORT_PROVIDERS.includes(provider);
+  const modelOptions =
+    provider !== '' && provider !== DISPATCH_COMPUTE_PROVIDER
+      ? (DISPATCH_MODEL_OPTIONS[provider] ?? [])
+      : [];
   // T5 fleet controls, PER-DISPATCH TIME CAP — empty means no cap; anything
   // else must parse as a positive integer within bounds, or Send stays
   // disabled with an honest inline reason (never silently dropped/clamped).
@@ -172,22 +192,42 @@ export function CallModal({ isOpen, onClose, prefill, send, onSend, budget }: Ca
   const canSubmit =
     machine.trim() !== '' &&
     provider !== '' &&
-    joined.ok &&
-    remaining >= 0 &&
-    (mode === 'session'
-      ? selectedMachine?.sessions === true
-      : prompt.trim() !== '' && timeoutValid);
+    (isShell
+      ? // T8 compute: no cwd/prompt on the wire — a script pick is the whole
+        // identity; the server rejects shell sessions, so dispatch-only.
+        mode === 'dispatch' && scriptId !== '' && argsParse.ok && timeoutValid
+      : joined.ok &&
+        remaining >= 0 &&
+        (mode === 'session'
+          ? selectedMachine?.sessions === true
+          : prompt.trim() !== '' && timeoutValid));
   const resetHint = budgetResetHintLine(budget, provider || undefined);
 
   const handleSubmit = () => {
-    // canSubmit already guarantees provider !== '' (its own definition
-    // checks it) — TS's aliased-condition narrowing carries that fact
-    // forward from here, so `provider` below is DispatchProvider, not ''.
-    if (!canSubmit || !joined.ok || !joined.cwd) return;
+    if (!canSubmit || provider === '') return;
     // Correlation id (asyncapi DispatchRequest.requestId): echoed on every
     // dispatchUpdate for this queue entry, so the silent-drop detector can
     // tell exactly which send a broadcast answers.
     const requestId = crypto.randomUUID();
+    if (provider === DISPATCH_COMPUTE_PROVIDER) {
+      if (!argsParse.ok) return;
+      send({
+        type: 'dispatchRequest',
+        action: 'dispatch',
+        machine,
+        provider,
+        scriptId,
+        requestId,
+        ...(argsParse.args.length > 0 ? { args: argsParse.args } : {}),
+        ...(timeoutTrimmed !== '' && timeoutParsed !== undefined
+          ? { timeoutSec: timeoutParsed }
+          : {}),
+      });
+      onSend(machine, 'dispatch', requestId);
+      onClose();
+      return;
+    }
+    if (!joined.ok || !joined.cwd) return;
     send({
       type: 'dispatchRequest',
       action: mode,
@@ -230,6 +270,13 @@ export function CallModal({ isOpen, onClose, prefill, send, onSend, budget }: Ca
           data-testid="call-mode-session"
           onClick={() => {
             setMode('session');
+            // T8: shell can never be a session (server denies outright) —
+            // reset rather than leaving an unsendable pick armed.
+            if (provider === DISPATCH_COMPUTE_PROVIDER) {
+              setProvider('');
+              setScriptId('');
+              setArgsInput('');
+            }
           }}
         >
           PERSISTENT SESSION
@@ -288,9 +335,13 @@ export function CallModal({ isOpen, onClose, prefill, send, onSend, budget }: Ca
                 <select
                   value={provider}
                   onChange={(e) => {
-                    const nextProvider = e.target.value as DispatchProvider;
+                    const nextProvider = e.target.value as CallProvider;
                     setProvider(nextProvider);
                     setModel('');
+                    if (nextProvider !== DISPATCH_COMPUTE_PROVIDER) {
+                      setScriptId('');
+                      setArgsInput('');
+                    }
                     if (nextProvider !== 'claude') {
                       // SKILL + PERMISSION are claude-only concepts — strip
                       // any inserted skill prefix and reset the toggle
@@ -310,22 +361,71 @@ export function CallModal({ isOpen, onClose, prefill, send, onSend, budget }: Ca
                         {p}
                       </option>
                     ))}
+                  {/* T8 compute — offered only when the machine's allowlist
+                      actually registers scripts (honest absence, matching the
+                      sessions/skills gates), and never for a session. */}
+                  {mode === 'dispatch' && (selectedMachine.scriptIds?.length ?? 0) > 0 && (
+                    <option value={DISPATCH_COMPUTE_PROVIDER}>shell — compute script</option>
+                  )}
                 </select>
               </label>
 
-              <label className="field">
-                <span className="field__label">PROJECT</span>
-                <select value={root} onChange={(e) => setRoot(e.target.value)}>
-                  <option value="">— choose a project —</option>
-                  {selectedMachine.roots.map((r) => (
-                    <option key={r} value={r}>
-                      {r}
-                    </option>
-                  ))}
-                </select>
-              </label>
+              {isShell && (
+                <>
+                  <label className="field">
+                    <span className="field__label">SCRIPT</span>
+                    <select
+                      value={scriptId}
+                      data-testid="call-script-select"
+                      onChange={(e) => setScriptId(e.target.value)}
+                    >
+                      <option value="">— choose a script —</option>
+                      {[...(selectedMachine.scriptIds ?? [])].sort().map((s) => (
+                        <option key={s} value={s}>
+                          {s}
+                        </option>
+                      ))}
+                    </select>
+                    <span className="field__hint">
+                      runs the machine-local allowlisted script — the wire never carries a path or
+                      command
+                    </span>
+                  </label>
+                  <label className="field">
+                    <span className="field__label">ARGS (optional)</span>
+                    <input
+                      type="text"
+                      value={argsInput}
+                      data-testid="call-args-input"
+                      onChange={(e) => setArgsInput(e.target.value)}
+                      placeholder="plain tokens, space-separated"
+                    />
+                    <span
+                      className={argsParse.ok ? 'field__hint' : 'field__hint field__hint--warn'}
+                    >
+                      {argsParse.ok
+                        ? 'each token: letters/digits and . _ / = : @ , + - (no shell metacharacters)'
+                        : `⚠ ${argsParse.reason}`}
+                    </span>
+                  </label>
+                </>
+              )}
 
-              {root && (
+              {!isShell && (
+                <label className="field">
+                  <span className="field__label">PROJECT</span>
+                  <select value={root} onChange={(e) => setRoot(e.target.value)}>
+                    <option value="">— choose a project —</option>
+                    {selectedMachine.roots.map((r) => (
+                      <option key={r} value={r}>
+                        {r}
+                      </option>
+                    ))}
+                  </select>
+                </label>
+              )}
+
+              {!isShell && root && (
                 <label className="field">
                   <span className="field__label">SUBFOLDER (optional)</span>
                   <input
@@ -342,17 +442,19 @@ export function CallModal({ isOpen, onClose, prefill, send, onSend, budget }: Ca
                 </label>
               )}
 
-              <label className="field">
-                <span className="field__label">MODEL (optional)</span>
-                <select value={model} onChange={(e) => setModel(e.target.value)}>
-                  {modelOptions.length === 0 && <option value="">default (no flag)</option>}
-                  {modelOptions.map((opt) => (
-                    <option key={opt.value} value={opt.value}>
-                      {opt.label}
-                    </option>
-                  ))}
-                </select>
-              </label>
+              {!isShell && (
+                <label className="field">
+                  <span className="field__label">MODEL (optional)</span>
+                  <select value={model} onChange={(e) => setModel(e.target.value)}>
+                    {modelOptions.length === 0 && <option value="">default (no flag)</option>}
+                    {modelOptions.map((opt) => (
+                      <option key={opt.value} value={opt.value}>
+                        {opt.label}
+                      </option>
+                    ))}
+                  </select>
+                </label>
+              )}
 
               {showEffort && (
                 <label className="field">
@@ -453,24 +555,27 @@ export function CallModal({ isOpen, onClose, prefill, send, onSend, budget }: Ca
             </label>
           )}
 
-          <label className="field">
-            <span className="field__label">
-              {mode === 'session' ? 'OPENING BRIEF (optional)' : 'PROMPT'}
-            </span>
-            <textarea
-              value={prompt}
-              maxLength={DISPATCH_PROMPT_MAX_CHARS}
-              onChange={(e) => setPrompt(e.target.value)}
-              placeholder={
-                mode === 'session'
-                  ? 'Optional — the session can also launch with nothing queued yet'
-                  : 'What should this session do?'
-              }
-            />
-            <span className={remaining < 0 ? 'field__hint field__hint--warn' : 'field__hint'}>
-              {remaining} chars remaining
-            </span>
-          </label>
+          {/* T8: a compute dispatch has no prompt — the script IS the brief. */}
+          {!isShell && (
+            <label className="field">
+              <span className="field__label">
+                {mode === 'session' ? 'OPENING BRIEF (optional)' : 'PROMPT'}
+              </span>
+              <textarea
+                value={prompt}
+                maxLength={DISPATCH_PROMPT_MAX_CHARS}
+                onChange={(e) => setPrompt(e.target.value)}
+                placeholder={
+                  mode === 'session'
+                    ? 'Optional — the session can also launch with nothing queued yet'
+                    : 'What should this session do?'
+                }
+              />
+              <span className={remaining < 0 ? 'field__hint field__hint--warn' : 'field__hint'}>
+                {remaining} chars remaining
+              </span>
+            </label>
+          )}
 
           <div className="modal__actions">
             <span
