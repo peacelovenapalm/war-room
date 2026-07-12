@@ -35,6 +35,22 @@ export const COLOR_PROP_RIGHT = '#3f4658';
  *  is the occupant block + the DOM chip's shape+text). */
 export const COLOR_DESK_GLOW = 'rgba(224, 178, 90, 0.16)';
 
+/** DISTRICTS view (Phase 5 Lane C, T7/D-35) building placeholder — one
+ *  fixed palette for every district's box (shape/height carries the real
+ *  signal — floor count from progress — never the color; see
+ *  engine/districtScene.ts). Deliberately distinct luminance from the desk
+ *  placeholder above so a building never gets mistaken for office
+ *  furniture if the two views were ever composited. */
+export const COLOR_DISTRICT_TOP = '#7a8ba8';
+export const COLOR_DISTRICT_LEFT = '#4e5c78';
+export const COLOR_DISTRICT_RIGHT = '#3c4863';
+/** Unknown-state building (no configured/readable STATE.md) — a visibly
+ *  flatter, desaturated placeholder so "no data" reads as visually
+ *  distinct from "0% progress" even before the DOM label is read. */
+export const COLOR_DISTRICT_UNKNOWN_TOP = '#5a6070';
+export const COLOR_DISTRICT_UNKNOWN_LEFT = '#3e4350';
+export const COLOR_DISTRICT_UNKNOWN_RIGHT = '#333743';
+
 /** Ambient walker placeholder (janitor / drift / pace) — a distinctly
  *  SMALLER, rounder-footprint box than any desk/prop (shape difference,
  *  not color-only) so it reads as "a small moving figure" even in

@@ -1314,6 +1314,60 @@ body,
   padding-left: 8px;
 }
 
+/* ── DISTRICTS view ─────────────────────────────────────────────────── */
+
+.districts__scene {
+  position: relative;
+  width: 100%;
+  height: 220px;
+  background: #171b22;
+  border: 1px solid #2c3240;
+  overflow: hidden;
+}
+
+.districts__scene canvas {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  cursor: pointer;
+}
+
+.districts__plaque {
+  position: absolute;
+  transform: translate(-50%, -100%);
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  padding: 2px 6px;
+  background: #101318;
+  border: 1px solid #3a4150;
+  color: inherit;
+  font: inherit;
+  font-size: 11px;
+  white-space: nowrap;
+  cursor: pointer;
+}
+
+.districts__plaque-glyph {
+  flex-shrink: 0;
+  font-weight: 700;
+}
+
+.districts__info {
+  padding-top: 8px;
+  border-top: 1px solid #232936;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.districts__info-head {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
 /* ── Shift panel ────────────────────────────────────────────────────── */
 
 .shift-rows {
