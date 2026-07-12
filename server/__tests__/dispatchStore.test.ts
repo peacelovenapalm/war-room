@@ -16,6 +16,7 @@ import {
   DISPATCH_CONTEXT_PREAMBLE,
   DISPATCH_RESULT_TAIL_MAX_CHARS,
   DISPATCH_RINGING_CAP,
+  DISPATCH_SESSION_PREAMBLE,
   DispatchStore,
 } from '../src/dispatchStore.js';
 
@@ -231,6 +232,42 @@ describe('DispatchStore.enqueue', () => {
     expect(item.prompt).toBe(`${DISPATCH_CONTEXT_PREAMBLE}human words here`);
     // Broadcast preview shows the HUMAN words, not the boilerplate.
     expect(seen?.promptPreview).toBe('human words here');
+  });
+
+  it('P5: a session WITH a brief gets the SESSION preamble variant, preview strips it', () => {
+    const s = new DispatchStore(statePath, auditPath);
+    let seen: DispatchBroadcast | undefined;
+    s.onUpdate((b) => {
+      seen = b;
+    });
+    const enq = s.enqueue({
+      action: 'session',
+      machine: 'MACBOOK',
+      provider: 'claude',
+      cwd: '/x',
+      prompt: 'plan the milestone',
+    });
+    expect(enq.ok).toBe(true);
+    const item = s.pendingFor('MACBOOK')[0];
+    expect(item.prompt).toBe(`${DISPATCH_SESSION_PREAMBLE}plan the milestone`);
+    // Session variant tells the agent it CAN be answered; job variant must not leak in.
+    expect(item.prompt).toContain('PERSISTENT session');
+    expect(item.prompt).not.toContain('ONE-SHOT job');
+    expect(seen?.promptPreview).toBe('plan the milestone');
+  });
+
+  it('P5: re-enqueue of an already-preambled prompt keeps its variant, never double-prefixes', () => {
+    const s = new DispatchStore(statePath, auditPath);
+    const enq = s.enqueue({
+      action: 'dispatch',
+      machine: 'MACBOOK',
+      provider: 'claude',
+      cwd: '/x',
+      prompt: `${DISPATCH_SESSION_PREAMBLE}carried over from a session`,
+    });
+    expect(enq.ok).toBe(true);
+    const item = s.pendingFor('MACBOOK')[0];
+    expect(item.prompt).toBe(`${DISPATCH_SESSION_PREAMBLE}carried over from a session`);
   });
 
   it('4B: a session with no brief stays bare — no preamble injected', () => {

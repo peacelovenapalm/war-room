@@ -96,21 +96,48 @@ export type DispatchEffort = (typeof DISPATCH_EFFORT_VALUES)[number];
 export const DISPATCH_PERMISSION_MODE_VALUES = ['default', 'plan'] as const;
 export type DispatchPermissionMode = (typeof DISPATCH_PERMISSION_MODE_VALUES)[number];
 
-/** 4B dispatch context preamble — prefixed onto every non-empty LLM prompt
+/** 4B/5 dispatch context preamble — prefixed onto every non-empty LLM prompt
  *  at ENQUEUE time (never in pendingFor) so the persisted record, the audit
  *  log, and the runner all carry the EXACT same text. Rationale: a
  *  dispatched agent otherwise has zero idea a console drove it (verified
  *  live 2026-07-12 — it couldn't say what UI it ran under). Sessions
  *  launched with no brief stay bare — injecting a preamble there would turn
  *  a bare TUI launch into a running turn. promptPreview strips this prefix
- *  (the human's own words are the useful preview; the audit keeps it all). */
-export const DISPATCH_CONTEXT_PREAMBLE =
+ *  (the human's own words are the useful preview; the audit keeps it all).
+ *  Phase 5 split: jobs and sessions share a base but diverge on the
+ *  interaction contract — a one-shot job must never stall on a question
+ *  (nobody can answer it), while a managed session CAN be answered from the
+ *  board (T2 remote-answer plane). Both tell the agent to restate this
+ *  context when spawning subagents — Greg's dispatched gsd agent proved
+ *  skill-spawned subagents otherwise self-report "not in war room". */
+const DISPATCH_PREAMBLE_BASE =
   '[WAR ROOM] You were dispatched from the War Room console. Your final output ' +
   'is read on a phone dashboard tray — lead with the outcome and keep it tight. ' +
   'The knowledge vault lives at /Users/greg/Brain2/vault (knowledge graph: ' +
   'python3 vault/scripts/graph_query.py --help, run from /Users/greg/Brain2/vault) — ' +
   'consult it before re-deriving project context. If other agents may share ' +
-  'your checkout, prefer an isolated git worktree for writes.\n\n---\n\n';
+  'your checkout, prefer an isolated git worktree for writes. If you spawn ' +
+  'subagents (or invoke a skill that does), restate this dispatch context in ' +
+  'their prompts — they cannot see it otherwise. ';
+export const DISPATCH_CONTEXT_PREAMBLE =
+  DISPATCH_PREAMBLE_BASE +
+  'This is a ONE-SHOT job: no human can answer questions mid-run, so never stop ' +
+  'to ask — state your assumptions and proceed.\n\n---\n\n';
+export const DISPATCH_SESSION_PREAMBLE =
+  DISPATCH_PREAMBLE_BASE +
+  'This is a PERSISTENT session: an operator can send answers remotely from the ' +
+  'console. If genuinely blocked, ask ONE concise question and wait.\n\n---\n\n';
+/** Neither variant prefixes the other (suffixes diverge at the first char
+ *  past the shared base), so a plain startsWith sweep is unambiguous. */
+const DISPATCH_PREAMBLES = [DISPATCH_CONTEXT_PREAMBLE, DISPATCH_SESSION_PREAMBLE] as const;
+export function stripDispatchPreamble(prompt: string): string {
+  for (const p of DISPATCH_PREAMBLES) {
+    if (prompt.startsWith(p)) return prompt.slice(p.length);
+  }
+  return prompt;
+}
+const hasDispatchPreamble = (prompt: string): boolean =>
+  DISPATCH_PREAMBLES.some((p) => prompt.startsWith(p));
 
 /** A short model identifier/alias (e.g. 'fable', 'claude-fable-5', 'o3') —
  *  intentionally permissive (covers every provider's own naming scheme)
@@ -608,13 +635,17 @@ export class DispatchStore {
     // 4B context preamble: applied HERE (post-validation, pre-persist) so
     // record/audit/runner all carry identical text. Length-checked against
     // the human's prompt above — the preamble is server-owned constant cost.
-    // startsWith guard: a re-dispatch (getRedispatchInput) feeds the STORED
-    // prompt back through enqueue — never double-prefix it.
+    // Variant by action (Phase 5): jobs are told one-shot/no-questions,
+    // sessions are told the board can answer them. hasDispatchPreamble
+    // guard: a re-dispatch (getRedispatchInput) feeds the STORED prompt
+    // back through enqueue — never double-prefix, and keep whichever
+    // variant the original run carried.
     const prompt =
       isLlmRun && typeof input.prompt === 'string' && input.prompt.trim() !== ''
-        ? input.prompt.startsWith(DISPATCH_CONTEXT_PREAMBLE)
+        ? hasDispatchPreamble(input.prompt)
           ? input.prompt
-          : DISPATCH_CONTEXT_PREAMBLE + input.prompt
+          : (input.action === 'session' ? DISPATCH_SESSION_PREAMBLE : DISPATCH_CONTEXT_PREAMBLE) +
+            input.prompt
         : undefined;
     const commonFields = {
       id: randomUUID(),
@@ -1358,10 +1389,7 @@ export class DispatchStore {
       promptPreview:
         record.prompt === undefined
           ? undefined
-          : (record.prompt.startsWith(DISPATCH_CONTEXT_PREAMBLE)
-              ? record.prompt.slice(DISPATCH_CONTEXT_PREAMBLE.length)
-              : record.prompt
-            ).slice(0, DISPATCH_PROMPT_PREVIEW_MAX_CHARS),
+          : stripDispatchPreamble(record.prompt).slice(0, DISPATCH_PROMPT_PREVIEW_MAX_CHARS),
       reason: record.reason,
       pid: record.pid,
       exitCode: record.exitCode,

@@ -22,7 +22,7 @@ vi.mock('os', async () => {
   return { ...actual, homedir: () => tmpBase };
 });
 
-const { DispatchStore, ANSWER_TEXT_MAX_CHARS, DISPATCH_CONTEXT_PREAMBLE } =
+const { DispatchStore, ANSWER_TEXT_MAX_CHARS, DISPATCH_SESSION_PREAMBLE } =
   await import('../src/dispatchStore.js');
 const { PixelAgentsServer } = await import('../src/server.js');
 const { AgentStateStore } = await import('../src/agentStateStore.js');
@@ -103,7 +103,8 @@ describe('DispatchStore: session action', () => {
     });
     expect(ok.ok).toBe(true);
     const item = store.pendingFor('M1')[0];
-    expect(item.prompt).toBe(`${DISPATCH_CONTEXT_PREAMBLE}opening brief`);
+    // P5: sessions carry the SESSION preamble variant (answerable from the board).
+    expect(item.prompt).toBe(`${DISPATCH_SESSION_PREAMBLE}opening brief`);
     expect(item.model).toBe('fable');
 
     const capped = store.enqueue({
