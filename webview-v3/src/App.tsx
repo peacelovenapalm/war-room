@@ -11,6 +11,7 @@ import { type ChipFrame, ChipLayer } from './components/ChipLayer';
 import { ContractsPanel } from './components/ContractsPanel';
 import { DebugView, type DiagnosticsRow } from './components/DebugView';
 import { DispatchTray } from './components/DispatchTray';
+import { DispatchVisitorChips } from './components/DispatchVisitorChips';
 import { FloorFeed } from './components/FloorFeed';
 import { GraphSearchPanel } from './components/GraphSearchPanel';
 import { HelpModal } from './components/HelpModal';
@@ -22,6 +23,7 @@ import { PropHotspots } from './components/PropHotspots';
 import { RealSheet } from './components/RealSheet';
 import { SettingsModal } from './components/SettingsModal';
 import { ShiftPanel } from './components/ShiftPanel';
+import { SpeechBubbleLayer } from './components/SpeechBubbleLayer';
 import { TriageBoard } from './components/TriageBoard';
 import {
   type CalmTransition,
@@ -48,14 +50,17 @@ import {
   DEFAULT_COLS,
   DEFAULT_MAX_ELEVATION,
   DEFAULT_ROWS,
+  GUEST_SLOTS,
   occupiedDeskAnchors,
   outfitForAgent,
+  outfitForDispatchId,
   STATIC_PROP_SPRITE_NAMES,
   type WorldProp,
 } from './engine/world';
 import { type AgentMap, EMPTY_AGENTS, reduceAgents, toOccupants } from './net/agentStore';
 import { type ConnectionStatus, connectToServer, type ServerConnection } from './net/connection';
 import {
+  clearTerminalDispatchEntries,
   detectSendFailures,
   type DispatchActionValue,
   type DispatchEntry,
@@ -80,6 +85,7 @@ import {
   reduceCrisisState,
   sweepAcks,
 } from './state/crisisStore';
+import { deriveDispatchVisitors, type DispatchVisitor } from './state/dispatchVisitors';
 import { type EconomySnapshot, reduceEconomy } from './state/economy';
 import {
   appendFloorFeedEntry,
@@ -91,6 +97,16 @@ import { buildRealSheet, type RealSheetKind, tallyAgents, wingCounts } from './s
 import { parseLaunchTarget } from './state/launch';
 import { pinAgent, unpinAgent } from './state/pinDock';
 import { reduceSettings, type SettingsSnapshot } from './state/settings';
+import {
+  appendSpeechBubble,
+  detectNewlyLoudAgents,
+  detectNewlyTerminalDispatches,
+  dispatchDoneBubbleText,
+  dispatchStatusSnapshot,
+  loudAgentIds,
+  pruneSpeechBubbles,
+  type SpeechBubbleEvent,
+} from './state/speechBubbles';
 import { reduceAutomationStopped, stoppedFromOrders } from './state/stopAll';
 import {
   appendChunk,
@@ -196,6 +212,9 @@ export default function App() {
   // that already redraws (draw() itself stays a stable ref-reading
   // callback, matching every other piece of frame state here).
   const walkerInputsRef = useRef<WalkerAgentInput[]>([]);
+  // T6 item 1 (dispatch visitors) — same "ref recomputed on the redraw
+  // effect, read fresh inside draw()" convention as walkerInputsRef.
+  const dispatchVisitorsRef = useRef<DispatchVisitor[]>([]);
   const calmRef = useRef<CalmTransition>(INITIAL_CALM);
   // Source-of-truth refs for values reduced OUTSIDE render (WS callbacks +
   // the age tick); the matching useState mirrors them for rendering.
@@ -241,9 +260,21 @@ export default function App() {
   const [diagnostics, setDiagnostics] = useState<DiagnosticsRow[]>([]);
   const [callPrefill, setCallPrefill] = useState<CallModalPrefill | null>(null);
   const [viewingResult, setViewingResult] = useState<DispatchEntry | null>(null);
+  // T6 item 3 — speech bubbles: rising-edge trackers (state/speechBubbles.ts)
+  // so a still-loud agent or still-terminal dispatch never re-bubbles.
+  const [speechBubbles, setSpeechBubbles] = useState<readonly SpeechBubbleEvent[]>([]);
+  const prevLoudAgentIdsRef = useRef<ReadonlySet<number>>(new Set());
+  const prevDispatchStatusesRef = useRef<ReadonlyMap<string, DispatchEntry['status']>>(new Map());
 
   const occupants = useMemo(() => toOccupants(agents, now), [agents, now]);
   const occupantsRef = useRef(occupants);
+  // T6 item 1 — render-time mirror of dispatchVisitorsRef for the DOM chip
+  // layer (the canvas world reads the ref inside draw(); this memo is only
+  // for JSX, same split as occupants/occupantsRef above).
+  const dispatchVisitors = useMemo(
+    () => deriveDispatchVisitors(dispatchEntries),
+    [dispatchEntries],
+  );
 
   const draw = useCallback(() => {
     const container = containerRef.current;
@@ -304,13 +335,31 @@ export default function App() {
       // outfit; drift/pace wear the same outfit as their desk sprite.
       walkerOutfit: pose.agentId !== undefined ? outfitForAgent(pose.agentId) : 'rust',
     }));
+    // T6 item 1 — dispatch visitors: RUNNING dispatches (state/
+    // dispatchVisitors.ts) rendered as a stationary guest presence, same
+    // WorldProp shape as an ambient walker (walkerPoseKind:'visitor' picks
+    // the 'sit' pose in renderer.ts instead of a walk cycle).
+    const visitorProps: WorldProp[] = dispatchVisitorsRef.current.flatMap((visitor, index) => {
+      const slot = GUEST_SLOTS[index];
+      if (!slot) return [];
+      return [
+        {
+          kind: 'walker',
+          tileX: slot.tileX,
+          tileY: slot.tileY,
+          rotation: 'S',
+          walkerPoseKind: 'visitor',
+          walkerOutfit: outfitForDispatchId(visitor.id),
+        } satisfies WorldProp,
+      ];
+    });
     renderWorld(ctx, {
       cssSize,
       resolution,
       camera,
       cols: DEFAULT_COLS,
       rows: DEFAULT_ROWS,
-      props: [...buildProps(occupantsRef.current), ...walkerProps],
+      props: [...buildProps(occupantsRef.current), ...walkerProps, ...visitorProps],
       warmth: displayedWarmth(calmRef.current, Date.now()),
       assets: { now: Date.now(), propStore, characterStore, imageStore },
       posters: POSTER_PLACEMENTS,
@@ -466,9 +515,55 @@ export default function App() {
   useEffect(() => {
     occupantsRef.current = occupants;
     walkerInputsRef.current = classifyWalkerAgents(occupiedDeskAnchors(occupants), agents, now);
+    dispatchVisitorsRef.current = deriveDispatchVisitors(dispatchEntries);
     calmRef.current = updateCalmTransition(calmRef.current, openCrisisCount(crisis), Date.now());
+
+    // T6 item 3 — speech bubbles: real-telemetry rising edges only (state/
+    // speechBubbles.ts). Desk bubbles reuse the SAME `loud` derivation the
+    // desk chip already shows (its own text, verbatim); dispatch bubbles
+    // reuse dispatchChipLabel. Never invented content.
+    const at = Date.now();
+    const newlyLoud = detectNewlyLoudAgents(prevLoudAgentIdsRef.current, occupants);
+    const newlyTerminal = detectNewlyTerminalDispatches(
+      prevDispatchStatusesRef.current,
+      dispatchEntries,
+    );
+    prevLoudAgentIdsRef.current = loudAgentIds(occupants);
+    prevDispatchStatusesRef.current = dispatchStatusSnapshot(dispatchEntries);
+    if (newlyLoud.length > 0 || newlyTerminal.length > 0) {
+      setSpeechBubbles((prev) => {
+        let next = prev;
+        for (const occupant of newlyLoud) {
+          next = appendSpeechBubble(next, {
+            id: `agent-${String(occupant.agentId)}-${String(at)}`,
+            anchor: { kind: 'agent', agentId: occupant.agentId },
+            text: `${occupant.statusGlyph} ${occupant.statusWord}`,
+            createdAt: at,
+          });
+        }
+        for (const dispatchEntry of newlyTerminal) {
+          next = appendSpeechBubble(next, {
+            id: `dispatch-${dispatchEntry.id}-${String(at)}`,
+            anchor: { kind: 'dispatch', dispatchId: dispatchEntry.id },
+            text: dispatchDoneBubbleText(dispatchEntry),
+            createdAt: at,
+          });
+        }
+        return next;
+      });
+    }
+
     draw();
-  }, [draw, occupants, agents, crisis, now]);
+  }, [draw, occupants, agents, crisis, now, dispatchEntries]);
+
+  // TTL is applied at RENDER time off the existing `now` age tick (not a
+  // second effect+setState) — appendSpeechBubble already caps the
+  // underlying state at MAX_CONCURRENT_BUBBLES, so there's nothing to
+  // proactively garbage-collect, only what's currently worth SHOWING.
+  const visibleSpeechBubbles = useMemo(
+    () => pruneSpeechBubbles(speechBubbles, now),
+    [speechBubbles, now],
+  );
 
   /** Ack-state writes go through here so the tick's sweep sees them. */
   const applyAcks = useCallback((next: AckState) => {
@@ -908,6 +1003,13 @@ export default function App() {
             onPointerCancel={handlePointerUp}
           />
           <ChipLayer frame={chipFrame} occupants={occupants} onChipClick={handleDesk} />
+          <DispatchVisitorChips frame={chipFrame} visitors={dispatchVisitors} />
+          <SpeechBubbleLayer
+            frame={chipFrame}
+            bubbles={visibleSpeechBubbles}
+            occupants={occupants}
+            onTapAgent={handleDesk}
+          />
           {/* Room-is-interface half of the desktop chrome model — desktop
               only (CSS-hidden on phone, matching the pin dock's own
               breakpoint: no free camera play there). */}
@@ -981,6 +1083,9 @@ export default function App() {
           // itself re-broadcasts the record as 'ringing', so no optimistic
           // local update here; the WS dispatchUpdate is the honest source.
           void fetch(`/api/dispatch/${id}/release`, { method: 'POST' });
+        }}
+        onClearDone={() => {
+          setDispatchEntries(clearTerminalDispatchEntries);
         }}
       />
       {/* Compact-dock half of the desktop chrome model — the cross-platform
