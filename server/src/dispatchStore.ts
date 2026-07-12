@@ -136,8 +136,6 @@ export function stripDispatchPreamble(prompt: string): string {
   }
   return prompt;
 }
-const hasDispatchPreamble = (prompt: string): boolean =>
-  DISPATCH_PREAMBLES.some((p) => prompt.startsWith(p));
 
 /** A short model identifier/alias (e.g. 'fable', 'claude-fable-5', 'o3') —
  *  intentionally permissive (covers every provider's own naming scheme)
@@ -636,16 +634,16 @@ export class DispatchStore {
     // record/audit/runner all carry identical text. Length-checked against
     // the human's prompt above — the preamble is server-owned constant cost.
     // Variant by action (Phase 5): jobs are told one-shot/no-questions,
-    // sessions are told the board can answer them. hasDispatchPreamble
-    // guard: a re-dispatch (getRedispatchInput) feeds the STORED prompt
-    // back through enqueue — never double-prefix, and keep whichever
-    // variant the original run carried.
+    // sessions are told the board can answer them. Strip-then-reprefix:
+    // a re-dispatch (getRedispatchInput) feeds the STORED prompt back
+    // through enqueue — stripping first means it never double-prefixes,
+    // and re-prefixing with THIS enqueue's action means a client pasting
+    // the wrong variant (or redispatching a job as a session) always gets
+    // the contract matching the run actually being started.
     const prompt =
       isLlmRun && typeof input.prompt === 'string' && input.prompt.trim() !== ''
-        ? hasDispatchPreamble(input.prompt)
-          ? input.prompt
-          : (input.action === 'session' ? DISPATCH_SESSION_PREAMBLE : DISPATCH_CONTEXT_PREAMBLE) +
-            input.prompt
+        ? (input.action === 'session' ? DISPATCH_SESSION_PREAMBLE : DISPATCH_CONTEXT_PREAMBLE) +
+          stripDispatchPreamble(input.prompt)
         : undefined;
     const commonFields = {
       id: randomUUID(),

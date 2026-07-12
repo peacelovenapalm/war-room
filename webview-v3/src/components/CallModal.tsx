@@ -195,7 +195,10 @@ export function CallModal({ isOpen, onClose, prefill, send, onSend, budget }: Ca
     (isShell
       ? // T8 compute: no cwd/prompt on the wire — a script pick is the whole
         // identity; the server rejects shell sessions, so dispatch-only.
-        mode === 'dispatch' && scriptId !== '' && argsParse.ok && timeoutValid
+        // No timeoutValid here: the runner's per-script timeoutSec (from its
+        // local dispatch.json) is the only cap — the server drops a wire
+        // timeoutSec for shell, so offering one would be a lie.
+        mode === 'dispatch' && scriptId !== '' && argsParse.ok
       : joined.ok &&
         remaining >= 0 &&
         (mode === 'session'
@@ -222,9 +225,6 @@ export function CallModal({ isOpen, onClose, prefill, send, onSend, budget }: Ca
         scriptId,
         requestId,
         ...(argsParse.args.length > 0 ? { args: argsParse.args } : {}),
-        ...(timeoutTrimmed !== '' && timeoutParsed !== undefined
-          ? { timeoutSec: timeoutParsed }
-          : {}),
       });
       onSend(machine, 'dispatch', requestId);
       onClose();
@@ -538,8 +538,11 @@ export function CallModal({ isOpen, onClose, prefill, send, onSend, budget }: Ca
           {/* PERSISTENT SESSION rides the runner's tmux-managed lifecycle,
               not the one-shot SIGTERM/SIGKILL timer — the server rejects
               timeoutSec outright for action:'session', so the field is
-              never offered in this mode. */}
-          {mode === 'dispatch' && (
+              never offered in this mode. Shell computes are capped by the
+              runner's own per-script timeoutSec, and the server silently
+              drops a wire cap for them — hidden there too (honesty rule:
+              never render a control the server ignores). */}
+          {mode === 'dispatch' && !isShell && (
             <label className="field">
               <span className="field__label">TIME CAP (optional, seconds)</span>
               <input

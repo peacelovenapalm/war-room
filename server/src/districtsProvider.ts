@@ -55,6 +55,8 @@ const DISTRICT_SEEDS: readonly DistrictSeed[] = [
 ];
 
 const CACHE_TTL_MS = 60_000;
+/** Per-file read cap (P5 review #3) — a STATE.md is a few KB of markdown. */
+export const STATE_FILE_MAX_BYTES = 1024 * 1024;
 let cache: { at: number; value: DistrictsSnapshot } | null = null;
 
 /** Get the districts snapshot, serving from a 60s TTL cache when fresh. */
@@ -84,6 +86,21 @@ function loadProject(seed: DistrictSeed): DistrictProject {
     };
   }
   try {
+    // Size cap before the read (P5 review #3): a STATE.md is a few KB — a
+    // misconfigured env var pointing at something huge must not buffer it.
+    if (fs.statSync(file).size > STATE_FILE_MAX_BYTES) {
+      console.log(
+        `[Districts] ⚠ ${seed.envVar} (${file}) exceeds ${String(STATE_FILE_MAX_BYTES)} bytes -- refusing to read`,
+      );
+      return {
+        key: seed.key,
+        label: seed.label,
+        phase: null,
+        progress: null,
+        lastActivity: null,
+        source: 'unknown',
+      };
+    }
     const raw = fs.readFileSync(file, 'utf-8');
     const parsed = parseProjectState(raw);
     return { key: seed.key, label: seed.label, ...parsed, source: `file:${file}` };

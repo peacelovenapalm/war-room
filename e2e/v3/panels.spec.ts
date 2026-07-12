@@ -909,6 +909,59 @@ test.describe('stage-3 panel ports (desktop chrome model)', () => {
     }
   });
 
+  test('T8 + P5 review #5: shell compute picker hides the TIME CAP field and never sends timeoutSec (runner per-script cap is the only cap)', async ({
+    browser,
+  }) => {
+    const host = await serveV3Dist({
+      dispatchMachinesOverride: [
+        {
+          machine: 'MINI',
+          providers: ['claude', 'shell'],
+          roots: ['/Users/dev/code'],
+          focus: false,
+          sessions: false,
+          scriptIds: ['fleet-health'],
+        },
+      ],
+    });
+    const context = await browser.newContext({ viewport: VIEWPORT });
+    try {
+      const page = await context.newPage();
+      await page.goto(`${host.url}/`);
+      await expect(page.getByTestId('hud-connection')).toHaveText('● LIVE', { timeout: 20_000 });
+
+      await page.getByTestId('dock-call').click();
+      await expect(page.getByTestId('call-modal')).toBeVisible();
+
+      const machineSelect = page.locator('select').first();
+      await machineSelect.selectOption('MINI');
+      await page.locator('select').nth(1).selectOption('shell'); // PROVIDER
+
+      // Script picker appears; TIME CAP does NOT — the server drops a wire
+      // timeoutSec for shell, so the field would be a lie.
+      await expect(page.getByTestId('call-script-select')).toBeVisible();
+      await expect(page.getByTestId('call-timeout-input')).toHaveCount(0);
+
+      await page.getByTestId('call-script-select').selectOption('fleet-health');
+      await page.getByTestId('call-args-input').fill('--verbose');
+      await page.getByTestId('call-submit').click();
+
+      const shellMessage = host.receivedMessages.find(
+        (m) => m.type === 'dispatchRequest' && m.provider === 'shell',
+      );
+      expect(shellMessage).toBeDefined();
+      expect(shellMessage?.action).toBe('dispatch');
+      expect(shellMessage?.scriptId).toBe('fleet-health');
+      expect(shellMessage?.args).toEqual(['--verbose']);
+      expect(shellMessage?.timeoutSec).toBeUndefined();
+      expect(shellMessage?.cwd).toBeUndefined();
+      expect(shellMessage?.prompt).toBeUndefined();
+    } finally {
+      await context.close();
+      await host.close();
+    }
+  });
+
   test('4B: CALL modal SKILL dropdown prefixes the prompt and PERMISSION plan mode adds permissionMode to the outgoing dispatchRequest', async ({
     browser,
   }) => {

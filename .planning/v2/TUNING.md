@@ -986,3 +986,28 @@ managed flag not client-assertable; auth tiers correct; no 500-paths).
   Greg's call whether the Mini gets managed sessions.
 - Hook smoke-test hygiene: a synthetic PreToolUse POST mints a real agent
   on the board; close it with a matching SessionEnd (done this time).
+
+## Phase-5 codex review reconcile (2026-07-12)
+
+- **Verdict**: codex (gpt-5.5, pinned) said BLOCK; orchestrator reconciled
+  to SHIP-WITH-FIXES — all 5 findings CONFIRMED, but 3 sat behind the
+  tailnet-only trust tier. Gated on #2 + #5; #1/#3 fixed same pass.
+- **FIXED before merge-to-deploy** (all with tests, full gate green):
+  - #2 preamble variant spoof — enqueue now strip-then-reprefixes with the
+    CURRENT action's variant (dispatchStore.ts); a client pasting the
+    SESSION preamble onto a one-shot job gets the job contract.
+  - #5 fake TIME CAP for shell — field hidden, canSubmit no longer gates
+    on it, timeoutSec no longer sent (CallModal.tsx); runner's per-script
+    timeoutSec is the only cap. New e2e locks it.
+  - #1 inbox symlink escape — readInboxFile realpath-resolves target+root
+    and requires containment post-resolution; false "symlink games are
+    not chased" comment corrected (inboxProvider.ts).
+  - #3 unbounded reads — statSync size caps before every readFileSync in
+    inboxProvider (512 KiB), districtsProvider + wiringProvider (1 MiB).
+- **BACKLOG #4**: wiringProvider time budget is checked BETWEEN dirs only —
+  a single pathological dir (huge readdir, slow NFS) can blow the deadline
+  inside one iteration. Acceptable for tailnet-only v4; revisit if scan
+  roots ever include network mounts.
+- **Meta**: worth keeping — codex's BLOCK calibration assumes an
+  internet-facing server; reconciler must re-weigh findings against the
+  actual tailnet trust tier every phase, in BOTH directions.

@@ -13,6 +13,7 @@ import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import {
   clearInboxCache,
   getInboxListing,
+  INBOX_CONTENT_MAX_BYTES,
   INBOX_MAX_ENTRIES,
   readInboxFile,
 } from '../src/inboxProvider.js';
@@ -143,5 +144,37 @@ describe('readInboxFile', () => {
       ok: false,
       reason: 'not-found',
     });
+  });
+
+  it('P5 review #1: refuses a symlink pointing outside the mount root', () => {
+    const outside = path.join(os.tmpdir(), `inbox-escape-${String(process.pid)}.md`);
+    fs.writeFileSync(outside, 'SECRET OUTSIDE THE MOUNT');
+    try {
+      fs.mkdirSync(path.join(tmpDir, 'todo'), { recursive: true });
+      fs.symlinkSync(outside, path.join(tmpDir, 'todo', 'escape.md'));
+      expect(readInboxFile('todo', 'escape.md')).toEqual({ ok: false, reason: 'invalid' });
+    } finally {
+      fs.rmSync(outside, { force: true });
+    }
+  });
+
+  it('P5 review #1: still serves a symlink that stays INSIDE the mount root', () => {
+    writeRoutineFile('summary', 'real.md', 'inside\n');
+    fs.mkdirSync(path.join(tmpDir, 'todo'), { recursive: true });
+    fs.symlinkSync(path.join(tmpDir, 'summary', 'real.md'), path.join(tmpDir, 'todo', 'alias.md'));
+    expect(readInboxFile('todo', 'alias.md')).toEqual({ ok: true, content: 'inside\n' });
+  });
+
+  it('P5 review #3: refuses a file over INBOX_CONTENT_MAX_BYTES instead of buffering it', () => {
+    const dir = path.join(tmpDir, 'todo');
+    fs.mkdirSync(dir, { recursive: true });
+    const fd = fs.openSync(path.join(dir, 'huge.md'), 'w');
+    try {
+      // Sparse file: set the length without writing megabytes.
+      fs.ftruncateSync(fd, INBOX_CONTENT_MAX_BYTES + 1);
+    } finally {
+      fs.closeSync(fd);
+    }
+    expect(readInboxFile('todo', 'huge.md')).toEqual({ ok: false, reason: 'invalid' });
   });
 });

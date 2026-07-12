@@ -256,7 +256,10 @@ describe('DispatchStore.enqueue', () => {
     expect(seen?.promptPreview).toBe('plan the milestone');
   });
 
-  it('P5: re-enqueue of an already-preambled prompt keeps its variant, never double-prefixes', () => {
+  it('P5 review #2: an already-preambled prompt is re-prefixed with THIS action’s variant, never double-prefixed', () => {
+    // A client pasting/spoofing the SESSION variant onto a one-shot job (or
+    // a redispatch crossing action kinds) must get the contract matching the
+    // run being started — strip-then-reprefix, exactly one preamble.
     const s = new DispatchStore(statePath, auditPath);
     const enq = s.enqueue({
       action: 'dispatch',
@@ -267,7 +270,22 @@ describe('DispatchStore.enqueue', () => {
     });
     expect(enq.ok).toBe(true);
     const item = s.pendingFor('MACBOOK')[0];
-    expect(item.prompt).toBe(`${DISPATCH_SESSION_PREAMBLE}carried over from a session`);
+    expect(item.prompt).toBe(`${DISPATCH_CONTEXT_PREAMBLE}carried over from a session`);
+    expect(item.prompt).not.toContain(DISPATCH_SESSION_PREAMBLE);
+  });
+
+  it('P5 review #2: re-enqueue of a same-action preambled prompt stays single-prefixed', () => {
+    const s = new DispatchStore(statePath, auditPath);
+    const enq = s.enqueue({
+      action: 'session',
+      machine: 'MACBOOK',
+      provider: 'claude',
+      cwd: '/x',
+      prompt: `${DISPATCH_SESSION_PREAMBLE}same-kind redispatch`,
+    });
+    expect(enq.ok).toBe(true);
+    const item = s.pendingFor('MACBOOK')[0];
+    expect(item.prompt).toBe(`${DISPATCH_SESSION_PREAMBLE}same-kind redispatch`);
   });
 
   it('4B: a session with no brief stays bare — no preamble injected', () => {

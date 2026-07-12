@@ -16,9 +16,13 @@
  * Path-traversal safety (readInboxFile): every read resolves the joined
  * path with `path.resolve` and verifies the result stays under the mount
  * root AND under a real (non-".", non-".."-containing, dotfile-free)
- * immediate child dir -- a caller cannot escape via `..`, symlink games are
- * not chased (fs.readFileSync doesn't follow into a different mount), and
- * a `routine` or `file` segment starting with "." is rejected outright.
+ * immediate child dir -- a caller cannot escape via `..`, and a `routine`
+ * or `file` segment starting with "." is rejected outright. Symlinks ARE
+ * followed by readFileSync, so the read additionally realpath-resolves both
+ * target and root and requires containment AFTER resolution (P5 codex
+ * review finding #1) -- a symlink planted inside the mount can no longer
+ * exfiltrate a file outside it. Reads are size-capped (finding #3): a
+ * multi-GB file in the mount returns `invalid` instead of ballooning RSS.
  */
 
 import * as fs from 'fs';
@@ -46,6 +50,9 @@ export interface InboxListing {
 /** Cross-routine cap — the tray renders a short newest-first list, not a
  *  full ledger dump. */
 export const INBOX_MAX_ENTRIES = 20;
+/** Per-file read cap — routine outputs are short markdown notes; anything
+ *  larger is not a routine note and is refused rather than buffered. */
+export const INBOX_CONTENT_MAX_BYTES = 512 * 1024;
 const CACHE_TTL_MS = 60_000;
 
 /** Subdirs skipped outright: `_ledger`/`_processed` are bookkeeping, not
@@ -146,8 +153,33 @@ export function readInboxFile(routine: string, file: string): InboxContentResult
     return { ok: false, reason: 'invalid' };
   }
 
+  // Symlink containment (P5 review #1): the string checks above constrain
+  // the LEXICAL path only — a symlink at root/routine/note.md pointing at
+  // /etc/passwd would still pass them and readFileSync would follow it.
+  // realpath both sides and require the resolved target to live under the
+  // resolved root. (root itself may legitimately BE a symlink/mount — the
+  // deploy bind-mounts it — which is why root is resolved too rather than
+  // compared raw.)
+  let realTarget: string;
+  let realRoot: string;
   try {
-    const content = fs.readFileSync(target, 'utf-8');
+    realTarget = fs.realpathSync(target);
+    realRoot = fs.realpathSync(resolvedRoot);
+  } catch {
+    return { ok: false, reason: 'not-found' }; // target (or root) doesn't exist
+  }
+  if (realTarget !== realRoot && !realTarget.startsWith(realRoot + path.sep)) {
+    return { ok: false, reason: 'invalid' };
+  }
+
+  try {
+    // Size cap BEFORE the read (P5 review #3) — stat the realpath so the
+    // size checked is the size read.
+    const stat = fs.statSync(realTarget);
+    if (!stat.isFile() || stat.size > INBOX_CONTENT_MAX_BYTES) {
+      return { ok: false, reason: 'invalid' };
+    }
+    const content = fs.readFileSync(realTarget, 'utf-8');
     return { ok: true, content };
   } catch {
     return { ok: false, reason: 'not-found' };

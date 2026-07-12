@@ -9,7 +9,12 @@ import * as os from 'os';
 import * as path from 'path';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 
-import { clearWiringCache, getWiringSnapshot, parseWiringRoots } from '../src/wiringProvider.js';
+import {
+  clearWiringCache,
+  getWiringSnapshot,
+  parseWiringRoots,
+  WIRING_STATE_MAX_BYTES,
+} from '../src/wiringProvider.js';
 
 let tmpDir: string;
 const savedEnv = process.env['WAR_ROOM_WIRING_ROOTS'];
@@ -102,6 +107,22 @@ describe('getWiringSnapshot', () => {
 
     expect(() => getWiringSnapshot()).not.toThrow();
     expect(getWiringSnapshot().projects.length).toBe(1);
+  });
+
+  it('P5 review #3: a STATE.md over WIRING_STATE_MAX_BYTES is skipped, never buffered', () => {
+    writeStateFile(path.join(tmpDir, 'proj-a'), 'Real Project');
+    const hugeDir = path.join(tmpDir, 'proj-huge', '.planning');
+    fs.mkdirSync(hugeDir, { recursive: true });
+    const fd = fs.openSync(path.join(hugeDir, 'STATE.md'), 'w');
+    try {
+      fs.ftruncateSync(fd, WIRING_STATE_MAX_BYTES + 1); // sparse — no real MB written
+    } finally {
+      fs.closeSync(fd);
+    }
+    process.env['WAR_ROOM_WIRING_ROOTS'] = tmpDir;
+
+    const snapshot = getWiringSnapshot();
+    expect(snapshot.projects.map((p) => p.relativePath)).toEqual(['proj-a']);
   });
 
   it('serves from cache within the TTL and recomputes after clearWiringCache()', () => {

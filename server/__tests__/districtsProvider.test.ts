@@ -11,7 +11,11 @@ import * as os from 'os';
 import * as path from 'path';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 
-import { clearDistrictsCache, getDistricts } from '../src/districtsProvider.js';
+import {
+  clearDistrictsCache,
+  getDistricts,
+  STATE_FILE_MAX_BYTES,
+} from '../src/districtsProvider.js';
 
 const WARROOM_ENV = 'WAR_ROOM_DISTRICT_WARROOM_STATE';
 const TWE_ENV = 'WAR_ROOM_DISTRICT_TWE_STATE';
@@ -87,6 +91,22 @@ describe('getDistricts', () => {
 
     const refreshed = getDistricts(1_000 + 60_001);
     expect(refreshed.projects.find((p) => p.key === 'war-room')?.phase).toBe('SECOND');
+  });
+
+  it('P5 review #3: a file over STATE_FILE_MAX_BYTES is refused -> honest unknown, never buffered', () => {
+    const file = path.join(tmpDir, 'STATE.md');
+    const fd = fs.openSync(file, 'w');
+    try {
+      fs.ftruncateSync(fd, STATE_FILE_MAX_BYTES + 1); // sparse — no real MB written
+    } finally {
+      fs.closeSync(fd);
+    }
+    process.env[WARROOM_ENV] = file;
+
+    const snapshot = getDistricts();
+    const warroom = snapshot.projects.find((p) => p.key === 'war-room');
+    expect(warroom?.source).toBe('unknown');
+    expect(warroom?.phase).toBeNull();
   });
 
   it('label is a stable human string for each seed key', () => {

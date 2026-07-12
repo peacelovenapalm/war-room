@@ -47,6 +47,8 @@ export interface WiringSnapshot {
  *  level of slack (e.g. an org/repo nesting) without walking an entire
  *  home directory. */
 const MAX_SCAN_DEPTH = 3;
+/** Per-file read cap (P5 review #3) — a real STATE.md is a few KB. */
+export const WIRING_STATE_MAX_BYTES = 1024 * 1024;
 /** Wall-clock budget for one full getWiringSnapshot() call, across every
  *  configured root — protects against a huge or symlink-cyclic tree. */
 const SCAN_TIME_BUDGET_MS = 2_000;
@@ -143,6 +145,9 @@ function scanRootForStateFiles(
       }
       const stateFile = path.join(dir, '.planning', 'STATE.md');
       try {
+        // Size cap before the read (P5 review #3) — the scan walks arbitrary
+        // repos; a giant file masquerading as STATE.md must not buffer.
+        if (fs.statSync(stateFile).size > WIRING_STATE_MAX_BYTES) continue;
         const raw = fs.readFileSync(stateFile, 'utf-8');
         const parsed = parseTrackerState(raw);
         if (parsed) {
