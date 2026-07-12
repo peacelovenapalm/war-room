@@ -1,9 +1,10 @@
 /**
- * districtsProvider tests (Phase 5 Lane C, T7/D-35) — env-var + tolerant-
- * read + cache discipline, mirroring briefingProvider.test.ts/
- * graphProvider.test.ts. The two seeds (war-room, twe) are exercised
- * independently so one project's honest-unknown fallback never masks the
- * other's real data.
+ * districtsProvider tests (Phase 5 Lane C T7/D-35; v5 C1 N-project build-
+ * out) — env-var + tolerant-read + cache discipline, mirroring
+ * briefingProvider.test.ts/graphProvider.test.ts. The legacy 2-seed path
+ * (WAR_ROOM_DISTRICTS_DIR unset) is exercised independently from the new
+ * data-driven directory-scan path, plus the additive-override dedupe when
+ * both are configured together.
  */
 
 import * as fs from 'fs';
@@ -19,8 +20,10 @@ import {
 
 const WARROOM_ENV = 'WAR_ROOM_DISTRICT_WARROOM_STATE';
 const TWE_ENV = 'WAR_ROOM_DISTRICT_TWE_STATE';
+const DIR_ENV = 'WAR_ROOM_DISTRICTS_DIR';
 const savedWarroom = process.env[WARROOM_ENV];
 const savedTwe = process.env[TWE_ENV];
+const savedDir = process.env[DIR_ENV];
 
 let tmpDir: string;
 
@@ -28,6 +31,7 @@ beforeEach(() => {
   tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'districts-provider-'));
   delete process.env[WARROOM_ENV];
   delete process.env[TWE_ENV];
+  delete process.env[DIR_ENV];
   clearDistrictsCache();
 });
 
@@ -37,6 +41,8 @@ afterEach(() => {
   else process.env[WARROOM_ENV] = savedWarroom;
   if (savedTwe === undefined) delete process.env[TWE_ENV];
   else process.env[TWE_ENV] = savedTwe;
+  if (savedDir === undefined) delete process.env[DIR_ENV];
+  else process.env[DIR_ENV] = savedDir;
   clearDistrictsCache();
 });
 
@@ -113,5 +119,153 @@ describe('getDistricts', () => {
     const snapshot = getDistricts();
     expect(snapshot.projects.find((p) => p.key === 'war-room')?.label).toBe('WAR ROOM');
     expect(snapshot.projects.find((p) => p.key === 'twe')?.label).toBe('TWE');
+  });
+});
+
+describe('getDistricts — WAR_ROOM_DISTRICTS_DIR (v5 C1 data-driven scan)', () => {
+  it('root unset -> behavior is exactly the legacy 2-seed path (already covered above)', () => {
+    // Sanity re-assertion at this describe's own env baseline (root always
+    // deleted in the shared beforeEach): still exactly 2 unknown seeds.
+    const snapshot = getDistricts();
+    expect(snapshot.projects.map((p) => p.key)).toEqual(['war-room', 'twe']);
+  });
+
+  it('root set but empty directory -> zero projects (no legacy fallback)', () => {
+    process.env[DIR_ENV] = tmpDir;
+    const snapshot = getDistricts();
+    expect(snapshot.projects).toEqual([]);
+  });
+
+  it('root set but does not exist -> zero projects, never a throw', () => {
+    process.env[DIR_ENV] = path.join(tmpDir, 'does-not-exist-root');
+    expect(() => getDistricts()).not.toThrow();
+    expect(getDistricts().projects).toEqual([]);
+  });
+
+  it('subdir with .planning/STATE.md -> real milestone state, humanized label', () => {
+    const sub = path.join(tmpDir, 'diablito');
+    fs.mkdirSync(path.join(sub, '.planning'), { recursive: true });
+    fs.writeFileSync(
+      path.join(sub, '.planning', 'STATE.md'),
+      '---\nmilestone_name: "v1.0"\nprogress:\n  percent: 100\nlast_updated: "2026-07-06"\n---\n',
+    );
+    process.env[DIR_ENV] = tmpDir;
+
+    const snapshot = getDistricts();
+    expect(snapshot.projects).toHaveLength(1);
+    const project = snapshot.projects[0];
+    expect(project.key).toBe('diablito');
+    expect(project.label).toBe('DIABLITO');
+    expect(project.phase).toBe('v1.0');
+    expect(project.progress).toBe(1);
+    expect(project.lastActivity).toBe('2026-07-06');
+    expect(project.source).toBe(`file:${path.join(sub, '.planning', 'STATE.md')}`);
+  });
+
+  it('subdir with top-level STATE.md (no .planning/) -> falls back to that file', () => {
+    const sub = path.join(tmpDir, 'neon-goat');
+    fs.mkdirSync(sub, { recursive: true });
+    fs.writeFileSync(path.join(sub, 'STATE.md'), 'status: PARKED\n');
+    process.env[DIR_ENV] = tmpDir;
+
+    const snapshot = getDistricts();
+    const project = snapshot.projects.find((p) => p.key === 'neon-goat');
+    expect(project?.source).toBe(`file:${path.join(sub, 'STATE.md')}`);
+    expect(project?.phase).toBe('PARKED');
+  });
+
+  it('subdir with neither .planning/STATE.md nor STATE.md -> honest unknown, never a throw', () => {
+    const sub = path.join(tmpDir, 'bossa-pipeline');
+    fs.mkdirSync(sub, { recursive: true });
+    process.env[DIR_ENV] = tmpDir;
+
+    const snapshot = getDistricts();
+    const project = snapshot.projects.find((p) => p.key === 'bossa-pipeline');
+    expect(project?.source).toBe('unknown');
+    expect(project?.phase).toBeNull();
+    expect(project?.progress).toBeNull();
+    expect(project?.lastActivity).toBeNull();
+    expect(project?.label).toBe('BOSSA PIPELINE');
+  });
+
+  it('oversized STATE.md under a scanned subdir is refused -> honest unknown', () => {
+    const sub = path.join(tmpDir, 'oversized-project');
+    fs.mkdirSync(path.join(sub, '.planning'), { recursive: true });
+    const file = path.join(sub, '.planning', 'STATE.md');
+    const fd = fs.openSync(file, 'w');
+    try {
+      fs.ftruncateSync(fd, STATE_FILE_MAX_BYTES + 1);
+    } finally {
+      fs.closeSync(fd);
+    }
+    process.env[DIR_ENV] = tmpDir;
+
+    const snapshot = getDistricts();
+    const project = snapshot.projects.find((p) => p.key === 'oversized-project');
+    expect(project?.source).toBe('unknown');
+    expect(project?.phase).toBeNull();
+  });
+
+  it('the known war-room/two-wheel-events keys keep their special-case labels', () => {
+    fs.mkdirSync(path.join(tmpDir, 'war-room'), { recursive: true });
+    fs.mkdirSync(path.join(tmpDir, 'two-wheel-events'), { recursive: true });
+    process.env[DIR_ENV] = tmpDir;
+
+    const snapshot = getDistricts();
+    expect(snapshot.projects.find((p) => p.key === 'war-room')?.label).toBe('WAR ROOM');
+    expect(snapshot.projects.find((p) => p.key === 'two-wheel-events')?.label).toBe('TWE');
+  });
+
+  it('legacy env override dedupe: explicit legacy env wins over the directory-scanned entry for the same key', () => {
+    // Directory scan produces a real 'war-room' entry from the mount...
+    const scannedSub = path.join(tmpDir, 'war-room');
+    fs.mkdirSync(path.join(scannedSub, '.planning'), { recursive: true });
+    fs.writeFileSync(path.join(scannedSub, '.planning', 'STATE.md'), 'status: FROM SCAN\n');
+    process.env[DIR_ENV] = tmpDir;
+
+    // ...but an explicit legacy env var for the SAME key ('war-room') wins.
+    const legacyFile = path.join(tmpDir, 'legacy-warroom-state.md');
+    fs.writeFileSync(legacyFile, 'status: FROM LEGACY ENV\n');
+    process.env[WARROOM_ENV] = legacyFile;
+
+    const snapshot = getDistricts();
+    const projects = snapshot.projects.filter((p) => p.key === 'war-room');
+    expect(projects).toHaveLength(1); // deduped, not duplicated
+    expect(projects[0].phase).toBe('FROM LEGACY ENV');
+    expect(projects[0].source).toBe(`file:${legacyFile}`);
+  });
+
+  it('legacy env additive: a legacy var for a key the scan never produced is appended, not dropped', () => {
+    fs.mkdirSync(path.join(tmpDir, 'some-other-project'), { recursive: true });
+    process.env[DIR_ENV] = tmpDir;
+
+    const legacyFile = path.join(tmpDir, 'twe-state.md');
+    fs.writeFileSync(legacyFile, 'status: TWE VIA LEGACY\n');
+    process.env[TWE_ENV] = legacyFile;
+
+    const snapshot = getDistricts();
+    expect(snapshot.projects.map((p) => p.key).sort()).toEqual(['some-other-project', 'twe']);
+    expect(snapshot.projects.find((p) => p.key === 'twe')?.phase).toBe('TWE VIA LEGACY');
+  });
+
+  it('an unset legacy var does not clobber a directory-scanned entry of the same key', () => {
+    const sub = path.join(tmpDir, 'war-room');
+    fs.mkdirSync(path.join(sub, '.planning'), { recursive: true });
+    fs.writeFileSync(path.join(sub, '.planning', 'STATE.md'), 'status: SCANNED ONLY\n');
+    process.env[DIR_ENV] = tmpDir;
+    // WARROOM_ENV deliberately left unset.
+
+    const snapshot = getDistricts();
+    const project = snapshot.projects.find((p) => p.key === 'war-room');
+    expect(project?.phase).toBe('SCANNED ONLY');
+  });
+
+  it('non-directory entries under the root (stray files) are ignored, not treated as projects', () => {
+    fs.writeFileSync(path.join(tmpDir, 'README.md'), '# not a project\n');
+    fs.mkdirSync(path.join(tmpDir, 'real-project'), { recursive: true });
+    process.env[DIR_ENV] = tmpDir;
+
+    const snapshot = getDistricts();
+    expect(snapshot.projects.map((p) => p.key)).toEqual(['real-project']);
   });
 });

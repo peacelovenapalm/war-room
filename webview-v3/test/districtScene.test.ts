@@ -1,14 +1,15 @@
 /**
- * districtScene tests (Phase 5 Lane C, T7/D-35 districts) — plot layout and
- * hit-testing (pure math, no canvas needed). drawDistrictScene itself is
- * exercised via a minimal fake CanvasRenderingContext2D to confirm it
- * degrades gracefully when a plot has no matching project.
+ * districtScene tests (Phase 5 Lane C, T7/D-35 districts; v5 C1 N-project
+ * build-out) — plot layout and hit-testing (pure math, no canvas needed).
+ * drawDistrictScene itself is exercised via a minimal fake
+ * CanvasRenderingContext2D to confirm it degrades gracefully when a
+ * project has no matching plot.
  */
 
 import { describe, expect, it } from 'vitest';
 
 import {
-  DISTRICT_PLOTS,
+  computeDistrictPlots,
   districtSceneBounds,
   drawDistrictScene,
   hitTestDistrict,
@@ -28,41 +29,84 @@ function project(overrides: Partial<DistrictProject> = {}): DistrictProject {
   };
 }
 
-describe('DISTRICT_PLOTS', () => {
-  it('has exactly 2 plots (v4 proof slice) with distinct keys and positions', () => {
-    expect(DISTRICT_PLOTS).toHaveLength(2);
-    const keys = DISTRICT_PLOTS.map((p) => p.key);
-    expect(new Set(keys).size).toBe(2);
-    const [a, b] = DISTRICT_PLOTS;
-    expect(a.tileX).not.toBe(b.tileX);
+function projectsOf(keys: readonly string[]): DistrictProject[] {
+  return keys.map((key) => project({ key, label: key }));
+}
+
+describe('computeDistrictPlots', () => {
+  it('empty project list -> empty plot list', () => {
+    expect(computeDistrictPlots([])).toEqual([]);
+  });
+
+  it('one plot per project, distinct positions, same order as the input', () => {
+    const projects = projectsOf(['a', 'b', 'c']);
+    const plots = computeDistrictPlots(projects);
+    expect(plots).toHaveLength(3);
+    expect(plots.map((p) => p.key)).toEqual(['a', 'b', 'c']);
+    const positions = new Set(plots.map((p) => `${String(p.tileX)},${String(p.tileY)}`));
+    expect(positions.size).toBe(3); // no two plots share a tile
+  });
+
+  it('wraps into additional rows past the per-row cap rather than widening unbounded', () => {
+    const projects = projectsOf(Array.from({ length: 10 }, (_, i) => `p${String(i)}`));
+    const plots = computeDistrictPlots(projects);
+    expect(plots).toHaveLength(10);
+    const maxTileX = Math.max(...plots.map((p) => p.tileX));
+    const maxTileY = Math.max(...plots.map((p) => p.tileY));
+    // 10 projects must wrap into more than one row (bounded width).
+    expect(maxTileY).toBeGreaterThan(0);
+    // The row cap keeps width from growing linearly with N.
+    expect(maxTileX).toBeLessThan(maxTileY === 0 ? 20 : 10);
+  });
+
+  it('a single project still yields exactly one positive-position plot', () => {
+    const plots = computeDistrictPlots(projectsOf(['solo']));
+    expect(plots).toHaveLength(1);
+    expect(plots[0].key).toBe('solo');
   });
 });
 
 describe('districtSceneBounds', () => {
-  it('returns a positive-area world bounds box', () => {
-    const bounds = districtSceneBounds();
+  it('returns a positive-area world bounds box even with zero plots', () => {
+    const bounds = districtSceneBounds([]);
     expect(bounds.width).toBeGreaterThan(0);
     expect(bounds.height).toBeGreaterThan(0);
+  });
+
+  it('grows to fit more plots (more rows -> taller bounds)', () => {
+    const smallPlots = computeDistrictPlots(projectsOf(['a', 'b']));
+    const bigPlots = computeDistrictPlots(
+      projectsOf(Array.from({ length: 10 }, (_, i) => `p${String(i)}`)),
+    );
+    const small = districtSceneBounds(smallPlots);
+    const big = districtSceneBounds(bigPlots);
+    expect(big.height).toBeGreaterThanOrEqual(small.height);
   });
 });
 
 describe('hitTestDistrict', () => {
   it('a point exactly on a plot center resolves to that plot key', () => {
-    const [plot] = DISTRICT_PLOTS;
+    const plots = computeDistrictPlots(projectsOf(['a', 'b']));
+    const [plot] = plots;
     const center = plotWorldCenter(plot);
-    expect(hitTestDistrict(center.worldX, center.worldY)).toBe(plot.key);
+    expect(hitTestDistrict(center.worldX, center.worldY, plots)).toBe(plot.key);
   });
 
   it('a point far from every plot resolves to null', () => {
-    expect(hitTestDistrict(100_000, 100_000)).toBeNull();
+    const plots = computeDistrictPlots(projectsOf(['a', 'b']));
+    expect(hitTestDistrict(100_000, 100_000, plots)).toBeNull();
   });
 
-  it('two plots never share a hit radius (no ambiguous overlap)', () => {
-    const [a, b] = DISTRICT_PLOTS;
-    const centerA = plotWorldCenter(a);
-    expect(hitTestDistrict(centerA.worldX, centerA.worldY)).toBe(a.key);
-    const centerB = plotWorldCenter(b);
-    expect(hitTestDistrict(centerB.worldX, centerB.worldY)).toBe(b.key);
+  it('an empty plot list always resolves to null', () => {
+    expect(hitTestDistrict(0, 0, [])).toBeNull();
+  });
+
+  it('no two plots share a hit radius (no ambiguous overlap) across N projects', () => {
+    const plots = computeDistrictPlots(projectsOf(['a', 'b', 'c', 'd', 'e']));
+    for (const plot of plots) {
+      const center = plotWorldCenter(plot);
+      expect(hitTestDistrict(center.worldX, center.worldY, plots)).toBe(plot.key);
+    }
   });
 });
 
@@ -91,16 +135,32 @@ function fakeCtx(): CanvasRenderingContext2D {
 }
 
 describe('drawDistrictScene', () => {
-  it('draws without throwing when every plot has a matching project', () => {
-    const projects = DISTRICT_PLOTS.map((plot) => project({ key: plot.key, label: plot.key }));
+  it('draws without throwing for a full N-project roster (4-10 range)', () => {
+    const projects = projectsOf(Array.from({ length: 7 }, (_, i) => `p${String(i)}`));
+    const plots = computeDistrictPlots(projects);
     expect(() => {
-      drawDistrictScene(fakeCtx(), projects);
+      drawDistrictScene(fakeCtx(), projects, plots);
     }).not.toThrow();
   });
 
-  it('draws without throwing when a plot has NO matching project (graceful degradation)', () => {
+  it('draws without throwing when a project has NO matching plot (graceful degradation)', () => {
+    const projects = projectsOf(['orphan']);
     expect(() => {
-      drawDistrictScene(fakeCtx(), []);
+      drawDistrictScene(fakeCtx(), projects, []);
+    }).not.toThrow();
+  });
+
+  it('draws without throwing for an empty project list', () => {
+    expect(() => {
+      drawDistrictScene(fakeCtx(), [], []);
+    }).not.toThrow();
+  });
+
+  it('honest-unknown projects (source: "unknown") still draw without throwing', () => {
+    const projects = [project({ key: 'x', source: 'unknown', progress: null })];
+    const plots = computeDistrictPlots(projects);
+    expect(() => {
+      drawDistrictScene(fakeCtx(), projects, plots);
     }).not.toThrow();
   });
 });

@@ -506,10 +506,12 @@ function registerBriefingRoute(app: FastifyInstance, options: HttpServerOptions)
   // trust level, same "no new polling loop" posture — reads the executor's
   // own already-persisted state.
   app.get('/api/ops/auto', async () => autoExecutorStore.getStatus());
-  // Districts (Phase 5 Lane C, T7/D-35): per-project milestone state for the
-  // v4 proof-slice's 2 seed districts (war-room, TWE). Same trust tier +
+  // Districts (Phase 5 Lane C T7/D-35; v5 C1 N-project build-out):
+  // per-project milestone state, data-driven from WAR_ROOM_DISTRICTS_DIR
+  // (one project per immediate subdirectory) plus the legacy 2-seed env
+  // vars as additive overrides (districtsProvider.ts). Same trust tier +
   // tolerant-read/60s-cache posture as /api/briefing; a project with no
-  // configured STATE.md path renders honestly as source:'unknown', never a
+  // discoverable STATE.md renders honestly as source:'unknown', never a
   // fake number.
   app.get('/api/districts', async () => getDistricts());
 }

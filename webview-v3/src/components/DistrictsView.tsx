@@ -1,8 +1,8 @@
-import { useCallback, useEffect, useRef, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 
 import { fitToView, worldToCanvas } from '../engine/camera';
 import {
-  DISTRICT_PLOTS,
+  computeDistrictPlots,
   districtSceneBounds,
   drawDistrictScene,
   hitTestDistrict,
@@ -80,6 +80,18 @@ export function DistrictsView({ isOpen, onClose }: DistrictsViewProps) {
   const [plaques, setPlaques] = useState<PlaquePoint[]>([]);
   const cameraRef = useRef<ReturnType<typeof fitToView> | null>(null);
 
+  // Plots derived from whatever project list the server returns (v5 C1:
+  // N projects, not a fixed 2) — recomputed only when the project KEY list
+  // changes, so a poll that just refreshes progress/phase doesn't reshuffle
+  // the grid.
+  const projects = snapshot?.projects ?? [];
+  const projectKeysSignature = projects.map((p) => p.key).join(',');
+  const plots = useMemo(
+    () => computeDistrictPlots(projects),
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- keyed on the stable key signature, not the array identity
+    [projectKeysSignature],
+  );
+
   const draw = useCallback(() => {
     const container = containerRef.current;
     const canvas = canvasRef.current;
@@ -92,7 +104,7 @@ export function DistrictsView({ isOpen, onClose }: DistrictsViewProps) {
     canvas.style.width = `${String(cssSize.width)}px`;
     canvas.style.height = `${String(cssSize.height)}px`;
 
-    const bounds = districtSceneBounds();
+    const bounds = districtSceneBounds(plots);
     const camera = fitToView(cssSize, bounds);
     cameraRef.current = camera;
 
@@ -101,17 +113,18 @@ export function DistrictsView({ isOpen, onClose }: DistrictsViewProps) {
     ctx.save();
     ctx.scale(resolution, resolution);
     ctx.clearRect(0, 0, cssSize.width, cssSize.height);
-    drawDistrictScene(ctx, snapshot?.projects ?? []);
+    drawDistrictScene(ctx, projects, plots);
     ctx.restore();
 
     setPlaques(
-      DISTRICT_PLOTS.map((plot) => {
+      plots.map((plot) => {
         const { worldX, worldY } = plotWorldCenter(plot);
         const point = worldToCanvas(camera, worldX, worldY);
         return { key: plot.key, x: point.x, y: point.y };
       }),
     );
-  }, [snapshot]);
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- `projects`/`plots` are derived each render from `snapshot`; depending on `snapshot` itself is equivalent and avoids an extra dep-array entry churn
+  }, [snapshot, plots]);
 
   // Reset per-open state (adjust-while-rendering, not an effect — mirrors
   // GraphSearchPanel's wasOpen pattern).
@@ -158,18 +171,21 @@ export function DistrictsView({ isOpen, onClose }: DistrictsViewProps) {
     };
   }, [isOpen, draw]);
 
-  const handleCanvasClick = useCallback((e: { clientX: number; clientY: number }) => {
-    const canvas = canvasRef.current;
-    const camera = cameraRef.current;
-    if (!canvas || !camera) return;
-    const rect = canvas.getBoundingClientRect();
-    const canvasX = e.clientX - rect.left;
-    const canvasY = e.clientY - rect.top;
-    const worldX = (canvasX - camera.offsetX) / camera.zoom;
-    const worldY = (canvasY - camera.offsetY) / camera.zoom;
-    const key = hitTestDistrict(worldX, worldY);
-    if (key) setSelectedKey(key);
-  }, []);
+  const handleCanvasClick = useCallback(
+    (e: { clientX: number; clientY: number }) => {
+      const canvas = canvasRef.current;
+      const camera = cameraRef.current;
+      if (!canvas || !camera) return;
+      const rect = canvas.getBoundingClientRect();
+      const canvasX = e.clientX - rect.left;
+      const canvasY = e.clientY - rect.top;
+      const worldX = (canvasX - camera.offsetX) / camera.zoom;
+      const worldY = (canvasY - camera.offsetY) / camera.zoom;
+      const key = hitTestDistrict(worldX, worldY, plots);
+      if (key) setSelectedKey(key);
+    },
+    [plots],
+  );
 
   const selectedProject = snapshot?.projects.find((p) => p.key === selectedKey) ?? null;
 
