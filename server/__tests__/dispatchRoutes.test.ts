@@ -16,6 +16,8 @@ import * as os from 'os';
 import * as path from 'path';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
+import { DISPATCH_CONTEXT_PREAMBLE } from '../src/dispatchStore.js';
+
 // Isolated temp HOME, same rationale as server.test.ts (dispatchStore persists
 // under ~/.pixel-agents/ by default).
 let tmpBase: string;
@@ -257,7 +259,7 @@ describe('dispatch HTTP routes', () => {
       pending: Array<{ id: string; prompt?: string; model?: string; effort?: string }>;
     };
     expect(pollBody.pending).toHaveLength(1);
-    expect(pollBody.pending[0].prompt).toBe('list files');
+    expect(pollBody.pending[0].prompt).toBe(`${DISPATCH_CONTEXT_PREAMBLE}list files`);
     const id = pollBody.pending[0].id;
 
     const decisionRes = await fetch(`http://127.0.0.1:${config.port}/api/dispatch/${id}/decision`, {

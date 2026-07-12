@@ -12,6 +12,7 @@ import { afterEach, beforeEach, test } from 'node:test';
 
 import {
   buildArgv,
+  buildSessionArgv,
   DISPATCH_PROVIDERS,
   emptyAllowlist,
   parseAllowlist,
@@ -327,4 +328,66 @@ test('buildArgv: backticks and $() command-substitution syntax pass through iner
 
 test('buildArgv: unknown provider returns null rather than throwing', () => {
   assert.equal(buildArgv({ provider: 'bogus', prompt: 'x' }), null);
+});
+
+// ── 4B permission-mode toggle ─────────────────────────────────────
+
+test('buildArgv: permissionMode plan maps to --permission-mode plan for claude only', () => {
+  assert.deepEqual(buildArgv({ provider: 'claude', prompt: 'hi', permissionMode: 'plan' }), [
+    'claude',
+    '-p',
+    '--permission-mode',
+    'plan',
+    'hi',
+  ]);
+  // codex/gemini have no such flag — silently omitted, same as effort.
+  assert.deepEqual(buildArgv({ provider: 'codex', prompt: 'hi', permissionMode: 'plan' }), [
+    'codex',
+    'exec',
+    '--skip-git-repo-check',
+    'hi',
+  ]);
+  assert.deepEqual(buildArgv({ provider: 'gemini', prompt: 'hi', permissionMode: 'plan' }), [
+    'gemini',
+    '-p',
+    'hi',
+  ]);
+});
+
+test('buildArgv: permissionMode default/unknown/free-text NEVER emits a flag (closed enum)', () => {
+  assert.deepEqual(buildArgv({ provider: 'claude', prompt: 'hi', permissionMode: 'default' }), [
+    'claude',
+    '-p',
+    'hi',
+  ]);
+  // A non-enum value must never reach argv — free text here would be an
+  // arbitrary-flag injection surface on the CLI.
+  assert.deepEqual(
+    buildArgv({ provider: 'claude', prompt: 'hi', permissionMode: 'bypassPermissions' }),
+    ['claude', '-p', 'hi'],
+  );
+  assert.deepEqual(
+    buildArgv({
+      provider: 'claude',
+      prompt: 'hi',
+      permissionMode: '--dangerously-skip-permissions',
+    }),
+    ['claude', '-p', 'hi'],
+  );
+});
+
+test('buildSessionArgv: permissionMode plan rides the interactive launch too', () => {
+  assert.deepEqual(
+    buildSessionArgv({ provider: 'claude', prompt: 'brief', permissionMode: 'plan' }),
+    ['claude', '--permission-mode', 'plan', 'brief'],
+  );
+  assert.deepEqual(buildSessionArgv({ provider: 'claude', permissionMode: 'plan' }), [
+    'claude',
+    '--permission-mode',
+    'plan',
+  ]);
+  assert.deepEqual(
+    buildSessionArgv({ provider: 'codex', prompt: 'brief', permissionMode: 'plan' }),
+    ['codex', 'brief'],
+  );
 });

@@ -148,6 +148,8 @@ export function handleClientMessage(
         pid: typeof msg.pid === 'number' ? msg.pid : undefined,
         model: typeof msg.model === 'string' ? msg.model : undefined,
         effort: typeof msg.effort === 'string' ? msg.effort : undefined,
+        // 4B permission-mode toggle — enum-validated inside enqueue().
+        permissionMode: typeof msg.permissionMode === 'string' ? msg.permissionMode : undefined,
         // T8 Mini compute — opaque scriptId + plain-token args for a `shell`
         // dispatch; validated (and dropped for non-shell) inside enqueue().
         scriptId: typeof msg.scriptId === 'string' ? msg.scriptId : undefined,

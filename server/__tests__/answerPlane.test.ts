@@ -22,7 +22,8 @@ vi.mock('os', async () => {
   return { ...actual, homedir: () => tmpBase };
 });
 
-const { DispatchStore, ANSWER_TEXT_MAX_CHARS } = await import('../src/dispatchStore.js');
+const { DispatchStore, ANSWER_TEXT_MAX_CHARS, DISPATCH_CONTEXT_PREAMBLE } =
+  await import('../src/dispatchStore.js');
 const { PixelAgentsServer } = await import('../src/server.js');
 const { AgentStateStore } = await import('../src/agentStateStore.js');
 import type { AgentState } from '../src/types.js';
@@ -102,7 +103,7 @@ describe('DispatchStore: session action', () => {
     });
     expect(ok.ok).toBe(true);
     const item = store.pendingFor('M1')[0];
-    expect(item.prompt).toBe('opening brief');
+    expect(item.prompt).toBe(`${DISPATCH_CONTEXT_PREAMBLE}opening brief`);
     expect(item.model).toBe('fable');
 
     const capped = store.enqueue({

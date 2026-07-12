@@ -15,6 +15,8 @@ import * as os from 'os';
 import * as path from 'path';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
+import { DISPATCH_CONTEXT_PREAMBLE } from '../src/dispatchStore.js';
+
 // Isolated temp HOME, same rationale as dispatchRoutes.test.ts.
 let tmpBase: string;
 
@@ -187,7 +189,7 @@ describe('Chain live E2E (real Fastify server, real poll/decide/status runner si
     // Step 2: auto-enqueued with the substituted prompt.
     const step2 = await runnerTick(config.port, config.token, machine);
     expect(step2).not.toBeNull();
-    expect(step2!.prompt).toBe('report on BUILD_OK (exit 0)');
+    expect(step2!.prompt).toBe(`${DISPATCH_CONTEXT_PREAMBLE}report on BUILD_OK (exit 0)`);
     await decide(config.port, config.token, step2!.id, 'accept');
     await reportExit(config.port, config.token, step2!.id, 0, 'REPORT_OK');
 

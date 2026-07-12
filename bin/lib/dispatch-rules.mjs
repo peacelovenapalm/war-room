@@ -253,6 +253,26 @@ export function validateComputeRequest(request, allowlist) {
  *  omitted from argv here rather than passed to a flag that doesn't exist. */
 const PROVIDERS_WITH_EFFORT = new Set(['claude']);
 
+/** 4B permission-mode toggle. CLOSED enum — the wire value never reaches a
+ *  flag unless it is exactly one of these (a free-text mode would be an
+ *  arbitrary-flag injection surface on the CLI). `default` = omit the flag
+ *  entirely (whatever the CLI does unattended today). Only claude has a
+ *  `--permission-mode` flag (verified `claude --help` 2026-07-12); other
+ *  providers silently omit, same discipline as effort. */
+export const DISPATCH_PERMISSION_MODE_VALUES = Object.freeze(['default', 'plan']);
+const PROVIDERS_WITH_PERMISSION_MODE = new Set(['claude']);
+
+/** The validated flag value for a request's permissionMode, or undefined
+ *  when the flag must not be emitted (default/unknown value/unsupported
+ *  provider). NEVER returns free text — only enum members map through. */
+function permissionModeFlag(request, provider) {
+  const mode = typeof request?.permissionMode === 'string' ? request.permissionMode : undefined;
+  if (mode === undefined || mode === 'default') return undefined;
+  if (!DISPATCH_PERMISSION_MODE_VALUES.includes(mode)) return undefined;
+  if (!PROVIDERS_WITH_PERMISSION_MODE.has(provider)) return undefined;
+  return mode;
+}
+
 /**
  * Build the argv array for a validated dispatch request. The prompt is
  * ALWAYS a single argv element — never concatenated into a shell string —
@@ -296,6 +316,8 @@ export function buildArgv(request) {
       const argv = ['claude', '-p'];
       if (model) argv.push('--model', model);
       if (includeEffort('claude')) argv.push('--effort', effort);
+      const permissionMode = permissionModeFlag(request, 'claude');
+      if (permissionMode) argv.push('--permission-mode', permissionMode);
       argv.push(request.prompt);
       return argv;
     }
@@ -397,6 +419,8 @@ export function buildSessionArgv(request) {
       if (effort !== undefined && PROVIDERS_WITH_EFFORT.has('claude')) {
         argv.push('--effort', effort);
       }
+      const permissionMode = permissionModeFlag(request, 'claude');
+      if (permissionMode) argv.push('--permission-mode', permissionMode);
       if (prompt) argv.push(prompt);
       return argv;
     }

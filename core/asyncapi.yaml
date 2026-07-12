@@ -2144,6 +2144,8 @@ components:
             threads it to argv only for providers with a real --model flag.
         effort:
           $ref: '#/components/schemas/DispatchEffortValue'
+        permissionMode:
+          $ref: '#/components/schemas/DispatchPermissionModeValue'
         timeoutSec:
           type: integer
           minimum: 1
@@ -2173,6 +2175,18 @@ components:
         runner silently omits it for the rest.
       type: string
       enum: [low, medium, high, xhigh, max]
+
+    DispatchPermissionModeValue:
+      description: >-
+        4B permission-mode toggle for an LLM dispatch/session. CLOSED enum,
+        validated server-side AND member-checked again by the runner before
+        it ever maps to a CLI flag (free text here would be an
+        arbitrary-flag injection surface). "default" omits the flag
+        entirely; "plan" maps to `--permission-mode plan` for providers
+        that have the flag (currently claude — others silently omit, same
+        discipline as effort).
+      type: string
+      enum: [default, plan]
 
     TailSubscribe:
       description: >-

@@ -30,6 +30,7 @@ const { ShiftStats } = await import('../src/shiftStats.js');
 
 import type { ReworkBinItem } from '../../core/src/messages.js';
 import type { DispatchBroadcast } from '../src/dispatchStore.js';
+import { DISPATCH_CONTEXT_PREAMBLE } from '../src/dispatchStore.js';
 
 beforeEach(() => {
   tmpBase = fs.mkdtempSync(path.join(os.tmpdir(), 'pxl-rework-test-'));
@@ -127,9 +128,12 @@ describe('DispatchStore.getRedispatchInput', () => {
       machine: 'TESTMACH',
       provider: 'claude',
       cwd: '/repo',
-      prompt: 'fix the flaky test',
+      // 4B: the stored prompt carries the context preamble; re-enqueue's
+      // startsWith guard keeps it from doubling.
+      prompt: `${DISPATCH_CONTEXT_PREAMBLE}fix the flaky test`,
       model: 'fable',
       effort: 'high',
+      permissionMode: undefined,
     });
 
     const focus = store.enqueue({ action: 'focus', machine: 'TESTMACH', sessionId: 'sess-1' });
@@ -212,7 +216,11 @@ describe('rework routes (real server)', () => {
     // The fresh dispatch is a NORMAL ringing queue entry for that machine,
     // carrying the ORIGINAL prompt — visible on the runner poll surface.
     const pending = dispatchStore.pendingFor(machine);
-    expect(pending.some((p) => p.id === body.dispatchId && p.prompt === prompt)).toBe(true);
+    expect(
+      pending.some(
+        (p) => p.id === body.dispatchId && p.prompt === `${DISPATCH_CONTEXT_PREAMBLE}${prompt}`,
+      ),
+    ).toBe(true);
 
     const after = (await getRework(config.port)).find((i) => i.id === crate!.id);
     expect(after!.status).toBe('reworked');

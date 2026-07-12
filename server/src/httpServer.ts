@@ -981,7 +981,19 @@ function registerDispatchRoutes(app: FastifyInstance, options: HttpServerOptions
       const scriptIds = (Array.isArray(body.scriptIds) ? body.scriptIds : []).filter(
         (s): s is string => typeof s === 'string',
       );
-      dispatchStore.recordAdvertisement(machine, { providers, roots, focus, sessions, scriptIds });
+      // 4B skill picker — same names-only discipline (~/.claude/skills dir
+      // names); the CALL modal composes a visible `/name` prompt prefix.
+      const skills = (Array.isArray(body.skills) ? body.skills : []).filter(
+        (s): s is string => typeof s === 'string',
+      );
+      dispatchStore.recordAdvertisement(machine, {
+        providers,
+        roots,
+        focus,
+        sessions,
+        scriptIds,
+        skills,
+      });
       dispatchStore.recordManagedSessions(machine, managedSessions);
       // Propagate the managed flag onto matching agents (pid correlation)
       // and broadcast transitions — the board's ONLY license to render

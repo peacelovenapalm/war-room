@@ -214,6 +214,43 @@ function readAllowlist(cfg) {
   return result.allowlist;
 }
 
+// ── Skills advertisement (4B) ───────────────────────────────────
+
+/** Skill names are directory names — same names-only wire discipline as
+ *  scriptIds (never paths, never file contents). */
+export const SKILL_NAME_PATTERN = /^[a-zA-Z0-9_-]{1,64}$/;
+const SKILLS_MAX = 200;
+const SKILLS_CACHE_TTL_MS = 60_000;
+let skillsCache = { at: 0, names: [], home: '' };
+
+/** Enumerate the machine's global skills (~/.claude/skills dir names) for
+ *  the poll advertisement — the CALL modal's skill picker source. Names
+ *  only: pattern-filtered, capped, cached (a readdir per minute, not per
+ *  tick). Unreadable dir → empty list, never a throw (a machine without
+ *  skills is honestly skill-less). */
+export function listSkills(nowMs = Date.now(), fsImpl = fs, homedir = os.homedir()) {
+  if (
+    skillsCache.at !== 0 &&
+    skillsCache.home === homedir &&
+    nowMs - skillsCache.at < SKILLS_CACHE_TTL_MS
+  ) {
+    return skillsCache.names;
+  }
+  let names = [];
+  try {
+    names = fsImpl
+      .readdirSync(path.join(homedir, '.claude', 'skills'), { withFileTypes: true })
+      .filter((e) => e.isDirectory() && SKILL_NAME_PATTERN.test(e.name))
+      .map((e) => e.name)
+      .sort()
+      .slice(0, SKILLS_MAX);
+  } catch {
+    names = [];
+  }
+  skillsCache = { at: nowMs, names, home: homedir };
+  return names;
+}
+
 // ── Server calls ────────────────────────────────────────────────
 
 async function postDispatchPoll(cfg, allowlist, managedSessions, fetchImpl) {
@@ -222,6 +259,9 @@ async function postDispatchPoll(cfg, allowlist, managedSessions, fetchImpl) {
   // registry carries the capability (MINI-COMPUTE-NODE.md trust boundary).
   const { compute, ...capabilities } = allowlist;
   const scriptIds = compute?.scripts ? Object.keys(compute.scripts) : [];
+  // 4B: skills are names-only too — the picker composes a visible `/name`
+  // prefix into the prompt client-side; no new dispatch-request field.
+  const skills = listSkills();
   return fetchImpl(`${cfg.url}/api/dispatch/poll`, {
     method: 'POST',
     headers: {
@@ -234,7 +274,7 @@ async function postDispatchPoll(cfg, allowlist, managedSessions, fetchImpl) {
     // source for which agents may render ANSWER. Alive-in-tmux entries only,
     // re-derived every tick, never cached (REMOTE-ANSWER-DESIGN.md). scriptIds
     // are names-only (T8) so the CALL tray can render a real script picker.
-    body: JSON.stringify({ ...capabilities, scriptIds, managedSessions }),
+    body: JSON.stringify({ ...capabilities, scriptIds, skills, managedSessions }),
     signal: AbortSignal.timeout(POST_TIMEOUT_MS),
   });
 }

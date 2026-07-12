@@ -78,6 +78,31 @@ const COMPUTE_ARG_PATTERN = /^[a-zA-Z0-9._/=:@,+-]{1,256}$/;
 export const DISPATCH_EFFORT_VALUES = ['low', 'medium', 'high', 'xhigh', 'max'] as const;
 export type DispatchEffort = (typeof DISPATCH_EFFORT_VALUES)[number];
 
+/** 4B permission-mode toggle. CLOSED enum, validated here AND mapped to a
+ *  flag only through the runner's own member check — a free-text mode would
+ *  be an arbitrary-flag injection surface on the dispatched CLI. `default`
+ *  = omit the flag (whatever the CLI does unattended today); `plan` =
+ *  `--permission-mode plan` (claude only — other providers silently omit,
+ *  same discipline as effort). */
+export const DISPATCH_PERMISSION_MODE_VALUES = ['default', 'plan'] as const;
+export type DispatchPermissionMode = (typeof DISPATCH_PERMISSION_MODE_VALUES)[number];
+
+/** 4B dispatch context preamble — prefixed onto every non-empty LLM prompt
+ *  at ENQUEUE time (never in pendingFor) so the persisted record, the audit
+ *  log, and the runner all carry the EXACT same text. Rationale: a
+ *  dispatched agent otherwise has zero idea a console drove it (verified
+ *  live 2026-07-12 — it couldn't say what UI it ran under). Sessions
+ *  launched with no brief stay bare — injecting a preamble there would turn
+ *  a bare TUI launch into a running turn. promptPreview strips this prefix
+ *  (the human's own words are the useful preview; the audit keeps it all). */
+export const DISPATCH_CONTEXT_PREAMBLE =
+  '[WAR ROOM] You were dispatched from the War Room console. Your final output ' +
+  'is read on a phone dashboard tray — lead with the outcome and keep it tight. ' +
+  'The knowledge vault lives at /Users/greg/Brain2/vault (knowledge graph: ' +
+  'python3 vault/scripts/graph_query.py --help, run from /Users/greg/Brain2/vault) — ' +
+  'consult it before re-deriving project context. If other agents may share ' +
+  'your checkout, prefer an isolated git worktree for writes.\n\n---\n\n';
+
 /** A short model identifier/alias (e.g. 'fable', 'claude-fable-5', 'o3') —
  *  intentionally permissive (covers every provider's own naming scheme)
  *  while still rejecting anything that couldn't be a single argv token. */
@@ -152,6 +177,8 @@ interface DispatchRecord {
   pid?: number;
   model?: string;
   effort?: DispatchEffort;
+  /** 4B permission-mode toggle — closed enum, validated in enqueue(). */
+  permissionMode?: DispatchPermissionMode;
   /** T8 Mini compute — opaque scriptId + plain-token args for a `shell`
    *  dispatch (resolved to interpreter/path ONLY by the runner's local
    *  registry; the server never knows the path). */
@@ -203,6 +230,9 @@ export interface DispatchEnqueueInput {
   pid?: number;
   model?: string;
   effort?: string;
+  /** 4B permission-mode toggle — validated against
+   *  DISPATCH_PERMISSION_MODE_VALUES in enqueue(). */
+  permissionMode?: string;
   /** T8 Mini compute — opaque scriptId + plain-token args (shell provider). */
   scriptId?: string;
   args?: string[];
@@ -269,6 +299,9 @@ export interface DispatchRunnerItem {
   pid?: number;
   model?: string;
   effort?: DispatchEffort;
+  /** 4B permission-mode toggle — the runner maps enum members to a flag,
+   *  never free text (dispatch-rules.mjs permissionModeFlag). */
+  permissionMode?: DispatchPermissionMode;
   /** T8 Mini compute — the runner resolves scriptId + args against its own
    *  registry (buildComputeArgv); the wire never carries interpreter/path. */
   scriptId?: string;
@@ -291,6 +324,11 @@ export interface DispatchMachineAdvertisement {
    *  (never the interpreter/path). Drives the CALL tray's script picker so a
    *  shell dispatch is always a pick, never free-text. */
   scriptIds: string[];
+  /** 4B skill picker — the machine's global skill NAMES (~/.claude/skills
+   *  dir names, pattern-filtered + capped by the runner AND re-filtered
+   *  here). Names only: the picker composes a visible `/name` prefix into
+   *  the prompt client-side; no skill field ever rides a dispatch. */
+  skills: string[];
   lastSeenAt: number;
 }
 
@@ -520,6 +558,12 @@ export class DispatchStore {
       ) {
         return { ok: false, reason: 'invalid-effort' };
       }
+      if (
+        input.permissionMode !== undefined &&
+        !(DISPATCH_PERMISSION_MODE_VALUES as readonly string[]).includes(input.permissionMode)
+      ) {
+        return { ok: false, reason: 'invalid-permission-mode' };
+      }
       if (input.timeoutSec !== undefined) {
         // Sessions are interactive — the runner's cap timer only exists on
         // the headless spawn path, so accepting a cap here would silently
@@ -552,17 +596,31 @@ export class DispatchStore {
     const isCliRun = input.action === 'dispatch' || input.action === 'session';
     const isShell = input.provider === 'shell';
     const isLlmRun = isCliRun && !isShell;
+    // 4B context preamble: applied HERE (post-validation, pre-persist) so
+    // record/audit/runner all carry identical text. Length-checked against
+    // the human's prompt above — the preamble is server-owned constant cost.
+    // startsWith guard: a re-dispatch (getRedispatchInput) feeds the STORED
+    // prompt back through enqueue — never double-prefix it.
+    const prompt =
+      isLlmRun && typeof input.prompt === 'string' && input.prompt.trim() !== ''
+        ? input.prompt.startsWith(DISPATCH_CONTEXT_PREAMBLE)
+          ? input.prompt
+          : DISPATCH_CONTEXT_PREAMBLE + input.prompt
+        : undefined;
     const commonFields = {
       id: randomUUID(),
       action: input.action,
       machine: input.machine,
       provider: isCliRun ? (input.provider as DispatchProvider) : undefined,
       cwd: isLlmRun ? input.cwd : undefined,
-      prompt: isLlmRun ? input.prompt : undefined,
+      prompt,
       sessionId: input.sessionId,
       pid: input.action === 'focus' ? input.pid : undefined,
       model: isLlmRun ? input.model : undefined,
       effort: isLlmRun ? (input.effort as DispatchEffort | undefined) : undefined,
+      permissionMode: isLlmRun
+        ? (input.permissionMode as DispatchPermissionMode | undefined)
+        : undefined,
       // T8 Mini compute — carried only for a `shell` dispatch.
       scriptId: isShell ? input.scriptId : undefined,
       args: isShell ? input.args : undefined,
@@ -705,6 +763,7 @@ export class DispatchStore {
       focus: boolean;
       sessions?: boolean;
       scriptIds?: string[];
+      skills?: string[];
     },
     now: number = Date.now(),
   ): void {
@@ -720,6 +779,9 @@ export class DispatchStore {
       scriptIds: Array.isArray(ad.scriptIds)
         ? ad.scriptIds.filter((s) => typeof s === 'string')
         : [],
+      // 4B skill picker — names only, re-filtered here (never trust the
+      // wire for a shape the picker will render).
+      skills: Array.isArray(ad.skills) ? ad.skills.filter((s) => typeof s === 'string') : [],
       lastSeenAt: now,
     });
   }
@@ -942,6 +1004,7 @@ export class DispatchStore {
         pid: r.pid,
         model: r.model,
         effort: r.effort,
+        permissionMode: r.permissionMode,
         scriptId: r.scriptId,
         args: r.args,
         timeoutSec: r.timeoutSec,
@@ -1235,6 +1298,10 @@ export class DispatchStore {
       prompt: record.prompt,
       model: record.model,
       effort: record.effort,
+      // 4B: preserve the mode on re-dispatch — a plan-mode run must not
+      // silently rerun unrestricted. (The stored prompt already carries the
+      // context preamble; enqueue's startsWith guard keeps it single.)
+      permissionMode: record.permissionMode,
       timeoutSec: record.timeoutSec,
     };
   }
@@ -1273,7 +1340,13 @@ export class DispatchStore {
       status: record.status,
       machine: record.machine,
       provider: record.provider,
-      promptPreview: record.prompt?.slice(0, DISPATCH_PROMPT_PREVIEW_MAX_CHARS),
+      promptPreview:
+        record.prompt === undefined
+          ? undefined
+          : (record.prompt.startsWith(DISPATCH_CONTEXT_PREAMBLE)
+              ? record.prompt.slice(DISPATCH_CONTEXT_PREAMBLE.length)
+              : record.prompt
+            ).slice(0, DISPATCH_PROMPT_PREVIEW_MAX_CHARS),
       reason: record.reason,
       pid: record.pid,
       exitCode: record.exitCode,

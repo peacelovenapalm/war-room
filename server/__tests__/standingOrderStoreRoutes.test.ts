@@ -17,6 +17,8 @@ import { fileURLToPath } from 'url';
 import { promisify } from 'util';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
+import { DISPATCH_CONTEXT_PREAMBLE } from '../src/dispatchStore.js';
+
 const execFileAsync = promisify(execFile);
 
 /** Repo-root-relative path to the real poller script, resolved from this
@@ -104,7 +106,7 @@ describe('Standing order live E2E (real HTTP round trip)', () => {
     });
     const pollBody = (await pollRes.json()) as { pending: Array<{ prompt?: string }> };
     expect(pollBody.pending).toHaveLength(1); // the first-fire dispatch, unaffected by budget
-    expect(pollBody.pending[0].prompt).toBe('run the build');
+    expect(pollBody.pending[0].prompt).toBe(`${DISPATCH_CONTEXT_PREAMBLE}run the build`);
 
     // standingOrderStore is a process-wide singleton shared across every
     // test file in this worker (same convention dispatchRoutes.test.ts

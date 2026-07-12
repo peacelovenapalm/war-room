@@ -13,6 +13,7 @@ import * as path from 'path';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 
 import {
+  DISPATCH_CONTEXT_PREAMBLE,
   DISPATCH_RESULT_TAIL_MAX_CHARS,
   DISPATCH_RINGING_CAP,
   DispatchStore,
@@ -181,6 +182,83 @@ describe('DispatchStore.enqueue', () => {
     expect(result.reason).toBe('invalid-effort');
   });
 
+  it('4B: threads a valid permissionMode to the runner item; rejects non-enum values', () => {
+    const s = new DispatchStore(statePath, auditPath);
+    const enq = s.enqueue({
+      action: 'dispatch',
+      machine: 'MACBOOK',
+      provider: 'claude',
+      cwd: '/x',
+      prompt: 'p',
+      permissionMode: 'plan',
+    });
+    expect(enq.ok).toBe(true);
+    expect(s.pendingFor('MACBOOK')[0].permissionMode).toBe('plan');
+
+    // Free text / CLI-native values outside our closed enum never persist —
+    // 'bypassPermissions' is a REAL claude flag value and must still deny.
+    for (const bad of ['bypassPermissions', 'auto', '--dangerously-skip-permissions']) {
+      const result = s.enqueue({
+        action: 'dispatch',
+        machine: 'M2',
+        provider: 'claude',
+        cwd: '/x',
+        prompt: 'p',
+        permissionMode: bad,
+      });
+      expect(result.ok).toBe(false);
+      if (result.ok) throw new Error('unreachable');
+      expect(result.reason).toBe('invalid-permission-mode');
+    }
+  });
+
+  it('4B: prefixes the context preamble onto LLM prompts at enqueue; preview strips it', () => {
+    const s = new DispatchStore(statePath, auditPath);
+    let seen: { promptPreview?: string } | undefined;
+    s.onUpdate((b) => {
+      seen = b;
+    });
+    const enq = s.enqueue({
+      action: 'dispatch',
+      machine: 'MACBOOK',
+      provider: 'claude',
+      cwd: '/x',
+      prompt: 'human words here',
+    });
+    expect(enq.ok).toBe(true);
+    // Runner receives preamble + human text (one string, exact).
+    const item = s.pendingFor('MACBOOK')[0];
+    expect(item.prompt).toBe(`${DISPATCH_CONTEXT_PREAMBLE}human words here`);
+    // Broadcast preview shows the HUMAN words, not the boilerplate.
+    expect(seen?.promptPreview).toBe('human words here');
+  });
+
+  it('4B: a session with no brief stays bare — no preamble injected', () => {
+    const s = new DispatchStore(statePath, auditPath);
+    const enq = s.enqueue({
+      action: 'session',
+      machine: 'MACBOOK',
+      provider: 'claude',
+      cwd: '/x',
+    });
+    expect(enq.ok).toBe(true);
+    expect(s.pendingFor('MACBOOK')[0].prompt).toBeUndefined();
+  });
+
+  it('4B: recordAdvertisement carries skills (names-only, non-strings dropped)', () => {
+    const s = new DispatchStore(statePath, auditPath);
+    s.recordAdvertisement('MACBOOK', {
+      providers: ['claude'],
+      roots: ['/x'],
+      focus: false,
+      skills: ['gsd-health', 42 as unknown as string, 'graphify'],
+    });
+    expect(s.getMachines()[0].skills).toEqual(['gsd-health', 'graphify']);
+    // An advertisement without skills is honestly empty, never undefined.
+    s.recordAdvertisement('MINI', { providers: ['claude'], roots: ['/x'], focus: false });
+    expect(s.getMachines().find((m) => m.machine === 'MINI')?.skills).toEqual([]);
+  });
+
   it('caps at DISPATCH_RINGING_CAP ringing requests per machine', () => {
     const s = new DispatchStore(statePath, auditPath);
     for (let i = 0; i < DISPATCH_RINGING_CAP; i++) {
@@ -237,7 +315,9 @@ describe('DispatchStore runner-facing surface', () => {
     });
     const pending = s.pendingFor('MACBOOK');
     expect(pending).toHaveLength(1);
-    expect(pending[0].prompt).toBe('the full prompt');
+    // 4B: the context preamble is part of the stored prompt — the runner
+    // gets exactly what the record/audit hold, human text intact at the end.
+    expect(pending[0].prompt).toBe(`${DISPATCH_CONTEXT_PREAMBLE}the full prompt`);
   });
 });
 

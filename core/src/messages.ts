@@ -788,11 +788,14 @@ export interface DispatchRequest {
   args?: string[];
   model?: string;
   effort?: DispatchEffortValue;
+  permissionMode?: DispatchPermissionModeValue;
   timeoutSec?: number;
   requestId?: string;
 }
 
 export type DispatchEffortValue = 'low' | 'medium' | 'high' | 'xhigh' | 'max';
+
+export type DispatchPermissionModeValue = 'default' | 'plan';
 
 export interface TailSubscribe {
   type: 'tailSubscribe';

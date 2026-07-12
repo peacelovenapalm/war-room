@@ -18,7 +18,7 @@ import { afterEach, beforeEach, test } from 'node:test';
 import * as assert from 'node:assert/strict';
 import { fileURLToPath } from 'node:url';
 
-import { attemptFocus, tick, verifyClaudeProcess } from '../dispatch-runner.mjs';
+import { attemptFocus, listSkills, tick, verifyClaudeProcess } from '../dispatch-runner.mjs';
 
 const RUNNER_PATH = path.join(
   path.dirname(fileURLToPath(import.meta.url)),
@@ -118,8 +118,12 @@ test('tick: advertises the current allowlist on every poll', async () => {
 
   const pollReq = captured.find((c) => c.url === '/api/dispatch/poll');
   // managedSessions (T2) + scriptIds (T8, names-only) ride every poll —
-  // both empty here (no sessions capability, no compute registry).
-  assert.deepEqual(pollReq.body, { ...allowlist, scriptIds: [], managedSessions: [] });
+  // both empty here (no sessions capability, no compute registry). skills
+  // (4B) enumerates THIS machine's real ~/.claude/skills — assert shape,
+  // not contents (the list is machine-specific), then compare the rest.
+  const { skills, ...bodyWithoutSkills } = pollReq.body;
+  assert.ok(Array.isArray(skills));
+  assert.deepEqual(bodyWithoutSkills, { ...allowlist, scriptIds: [], managedSessions: [] });
   assert.equal(pollReq.headers['x-machine'], 'TESTMACHINE');
   assert.equal(pollReq.headers.authorization, 'Bearer test-token');
 });
@@ -1108,4 +1112,42 @@ test('worker session kill (observed pid): an UNKNOWN pid has no server/runner pa
   // KICKOFF v1.1 item 3's explicit "don't build a server/runner path for
   // this case" instruction.
   assert.ok(true);
+});
+
+// ── 4B skills advertisement ───────────────────────────────────────
+
+test('listSkills: enumerates skill dir names, filters bad tokens, sorts, caches', () => {
+  const fakeFs = {
+    readdirSync: () => [
+      { name: 'gsd-health', isDirectory: () => true },
+      { name: 'zeta', isDirectory: () => true },
+      { name: 'not a skill!', isDirectory: () => true }, // bad token → dropped
+      { name: 'README.md', isDirectory: () => false }, // file → dropped
+      { name: 'alpha', isDirectory: () => true },
+    ],
+  };
+  const t0 = 10_000_000;
+  const names = listSkills(t0, fakeFs, '/fake/home');
+  assert.deepEqual(names, ['alpha', 'gsd-health', 'zeta']);
+  // Cached: a different fs within the TTL is NOT consulted.
+  const throwingFs = {
+    readdirSync: () => {
+      throw new Error('must not be called inside TTL');
+    },
+  };
+  assert.deepEqual(listSkills(t0 + 1_000, throwingFs, '/fake/home'), [
+    'alpha',
+    'gsd-health',
+    'zeta',
+  ]);
+});
+
+test('listSkills: unreadable skills dir advertises an honest empty list', () => {
+  const failFs = {
+    readdirSync: () => {
+      throw new Error('ENOENT');
+    },
+  };
+  // Past the TTL of the prior test's cache entry.
+  assert.deepEqual(listSkills(20_000_000, failFs, '/fake/home'), []);
 });
