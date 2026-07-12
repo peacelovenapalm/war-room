@@ -156,8 +156,16 @@ export async function createHttpServer(options: HttpServerOptions): Promise<Http
     app.setNotFoundHandler((req, reply) => {
       if (req.url === '/v3' || req.url.startsWith('/v3?') || req.url.startsWith('/v3/')) {
         // '/v3' → '/', '/v3?q' → '/?q', '/v3/x?q' → '/x?q' — never strip
-        // the query (deep links ride it).
-        reply.redirect(req.url.replace(/^\/v3\/?/, '/'), 301);
+        // the query (deep links ride it). Path and query are rebuilt
+        // separately with EXACTLY one leading slash: naive string splicing
+        // turned '/v3//evil.example/x' into the protocol-relative
+        // '//evil.example/x' — an open redirect off-tailnet (P6 codex
+        // review finding #1).
+        const qIndex = req.url.indexOf('?');
+        const rawPath = qIndex === -1 ? req.url : req.url.slice(0, qIndex);
+        const query = qIndex === -1 ? '' : req.url.slice(qIndex);
+        const rest = rawPath.slice('/v3'.length).replace(/^\/+/, '');
+        reply.redirect(`/${rest}${query}`, 301);
       } else if (staticDirLegacy && req.url.startsWith('/v1/')) {
         // HTML5 history fallback for the legacy face's own routes.
         reply.sendFile('index.html', staticDirLegacy);

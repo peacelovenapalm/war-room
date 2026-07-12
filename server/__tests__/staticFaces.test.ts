@@ -87,6 +87,10 @@ describe('face-merge static routing', () => {
       ['/v3?x=1', '/?x=1'],
       ['/v3/?agentId=5', '/?agentId=5'],
       ['/v3/deep/route?open=agent&id=2', '/deep/route?open=agent&id=2'],
+      // P6 codex review finding #1: extra slashes must NEVER yield a
+      // protocol-relative '//host' Location (open redirect off-tailnet).
+      ['/v3//evil.example/path?x=1', '/evil.example/path?x=1'],
+      ['/v3///evil.example', '/evil.example'],
     ];
     for (const [from, to] of cases) {
       const res = await fetch(`http://127.0.0.1:${String(port)}${from}`, {

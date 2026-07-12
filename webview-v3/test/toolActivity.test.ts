@@ -225,6 +225,24 @@ describe('reduceToolActivity — unrelated messages', () => {
   });
 });
 
+describe('reduceToolActivity — agentClosed pruning (P6 review #5)', () => {
+  it('drops the closed agent so the outer map never grows unbounded', () => {
+    let agents: ToolActivityMap = EMPTY_TOOL_ACTIVITY;
+    agents = reduceToolActivity(agents, start({ id: 1, toolName: 'Read' }), 1000);
+    agents = reduceToolActivity(agents, start({ id: 2, toolId: 't2', toolName: 'Bash' }), 1100);
+    const closed: ServerMessage = { type: 'agentClosed', id: 1 };
+    const next = reduceToolActivity(agents, closed, 2000);
+    expect(next.has(1)).toBe(false);
+    expect(next.has(2)).toBe(true);
+  });
+
+  it('is a same-reference no-op for an agent this store never saw', () => {
+    const withAgent = reduceToolActivity(EMPTY_TOOL_ACTIVITY, start({ toolName: 'Read' }), 1000);
+    const closed: ServerMessage = { type: 'agentClosed', id: 99 };
+    expect(reduceToolActivity(withAgent, closed, 2000)).toBe(withAgent);
+  });
+});
+
 describe('detectToolNameChanges — rate-limit for speech bubbles/FloorFeed', () => {
   it('fires once when a tool starts, not again for a same-name second call', () => {
     let agents: ToolActivityMap = EMPTY_TOOL_ACTIVITY;

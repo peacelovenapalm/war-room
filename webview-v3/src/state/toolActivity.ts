@@ -229,6 +229,16 @@ export function reduceToolActivity(
       next.set(message.id, { ...existing, subagents: nextSubagents });
       return next;
     }
+    case 'agentClosed': {
+      // Prune closed agents (P6 codex review finding #5): per-agent entries
+      // are internally capped, but the OUTER map only ever grew — a
+      // long-running dashboard cycling short-lived agents accumulated stale
+      // keys forever. Mirrors net/agentStore.ts's roster removal.
+      if (!agents.has(message.id)) return agents;
+      const next = new Map(agents);
+      next.delete(message.id);
+      return next;
+    }
     default:
       return agents;
   }

@@ -73,11 +73,17 @@ export default defineConfig({
           { urlPattern: /^\/api\//, method: 'GET', handler: 'NetworkOnly' },
           { urlPattern: /^\/api\//, method: 'POST', handler: 'NetworkOnly' },
         ],
-        // Never serve this face's index.html for API paths or for the old
-        // face's grace-period mount (/v1/ after the Tier-3 cutover). /v3 is
-        // NOT denylisted: post-cutover this SW controls root and /v3 301s
-        // to / — the redirect happens server-side before any fallback.
-        navigateFallbackDenylist: [/^\/api\//, /^\/v1\//],
+        // Never serve this face's index.html for API paths, the old face's
+        // grace-period mount (/v1/), OR old /v3 URLs. /v3 MUST be here (P6
+        // codex review finding #2): once this SW controls root, Workbox's
+        // navigation fallback would otherwise answer /v3/* CLIENT-SIDE with
+        // the cached root index.html — the server's 301 never runs, and the
+        // document's relative (base './') asset URLs resolve against /v3/
+        // where nothing is served → hard app break for exactly the
+        // installed-PWA users push deep links target. Denylisted, the
+        // navigation passes through to the network, the server 301s home
+        // with the query intact, and the SW serves the root normally.
+        navigateFallbackDenylist: [/^\/api\//, /^\/v1\//, /^\/v3(?:\/|$|\?)/],
       },
     }),
   ],

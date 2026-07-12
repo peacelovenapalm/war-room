@@ -132,7 +132,13 @@ export function ControlTip({
         }
       }}
       onTouchCancel={() => {
+        // OS-cancelled touch (system gesture, scroll interrupt): the bubble
+        // would otherwise stick at a stale anchor and the armed
+        // suppressNextClick would swallow a LATER non-touch activation
+        // (keyboard Enter on a hybrid device) — P6 codex review finding #4.
         clearTimers();
+        hide();
+        suppressNextClick.current = false;
       }}
       onClickCapture={(event) => {
         // The long-press already showed the tip; the synthetic click that
