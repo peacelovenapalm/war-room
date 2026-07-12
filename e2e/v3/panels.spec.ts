@@ -726,6 +726,71 @@ test.describe('stage-3 panel ports (desktop chrome model)', () => {
     }
   });
 
+  test('T1d FOCUS verb: drawer shows ⌖ FOCUS when the machine advertises focus:true, sends the real dispatchRequest, and shows an honest transient ▸ SENT (never a fake done)', async ({
+    browser,
+  }) => {
+    // Agent 1's existingAgents fixture (webviewReady script) is machine
+    // MACBOOK, pid 4242 — a real pid, so canFocusAgent only needs the
+    // machine's advertisement to carry focus:true.
+    const host = await serveV3Dist({
+      dispatchMachinesOverride: [
+        { machine: 'MACBOOK', providers: ['claude'], roots: ['/Users/dev/war-room'], focus: true },
+      ],
+    });
+    const context = await browser.newContext({ viewport: VIEWPORT });
+    try {
+      const page = await context.newPage();
+      await page.goto(`${host.url}/?agentId=1`);
+      await expect(page.getByTestId('hud-connection')).toHaveText('● LIVE', { timeout: 20_000 });
+      await expect(page.getByTestId('agent-drawer')).toBeVisible({ timeout: 20_000 });
+
+      const focusButton = page.getByTestId('drawer-focus');
+      await expect(focusButton).toBeVisible();
+      await expect(focusButton).toHaveText('⌖ FOCUS');
+      await expect(focusButton).toBeEnabled();
+
+      await focusButton.click();
+      // No ack exists on the wire for focus anywhere in the system —
+      // "SENT" is the honest terminal state, never upgraded to a
+      // fabricated "done" (mirrors the OPS REVIEW rung-2 FOCUS proposal).
+      await expect(focusButton).toHaveText('▸ SENT');
+      expect(
+        host.receivedMessages.some(
+          (m) =>
+            m.type === 'dispatchRequest' &&
+            m.action === 'focus' &&
+            m.machine === 'MACBOOK' &&
+            m.pid === 4242,
+        ),
+      ).toBe(true);
+    } finally {
+      await context.close();
+      await host.close();
+    }
+  });
+
+  test('T1d FOCUS verb: drawer hides the button entirely (not a dead disabled control) when the machine never advertised focus:true', async ({
+    browser,
+  }) => {
+    const host = await serveV3Dist({
+      dispatchMachinesOverride: [
+        { machine: 'MACBOOK', providers: ['claude'], roots: ['/Users/dev/war-room'], focus: false },
+      ],
+    });
+    const context = await browser.newContext({ viewport: VIEWPORT });
+    try {
+      const page = await context.newPage();
+      await page.goto(`${host.url}/?agentId=1`);
+      await expect(page.getByTestId('hud-connection')).toHaveText('● LIVE', { timeout: 20_000 });
+      await expect(page.getByTestId('agent-drawer')).toBeVisible({ timeout: 20_000 });
+
+      await expect(page.getByTestId('drawer-focus')).toHaveCount(0);
+    } finally {
+      await context.close();
+      await host.close();
+    }
+  });
+
   test('T2/T4 remote-answer plane: unmanaged agent stays DESK-only; a managed agent gets ANSWER, one-tap options, verbatim confirm, and DELIVERING…→✓ DELIVERED', async ({
     browser,
   }) => {

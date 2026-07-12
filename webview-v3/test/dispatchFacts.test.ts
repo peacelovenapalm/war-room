@@ -3,11 +3,13 @@ import { describe, expect, it } from 'vitest';
 import {
   applySkillPrefix,
   buildCopyIdLine,
+  canFocusAgent,
   canKillAgent,
   COMPUTE_MAX_ARGS_CEILING,
   DISPATCH_PERMISSION_MODE_OPTIONS,
   type DispatchMachine,
   machineHasLiveRunner,
+  machineSupportsFocus,
   machineSupportsSessions,
   parseComputeArgs,
 } from '../src/net/dispatchFacts';
@@ -51,6 +53,27 @@ describe('machineHasLiveRunner / canKillAgent', () => {
 
   it('no machine label → no runner', () => {
     expect(machineHasLiveRunner(MACHINES, undefined)).toBe(false);
+  });
+});
+
+describe('machineSupportsFocus / canFocusAgent (drawer FOCUS verb)', () => {
+  it('machineSupportsFocus is true only when the advertisement carries focus:true', () => {
+    expect(machineSupportsFocus(MACHINES, 'MACBOOK')).toBe(true);
+    expect(machineSupportsFocus(MACHINES, 'NEXUS')).toBe(false);
+    expect(machineSupportsFocus(MACHINES, 'GHOST')).toBe(false);
+    expect(machineSupportsFocus(MACHINES, undefined)).toBe(false);
+    expect(machineSupportsFocus([], 'MACBOOK')).toBe(false);
+  });
+
+  it('focus needs BOTH a pid and a live runner advertising focus:true', () => {
+    expect(canFocusAgent(42, MACHINES, 'MACBOOK')).toBe(true);
+    expect(canFocusAgent(undefined, MACHINES, 'MACBOOK')).toBe(false);
+    expect(canFocusAgent(42, MACHINES, 'GHOST')).toBe(false);
+    expect(canFocusAgent(42, [], 'MACBOOK')).toBe(false);
+  });
+
+  it('unlike KILL, focus IS gated on the focus capability flag (NEXUS advertises focus:false)', () => {
+    expect(canFocusAgent(42, MACHINES, 'NEXUS')).toBe(false);
   });
 });
 
