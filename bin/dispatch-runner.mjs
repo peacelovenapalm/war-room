@@ -147,7 +147,11 @@ const KILL_GRACE_MS = 5_000;
  *  terminal state after the server's ANSWER_TTL_MS (600_000 ms). Keying
  *  consumed nonces by consumption time and evicting past this SAME window
  *  bounds the map without ever narrowing the real replay defense (an evicted
- *  nonce's server record is already terminal). */
+ *  nonce's server record is already terminal).
+ *  INVARIANT: must stay >= DISPATCH_TTL_MS/ANSWER_TTL_MS in
+ *  server/src/dispatchStore.ts (both 600_000 today) — the runner's
+ *  replay-memory window must never be shorter than the server's
+ *  answer-record validity window. Change them together. */
 const CONSUMED_NONCE_TTL_MS = 600_000;
 
 /**

@@ -30,7 +30,11 @@ import { LAYOUT_FILE_DIR } from './constants.js';
 const DISPATCH_FILE_NAME = 'dispatch-queue.json';
 const DISPATCH_AUDIT_FILE_NAME = 'dispatch-audit.jsonl';
 
-/** A ringing request unanswered this long is swept to `expired`. */
+/** A ringing request unanswered this long is swept to `expired`.
+ *  INVARIANT: CONSUMED_NONCE_TTL_MS in bin/dispatch-runner.mjs must stay
+ *  >= this value (both 600_000 today) — the runner's replay-memory window
+ *  must never be shorter than the server's answer-record validity window.
+ *  Change them together. */
 export const DISPATCH_TTL_MS = 600_000; // 10 minutes
 /** Per-machine cap on simultaneously RINGING requests (backpressure). */
 export const DISPATCH_RINGING_CAP = 5;
