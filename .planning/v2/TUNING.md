@@ -908,3 +908,33 @@ managed flag not client-assertable; auth tiers correct; no 500-paths).
   could fail to parse exotic tmux version strings (e.g. OpenBSD builds) →
   deny-by-default (no launch), which is safe but could surprise. Widen the
   parse if a real machine hits it.
+
+## Phase 2B live acceptance (2026-07-12, Greg on-device)
+
+- **FIXED (995edef):** answer delivery failed live with "can't find pane:
+  =war-room-<id>" — tmux 3.6a rejects a bare `=name` exact-match as a
+  send-keys PANE target (has-session accepts it; send-keys does not).
+  Fix: `=name:` (exact-match + explicit window separator). LESSON —
+  fake-fidelity gap: the unit fake accepted `=name`, so 185/185 green
+  while the real tmux denied; the containment feature (exact-match) was
+  itself the trigger. Consider a thin integration test against real tmux
+  in CI-on-mac, or at minimum keep the fake's target parser strict.
+- **TOP FIX CANDIDATE (Greg-reported): status accuracy.** (a) The board
+  showed "✓ ANSWERED" / status `answered` at REQUEST time, before any
+  delivery — first live answer then visibly FAILED. Label must track the
+  receipt outcome (requested → delivered/failed), not the request. (b)
+  Fire/needs-input false positives: a working window can read as a fire —
+  the heuristic (idle+prompt patterns) has no ground-truth channel.
+  Candidate: hook-driven state transitions as primary, poller as fallback.
+- **IDEA (Greg): dispatch context preamble** — dispatched agents get zero
+  war-room context (verified: a dispatched session couldn't tell what UI
+  drove it). A standard preamble (you're War Room staff, prefer worktree
+  isolation, how to report) would make dispatches "in-world".
+- **IDEA (Greg, parking lot): asset-generation skill** — style-guide
+  extraction (palette/iso angle/proportions) + generator producing random
+  on-brand props/staff; autonomous cadence. Dovetails with T6's Blender +
+  $imagegen lanes.
+- **UX gap (Greg): no free-form prompting of visible sessions** — ANSWER
+  exists only for managed sessions; hook-registered terminals are
+  read-only by T2 design (no adopt). A launcher shim or per-session
+  opt-in needs its own design gate before any build.
