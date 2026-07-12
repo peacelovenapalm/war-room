@@ -33,7 +33,7 @@ import {
   INITIAL_CALM,
   updateCalmTransition,
 } from './engine/calm';
-import { type CameraState, clampPanToFit, fitToView } from './engine/camera';
+import { type CameraState, clampPanToFit, fitToView, worldToCanvas } from './engine/camera';
 import { easeInOut, focusCamera, mixCamera, walkProgress } from './engine/focus';
 import {
   EMPTY_GESTURE,
@@ -43,7 +43,7 @@ import {
   type GestureState,
 } from './engine/gesture';
 import type { HotspotKind } from './engine/hotspots';
-import { mapWorldBounds } from './engine/iso';
+import { mapWorldBounds, tileToWorld } from './engine/iso';
 import { type PosterPlacement, renderWorld } from './engine/renderer';
 import { getCanvasResolution } from './engine/resolution';
 import { computeWalkers, type WalkerAgentInput } from './engine/walkers';
@@ -97,6 +97,8 @@ import {
 } from './state/floorFeed';
 import { buildRealSheet, type RealSheetKind, tallyAgents, wingCounts } from './state/hud';
 import { parseLaunchTarget } from './state/launch';
+import { panelFlightAnchor } from './state/panelFlight';
+import { type PanelGrowOrigin, PanelGrowOriginProvider } from './state/panelGrowOrigin';
 import { pinAgent, unpinAgent } from './state/pinDock';
 import { reduceSettings, type SettingsSnapshot } from './state/settings';
 import {
@@ -151,6 +153,18 @@ interface WalkState {
   startTs: number;
 }
 
+/** T6 item 4 — CAMERA-MOVE PANEL OPENS: a one-shot camera flight to an
+ *  anchored panel's hotspot tile (state/panelFlight.ts). Unlike WalkState
+ *  (which persists for as long as the drawer stays open), this always
+ *  self-clears once walkProgress reaches 1 — it's an entrance flourish,
+ *  not a standing focus — and is skippable: ANY input (pointer or key)
+ *  clears it immediately (see the cancel effect below). */
+interface PanelFlightState {
+  from: CameraState;
+  target: { worldX: number; worldY: number };
+  startTs: number;
+}
+
 /**
  * Stage-2 face: HUD strip + triage board + tail sheets + agent drawer, all
  * DOM layers over the canvas world (text is DOM ALWAYS; the canvas draws
@@ -164,6 +178,7 @@ export default function App() {
   const lastResolutionRef = useRef(0);
   const lastCameraRef = useRef<CameraState | null>(null);
   const walkRef = useRef<WalkState>({ targetAgentId: null, from: null, startTs: 0 });
+  const panelFlightRef = useRef<PanelFlightState | null>(null);
   const rafRef = useRef<number | null>(null);
   // Pinch/pan (KICKOFF-v3.1 WS-A item 4): the user's free camera, layered
   // OVER fit-to-view. null = no interaction yet, draw() uses `fit`. A desk
@@ -249,6 +264,10 @@ export default function App() {
 
   // ── Stage-3 panel ports ──────────────────────────────────────────
   const [openPanel, setOpenPanel] = useState<DockPanelKind | null>(null);
+  // T6 item 4 — CAMERA-MOVE PANEL OPENS: components/Modal.tsx's grow
+  // origin, `null` = no anchor / cancelled (plain open, matching every
+  // panel's prior appearance exactly).
+  const [panelGrowOrigin, setPanelGrowOrigin] = useState<PanelGrowOrigin | null>(null);
   const [settings, setSettings] = useState<SettingsSnapshot | null>(null);
   const [dispatchEntries, setDispatchEntries] = useState<DispatchEntry[]>([]);
   const [sendFailures, setSendFailures] = useState<SendFailure[]>([]);
@@ -315,6 +334,24 @@ export default function App() {
       const t = walkProgress(walk.startTs, performance.now());
       camera = mixCamera(walk.from, target, easeInOut(t));
       if (t >= 1) walk.from = null;
+    } else if (panelFlightRef.current !== null) {
+      // T6 item 4 — CAMERA-MOVE PANEL OPENS: a desk walk (an explicit user
+      // verb) always wins outright; the panel-open flourish only ever runs
+      // when no desk walk owns the camera this frame.
+      const flight = panelFlightRef.current;
+      const t = walkProgress(flight.startTs, performance.now());
+      const flightTarget = focusCamera(cssSize, flight.target, fit);
+      camera = mixCamera(flight.from, flightTarget, easeInOut(t));
+      if (t >= 1) {
+        // Natural completion (not a cancel) — the CSS keyframe's own 'to'
+        // state already equals the plain resting appearance (translate(0,0)
+        // scale(1) opacity:1), so dropping the grow origin here is visually
+        // seamless AND keeps panelFlightRef/panelGrowOrigin's null-ness in
+        // lockstep, which is what lets cancelPanelFlight's early-return
+        // guard stay correct for every later panel open (anchored or not).
+        panelFlightRef.current = null;
+        setPanelGrowOrigin(null);
+      }
     }
 
     const ctx = canvas.getContext('2d');
@@ -381,12 +418,13 @@ export default function App() {
     );
   }, [propStore, characterStore, imageStore]);
 
-  /** Kick the RAF loop that advances an in-flight camera walk. */
+  /** Kick the RAF loop that advances an in-flight camera walk (▸ DESK or a
+   *  T6 panel-open flight — either keeps this loop alive). */
   const ensureWalkLoop = useCallback(() => {
     if (rafRef.current !== null) return;
     const step = () => {
       draw();
-      if (walkRef.current.from !== null) {
+      if (walkRef.current.from !== null || panelFlightRef.current !== null) {
         rafRef.current = requestAnimationFrame(step);
       } else {
         rafRef.current = null;
@@ -883,13 +921,82 @@ export default function App() {
     };
   }, []);
 
+  /** T6 item 4 — clears BOTH the JS-driven camera flight and the CSS grow
+   *  origin. "Any input cancels": called from the global pointerdown/keydown
+   *  listener below (every click/key anywhere in the app, including inside
+   *  the just-opened panel itself), and defensively before starting a
+   *  fresh flight. The early return matters beyond hygiene: once a flight
+   *  has already finished/been cancelled, panelGrowOrigin is already null
+   *  and MUST stay untouched — a redundant setPanelGrowOrigin(null) is a
+   *  same-value no-op in React terms today, but this guard is the one
+   *  place that invariant is enforced on purpose, not by accident. */
+  const cancelPanelFlight = useCallback(() => {
+    if (panelFlightRef.current === null) return;
+    panelFlightRef.current = null;
+    setPanelGrowOrigin(null);
+  }, []);
+
   const closePanel = useCallback(() => {
     setOpenPanel(null);
   }, []);
 
-  const handleOpenHotspot = useCallback((kind: HotspotKind) => {
-    setOpenPanel(kind);
-  }, []);
+  /** T6 item 4 — CAMERA-MOVE PANEL OPENS: opens `kind` and, if it has a
+   *  real in-world prop (state/panelFlight.ts — never an invented anchor),
+   *  flies the camera to that tile and grows the panel from its current
+   *  screen position. Panels with no physical prop, a desk-walk already in
+   *  flight, or a not-yet-measured world all degrade to a plain open —
+   *  honest skip, never a fabricated anchor. */
+  const openPanelWithFlight = useCallback(
+    (kind: DockPanelKind) => {
+      setOpenPanel(kind);
+      const anchor = panelFlightAnchor(kind);
+      const container = containerRef.current;
+      const camera = lastCameraRef.current;
+      if (!anchor || !container || !camera || walkRef.current.from !== null) {
+        cancelPanelFlight();
+        return;
+      }
+      const { worldX, worldY } = tileToWorld(anchor.tileX, anchor.tileY);
+      const canvasPoint = worldToCanvas(camera, worldX, worldY);
+      const rect = container.getBoundingClientRect();
+      const viewportX = rect.left + canvasPoint.x;
+      const viewportY = rect.top + canvasPoint.y;
+      panelFlightRef.current = {
+        from: camera,
+        target: { worldX, worldY },
+        startTs: performance.now(),
+      };
+      setPanelGrowOrigin({
+        dx: viewportX - window.innerWidth / 2,
+        dy: viewportY - window.innerHeight / 2,
+      });
+      ensureWalkLoop();
+    },
+    [cancelPanelFlight, ensureWalkLoop],
+  );
+
+  const handleOpenHotspot = useCallback(
+    (kind: HotspotKind) => {
+      openPanelWithFlight(kind);
+    },
+    [openPanelWithFlight],
+  );
+
+  // T6 item 4, "skippable": ANY input while a panel-open flight/grow is in
+  // progress cancels it immediately — capture phase so it fires before the
+  // event reaches whatever it's aimed at, but harmless (a plain state
+  // clear, no preventDefault) when nothing is flying.
+  useEffect(() => {
+    const cancel = () => {
+      cancelPanelFlight();
+    };
+    window.addEventListener('pointerdown', cancel, { capture: true });
+    window.addEventListener('keydown', cancel, { capture: true });
+    return () => {
+      window.removeEventListener('pointerdown', cancel, { capture: true });
+      window.removeEventListener('keydown', cancel, { capture: true });
+    };
+  }, [cancelPanelFlight]);
 
   const handleDispatchSend = useCallback(
     (machine: string, action: DispatchActionValue, requestId: string) => {
@@ -985,13 +1092,13 @@ export default function App() {
         }}
         onOpenReal={setRealKind}
         onOpenCall={() => {
-          setOpenPanel('call');
+          openPanelWithFlight('call');
         }}
         onOpenShift={() => {
-          setOpenPanel('shift');
+          openPanelWithFlight('shift');
         }}
         onOpenHelp={() => {
-          setOpenPanel('help');
+          openPanelWithFlight('help');
         }}
       />
       <div className="surfaces" data-view={view}>
@@ -1092,70 +1199,76 @@ export default function App() {
       />
       {/* Compact-dock half of the desktop chrome model — the cross-platform
           affordance (works on phone too, where PropHotspots doesn't apply). */}
-      <PanelDock onOpen={setOpenPanel} />
+      <PanelDock onOpen={openPanelWithFlight} />
 
-      <HelpModal isOpen={openPanel === 'help'} onClose={closePanel} />
-      <SettingsModal
-        isOpen={openPanel === 'settings'}
-        onClose={closePanel}
-        settings={settings}
-        onToggleSound={handleToggleSound}
-        onToggleWatchAllSessions={handleToggleWatchAllSessions}
-        onToggleHooksEnabled={handleToggleHooksEnabled}
-        onToggleAlwaysShowLabels={handleToggleAlwaysShowLabels}
-      />
-      <DebugView
-        isOpen={openPanel === 'debug'}
-        onClose={closePanel}
-        agents={agents}
-        connectionStatus={connectionStatus}
-        crisis={crisis}
-        economy={economy}
-        diagnostics={diagnostics}
-        onRequestDiagnostics={handleRequestDiagnostics}
-      />
-      <CallModal
-        isOpen={openPanel === 'call'}
-        onClose={() => {
-          closePanel();
-          setCallPrefill(null);
-        }}
-        prefill={callPrefill}
-        send={send}
-        onSend={handleDispatchSend}
-        budget={budget}
-      />
-      <ShiftPanel isOpen={openPanel === 'shift'} onClose={closePanel} />
-      <BriefingPanel
-        isOpen={openPanel === 'briefing'}
-        onClose={closePanel}
-        onDispatchTodo={handleDispatchTodo}
-      />
-      <AutomationPanel
-        isOpen={openPanel === 'automation'}
-        onClose={closePanel}
-        chainRuns={chainRuns}
-        chainRunReceivedAt={chainRunReceivedAt}
-        now={now}
-        automationStopped={automationStopped}
-        onAutomationStoppedChange={setAutomationStopped}
-      />
-      <ContractsPanel
-        isOpen={openPanel === 'contracts'}
-        onClose={closePanel}
-        onDispatchContract={handleDispatchContract}
-      />
-      <OpsReviewPanel
-        isOpen={openPanel === 'ops'}
-        onClose={closePanel}
-        send={send}
-        onDispatchSend={handleDispatchSend}
-        dispatchEntries={dispatchEntries}
-        sendFailures={sendFailures}
-      />
-      <GraphSearchPanel isOpen={openPanel === 'graph-search'} onClose={closePanel} />
-      <DistrictsView isOpen={openPanel === 'districts'} onClose={closePanel} />
-      <InboxPanel isOpen={openPanel === 'inbox'} onClose={closePanel} />
+      {/* T6 item 4 — CAMERA-MOVE PANEL OPENS: one shared grow-origin value
+          for every Modal-based panel (components/Modal.tsx reads it via
+          context) — only whichever panel is actually `isOpen` ever renders
+          it, so this single provider is safe for all of them at once. */}
+      <PanelGrowOriginProvider value={panelGrowOrigin}>
+        <HelpModal isOpen={openPanel === 'help'} onClose={closePanel} />
+        <SettingsModal
+          isOpen={openPanel === 'settings'}
+          onClose={closePanel}
+          settings={settings}
+          onToggleSound={handleToggleSound}
+          onToggleWatchAllSessions={handleToggleWatchAllSessions}
+          onToggleHooksEnabled={handleToggleHooksEnabled}
+          onToggleAlwaysShowLabels={handleToggleAlwaysShowLabels}
+        />
+        <DebugView
+          isOpen={openPanel === 'debug'}
+          onClose={closePanel}
+          agents={agents}
+          connectionStatus={connectionStatus}
+          crisis={crisis}
+          economy={economy}
+          diagnostics={diagnostics}
+          onRequestDiagnostics={handleRequestDiagnostics}
+        />
+        <CallModal
+          isOpen={openPanel === 'call'}
+          onClose={() => {
+            closePanel();
+            setCallPrefill(null);
+          }}
+          prefill={callPrefill}
+          send={send}
+          onSend={handleDispatchSend}
+          budget={budget}
+        />
+        <ShiftPanel isOpen={openPanel === 'shift'} onClose={closePanel} />
+        <BriefingPanel
+          isOpen={openPanel === 'briefing'}
+          onClose={closePanel}
+          onDispatchTodo={handleDispatchTodo}
+        />
+        <AutomationPanel
+          isOpen={openPanel === 'automation'}
+          onClose={closePanel}
+          chainRuns={chainRuns}
+          chainRunReceivedAt={chainRunReceivedAt}
+          now={now}
+          automationStopped={automationStopped}
+          onAutomationStoppedChange={setAutomationStopped}
+        />
+        <ContractsPanel
+          isOpen={openPanel === 'contracts'}
+          onClose={closePanel}
+          onDispatchContract={handleDispatchContract}
+        />
+        <OpsReviewPanel
+          isOpen={openPanel === 'ops'}
+          onClose={closePanel}
+          send={send}
+          onDispatchSend={handleDispatchSend}
+          dispatchEntries={dispatchEntries}
+          sendFailures={sendFailures}
+        />
+        <GraphSearchPanel isOpen={openPanel === 'graph-search'} onClose={closePanel} />
+        <DistrictsView isOpen={openPanel === 'districts'} onClose={closePanel} />
+        <InboxPanel isOpen={openPanel === 'inbox'} onClose={closePanel} />
+      </PanelGrowOriginProvider>
 
       {viewingResult && (
         <div className="modal-backdrop" onClick={() => setViewingResult(null)}>

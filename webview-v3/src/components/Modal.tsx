@@ -1,4 +1,6 @@
-import { type ReactNode, useEffect } from 'react';
+import { type CSSProperties, type ReactNode, useContext, useEffect } from 'react';
+
+import { PanelGrowOriginContext } from '../state/panelGrowOrigin';
 
 export interface ModalProps {
   isOpen: boolean;
@@ -29,15 +31,28 @@ export function Modal({ isOpen, onClose, title, children, testId, wide }: ModalP
     };
   }, [isOpen, onClose]);
 
+  const grow = useContext(PanelGrowOriginContext);
+
   if (!isOpen) return null;
+
+  const className = ['modal', wide ? 'modal--wide' : null, grow ? 'modal--grow' : null]
+    .filter(Boolean)
+    .join(' ');
+  const style: CSSProperties | undefined = grow
+    ? ({
+        '--panel-grow-dx': `${String(grow.dx)}px`,
+        '--panel-grow-dy': `${String(grow.dy)}px`,
+      } as CSSProperties)
+    : undefined;
 
   return (
     <div className="modal-backdrop" data-testid="modal-backdrop" onClick={onClose}>
       <div
-        className={wide ? 'modal modal--wide' : 'modal'}
+        className={className}
         data-testid={testId ?? 'modal'}
         role="dialog"
         aria-label={typeof title === 'string' ? title : undefined}
+        style={style}
         onClick={(e) => {
           e.stopPropagation();
         }}
