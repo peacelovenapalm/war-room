@@ -44,6 +44,10 @@ BUILT_AT="$(date -u +%Y-%m-%dT%H:%M:%SZ)"
 #  - tracker: the same dir the projects-board container binds read-only
 TODO_DIR_NEXUS="/data/repos/vault-notifier/vault/vault/_inbox/routines/todo"
 TRACKER_DIR_NEXUS="/data/repos/completion-2026-07"
+#  - graph (4C): the Phase-9 knowledge-graph store inside the same vault
+#    clone — nodes.jsonl + edges.jsonl, git-tracked so the notifier cron's
+#    hard-reset keeps it as fresh as the last committed graph_build run
+GRAPH_DIR_NEXUS="/data/repos/vault-notifier/vault/vault/_meta/graph"
 TRACKER_STATE_LOCAL="/Users/greg/code/completion-2026-07/STATE.md"
 
 ok()   { printf '[OK]   %s\n' "$1"; }
@@ -72,6 +76,8 @@ ssh "${NEXUS_HOST}" "test -d ${TODO_DIR_NEXUS}" \
   && ok "todo source present: ${TODO_DIR_NEXUS}" || warn "todo dir missing on nexus — briefing panel will show 'no todo source'"
 ssh "${NEXUS_HOST}" "test -d ${TRACKER_DIR_NEXUS}" \
   && ok "tracker dir present: ${TRACKER_DIR_NEXUS}" || warn "tracker dir missing on nexus — briefing panel will show no gates"
+ssh "${NEXUS_HOST}" "test -f ${GRAPH_DIR_NEXUS}/nodes.jsonl" \
+  && ok "graph store present: ${GRAPH_DIR_NEXUS}" || warn "graph store missing on nexus — graph search will report available:false"
 
 # ── Refresh the tracker copy (laptop is canonical; also feeds projects-board) ─
 if [ -f "${TRACKER_STATE_LOCAL}" ]; then
@@ -124,8 +130,10 @@ ssh "${NEXUS_HOST}" "docker run -d --name war-room --restart unless-stopped \
   --env-file ${REMOTE_ENV_DIR}/war-room.env \
   -e WAR_ROOM_TODO_DIR=/briefing/todo \
   -e WAR_ROOM_TRACKER_STATE=/briefing/tracker/STATE.md \
+  -e WAR_ROOM_GRAPH_DIR=/briefing/graph \
   -v ${TODO_DIR_NEXUS}:/briefing/todo:ro \
   -v ${TRACKER_DIR_NEXUS}:/briefing/tracker:ro \
+  -v ${GRAPH_DIR_NEXUS}:/briefing/graph:ro \
   -v ${REMOTE_STATE_DIR}:/root/.pixel-agents \
   -p 127.0.0.1:${APP_PORT}:3141 war-room:latest" >/dev/null \
   && ok "container war-room running (127.0.0.1:${APP_PORT}, briefing ro, state vol rw)" || fail "docker run failed"

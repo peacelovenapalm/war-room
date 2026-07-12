@@ -37,6 +37,7 @@ import { PERK_IDS } from './economyConstants.js';
 import { economyStore } from './economyStore.js';
 import type { Employee, ScoreTrack } from './employeeStore.js';
 import { employeeStore } from './employeeStore.js';
+import { searchGraph } from './graphProvider.js';
 import { matchDayDerivation } from './matchDayDerivation.js';
 import { matchDayStore, toMatchDayEvent } from './matchDayStore.js';
 import {
@@ -440,6 +441,15 @@ function registerHealthRoute(app: FastifyInstance): void {
 
 /** GET /api/briefing -- unauthenticated, like /api/health; the server is tailnet-only. */
 function registerBriefingRoute(app: FastifyInstance, options: HttpServerOptions): void {
+  // Knowledge-graph search (4C, T7 first slice) — same unauthenticated
+  // tailnet-read tier as /api/briefing. Pure read of the :ro graph mount;
+  // absent mount → { available: false }, never a 500.
+  app.get<{ Querystring: { q?: string; depth?: string } }>('/api/graph/search', async (request) => {
+    const q = typeof request.query.q === 'string' ? request.query.q : '';
+    const depthRaw = Number.parseInt(request.query.depth ?? '1', 10);
+    const depth = Number.isFinite(depthRaw) ? depthRaw : 1;
+    return searchGraph(q, depth);
+  });
   app.get('/api/briefing', async () => {
     const briefing = getBriefing();
     // Contracts (v2 mechanic G4, §6.2): piggybacks briefingProvider's own
