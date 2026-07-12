@@ -1241,6 +1241,79 @@ test.describe('stage-3 panel ports (desktop chrome model)', () => {
     }
   });
 
+  test('T6: terminal dispatch chips persist until DISMISS/CLEAR DONE, in-flight chips are never dismissible', async ({
+    browser,
+  }) => {
+    const host = await serveV3Dist({
+      extraDispatchUpdates: [
+        {
+          type: 'dispatchUpdate',
+          id: 'd-ringing',
+          action: 'dispatch',
+          status: 'ringing',
+          machine: 'MACBOOK',
+          provider: 'claude',
+        },
+        {
+          type: 'dispatchUpdate',
+          id: 'd-exited',
+          action: 'dispatch',
+          status: 'exited',
+          machine: 'MACBOOK',
+          provider: 'claude',
+          exitCode: 0,
+        },
+        {
+          type: 'dispatchUpdate',
+          id: 'd-denied',
+          action: 'dispatch',
+          status: 'denied',
+          machine: 'NEXUS',
+          provider: 'claude',
+          reason: 'path-not-allowlisted',
+        },
+      ],
+    });
+    const context = await browser.newContext({ viewport: VIEWPORT });
+    try {
+      const page = await context.newPage();
+      await page.goto(`${host.url}/`);
+      await expect(page.getByTestId('hud-connection')).toHaveText('● LIVE', { timeout: 20_000 });
+
+      const tray = page.getByTestId('dispatch-tray');
+      await expect(tray).toBeVisible();
+      await expect(page.getByTestId('dispatch-chip')).toHaveCount(3);
+
+      // In-flight (RINGING) never gets a DISMISS button.
+      const ringingChip = tray.locator('[data-testid="dispatch-chip"]', {
+        hasText: 'RINGING',
+      });
+      await expect(ringingChip.getByTestId('dispatch-chip-dismiss')).toHaveCount(0);
+
+      // Both terminal chips (EXITED, DENIED) get their own DISMISS.
+      await expect(tray.getByTestId('dispatch-chip-dismiss')).toHaveCount(2);
+      await expect(tray.getByTestId('dispatch-clear-done')).toBeVisible();
+
+      // Individually dismissing one terminal chip leaves the other + CLEAR
+      // DONE behind (never auto-clears on its own — this is a real click).
+      const exitedChip = tray.locator('[data-testid="dispatch-chip"]', { hasText: 'EXITED' });
+      await exitedChip.getByTestId('dispatch-chip-dismiss').click();
+      await expect(page.getByTestId('dispatch-chip')).toHaveCount(2);
+      await expect(tray).toContainText('DENIED');
+      await expect(tray).not.toContainText('EXITED');
+
+      // CLEAR DONE bulk-dismisses the remaining terminal chip, leaving the
+      // in-flight RINGING chip untouched.
+      await tray.getByTestId('dispatch-clear-done').click();
+      await expect(page.getByTestId('dispatch-chip')).toHaveCount(1);
+      await expect(tray).toContainText('RINGING');
+      await expect(tray.getByTestId('dispatch-clear-done')).toHaveCount(0);
+    } finally {
+      await context.close();
+      await host.close();
+    }
+  });
+
   test('GRAPH SEARCH: store not mounted renders the honest NO GRAPH line, never an empty-but-plausible result', async ({
     browser,
   }) => {

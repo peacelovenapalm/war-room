@@ -31,8 +31,12 @@ export interface Occupant {
 /** Ambient-walker pose kinds (engine/walkers.ts's WalkerPose['kind'],
  *  duplicated as a literal union rather than imported — world.ts is
  *  imported BY walkers.ts for staticPropTile(), so importing back would be
- *  circular). Only used to pick a rendering sprite; keep in sync by hand. */
-export type WalkerPoseKind = 'janitor' | 'drift' | 'pace' | 'cat-curl' | 'cat-walk';
+ *  circular). Only used to pick a rendering sprite; keep in sync by hand.
+ *  'visitor' (T6) is NOT produced by walkers.ts — App.tsx builds it
+ *  directly from state/dispatchVisitors.ts, reusing this same WorldProp
+ *  shape so the renderer needs no special-casing beyond picking a
+ *  stationary 'sit' pose instead of a walk cycle (renderer.ts). */
+export type WalkerPoseKind = 'janitor' | 'drift' | 'pace' | 'cat-curl' | 'cat-walk' | 'visitor';
 
 export interface WorldProp {
   kind: PropKind;
@@ -68,6 +72,20 @@ export const DESK_SLOTS: readonly TilePoint[] = [
   { tileX: 11, tileY: 2 },
   { tileX: 11, tileY: 4 },
   { tileX: 11, tileY: 6 },
+];
+
+/** T6 dispatch-visitor slots (D-9 "dispatched jobs visible in the office" —
+ *  Greg's repeated complaint): a short row near the front door, deliberately
+ *  off the DESK_SLOTS/STATIC_PROPS/janitor-route tiles so a visitor never
+ *  overlaps a real occupant or ambient walker. Count matches
+ *  state/dispatchVisitors.ts's MAX_DISPATCH_VISITORS — kept as two
+ *  independently-owned constants (world layout vs. dispatch-store policy)
+ *  rather than one importing the other. */
+export const GUEST_SLOTS: readonly TilePoint[] = [
+  { tileX: 4, tileY: 8 },
+  { tileX: 6, tileY: 8 },
+  { tileX: 8, tileY: 8 },
+  { tileX: 10, tileY: 8 },
 ];
 
 /** Tile column both wings face toward (the center aisle) — desks left of it
@@ -187,6 +205,36 @@ export function occupiedDeskAnchors(occupants: readonly Occupant[]): DeskAnchor[
   return anchors;
 }
 
+export interface DispatchVisitorAnchor {
+  id: string;
+  /** Chip anchor in WORLD px (guest-tile center lifted by CHIP_ANCHOR_LIFT). */
+  worldX: number;
+  worldY: number;
+  tileX: number;
+  tileY: number;
+}
+
+/** GUEST_SLOTS assigned in the given order (state/dispatchVisitors.ts
+ *  already caps + orders `ids` — oldest dispatch first). Extra ids beyond
+ *  GUEST_SLOTS.length are dropped, same "bigger floor is a later slice"
+ *  convention as occupiedDeskAnchors. */
+export function dispatchVisitorAnchors(ids: readonly string[]): DispatchVisitorAnchor[] {
+  const anchors: DispatchVisitorAnchor[] = [];
+  ids.forEach((id, index) => {
+    const slot = GUEST_SLOTS[index];
+    if (!slot) return;
+    const { worldX, worldY } = tileToWorld(slot.tileX, slot.tileY);
+    anchors.push({
+      id,
+      worldX,
+      worldY: worldY - CHIP_ANCHOR_LIFT,
+      tileX: slot.tileX,
+      tileY: slot.tileY,
+    });
+  });
+  return anchors;
+}
+
 // ── Real sprite catalog (WS-B pipeline names) ──────────────────────────
 //
 // Centralized here (the domain/layout owner) rather than scattered through
@@ -228,6 +276,17 @@ export type WorkerOutfit = (typeof WORKER_OUTFITS)[number];
  *  Math.random) so an agent doesn't change clothes every frame. */
 export function outfitForAgent(agentId: number): WorkerOutfit {
   return WORKER_OUTFITS[Math.abs(agentId) % WORKER_OUTFITS.length];
+}
+
+/** Deterministic outfit per dispatch id (string, unlike a numeric agentId) —
+ *  same "stable, not Math.random" rule as outfitForAgent, via a plain
+ *  string hash so a dispatch VISITOR doesn't change clothes every render. */
+export function outfitForDispatchId(id: string): WorkerOutfit {
+  let hash = 0;
+  for (let i = 0; i < id.length; i++) {
+    hash = (hash * 31 + id.charCodeAt(i)) >>> 0;
+  }
+  return WORKER_OUTFITS[hash % WORKER_OUTFITS.length];
 }
 
 export type OccupantPose = 'sit' | 'type' | 'blocked';

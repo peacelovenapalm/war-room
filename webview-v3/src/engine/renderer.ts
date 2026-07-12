@@ -292,11 +292,16 @@ export function renderWorld(ctx: CanvasRenderingContext2D, input: RenderInput): 
 
     if (prop.kind === 'walker') {
       const isCat = prop.walkerPoseKind === 'cat-curl' || prop.walkerPoseKind === 'cat-walk';
+      // T6 dispatch visitors are a PRESENCE, not an ambient patrol — 'sit'
+      // reads as "someone is here right now" rather than mid-stride, the
+      // same shape-difference register occupantPoseFor already uses to
+      // distinguish desk states.
+      const isVisitor = prop.walkerPoseKind === 'visitor';
       const spriteName = isCat
         ? prop.walkerPoseKind === 'cat-walk'
           ? CAT_WALK_SPRITE
           : CAT_CURL_SPRITE
-        : workerSpriteName(prop.walkerOutfit ?? 'rust', 'walk');
+        : workerSpriteName(prop.walkerOutfit ?? 'rust', isVisitor ? 'sit' : 'walk');
       const drew = tryDrawSprite(
         ctx,
         assets?.characterStore,
