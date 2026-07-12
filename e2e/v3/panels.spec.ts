@@ -1371,6 +1371,33 @@ test.describe('stage-3 panel ports (desktop chrome model)', () => {
     }
   });
 
+  test('T6: SOUNDSCAPE toggle defaults MUTED and persists across a reload', async ({ browser }) => {
+    const host = await serveV3Dist();
+    const context = await browser.newContext({ viewport: VIEWPORT });
+    try {
+      const page = await context.newPage();
+      await page.goto(`${host.url}/`);
+      await expect(page.getByTestId('hud-connection')).toHaveText('● LIVE', { timeout: 20_000 });
+
+      const toggle = page.getByTestId('hud-soundscape');
+      await expect(toggle).toHaveText('⊘ MUTED');
+      await expect(toggle).toHaveAttribute('aria-pressed', 'false');
+
+      await toggle.click();
+      await expect(toggle).toHaveText('♪ SOUND ON');
+      await expect(toggle).toHaveAttribute('aria-pressed', 'true');
+
+      // Persists via localStorage — a fresh load in the SAME context reads
+      // it back rather than resetting to the honest-default MUTED.
+      await page.reload();
+      await expect(page.getByTestId('hud-connection')).toHaveText('● LIVE', { timeout: 20_000 });
+      await expect(page.getByTestId('hud-soundscape')).toHaveText('♪ SOUND ON');
+    } finally {
+      await context.close();
+      await host.close();
+    }
+  });
+
   test('GRAPH SEARCH: store not mounted renders the honest NO GRAPH line, never an empty-but-plausible result', async ({
     browser,
   }) => {

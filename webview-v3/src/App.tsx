@@ -46,6 +46,7 @@ import type { HotspotKind } from './engine/hotspots';
 import { mapWorldBounds, tileToWorld } from './engine/iso';
 import { type PosterPlacement, renderWorld } from './engine/renderer';
 import { getCanvasResolution } from './engine/resolution';
+import { createSoundscapeEngine } from './engine/soundscape';
 import { computeWalkers, type WalkerAgentInput } from './engine/walkers';
 import {
   buildProps,
@@ -101,6 +102,7 @@ import { panelFlightAnchor } from './state/panelFlight';
 import { type PanelGrowOrigin, PanelGrowOriginProvider } from './state/panelGrowOrigin';
 import { pinAgent, unpinAgent } from './state/pinDock';
 import { reduceSettings, type SettingsSnapshot } from './state/settings';
+import { readSoundscapeMuted, writeSoundscapeMuted } from './state/soundscape';
 import {
   appendSpeechBubble,
   detectNewlyLoudAgents,
@@ -224,6 +226,25 @@ export default function App() {
       resolveUrl: (relativePath) => `/assets/${relativePath}`,
     }),
   );
+  // T6 item 5 — SOUNDSCAPE V1: same "useState lazy-initializer, built
+  // exactly once" convention as the sprite stores above. createSoundscapeEngine
+  // never touches AudioContext at construction (SSR/test-safe, mirrors
+  // createSpriteStore's "nothing fetched at construction" contract) —
+  // real audio nodes only exist once the user actually unmutes.
+  const [soundscapeEngine] = useState(() => createSoundscapeEngine());
+  const [soundscapeMuted, setSoundscapeMuted] = useState(() =>
+    readSoundscapeMuted(typeof window === 'undefined' ? undefined : window.localStorage),
+  );
+  useEffect(() => {
+    soundscapeEngine.setMuted(soundscapeMuted);
+  }, [soundscapeEngine, soundscapeMuted]);
+  const handleToggleSoundscape = useCallback(() => {
+    setSoundscapeMuted((previous) => {
+      const next = !previous;
+      if (typeof window !== 'undefined') writeSoundscapeMuted(window.localStorage, next);
+      return next;
+    });
+  }, []);
   // Ambient walkers + calm-channel lighting (KICKOFF-v3.1 WS-A item 4(c)) —
   // real-telemetry-derived, recomputed on the same tick/occupancy effect
   // that already redraws (draw() itself stays a stable ref-reading
@@ -593,8 +614,19 @@ export default function App() {
       });
     }
 
+    // T6 item 5 — SOUNDSCAPE V1: the SAME rising-edge detections that
+    // trigger a speech bubble also trigger a chirp. The engine itself
+    // no-ops while muted (engine/soundscape.ts), so this call is
+    // unconditional — no need to thread soundscapeMuted into this effect.
+    newlyLoud.forEach(() => {
+      soundscapeEngine.chirp('needs-input');
+    });
+    newlyTerminal.forEach(() => {
+      soundscapeEngine.chirp('dispatch-done');
+    });
+
     draw();
-  }, [draw, occupants, agents, crisis, now, dispatchEntries]);
+  }, [draw, occupants, agents, crisis, now, dispatchEntries, soundscapeEngine]);
 
   // TTL is applied at RENDER time off the existing `now` age tick (not a
   // second effect+setState) — appendSpeechBubble already caps the
@@ -1082,6 +1114,8 @@ export default function App() {
         economy={economy}
         grayscale={grayscale}
         view={view}
+        soundscapeMuted={soundscapeMuted}
+        onToggleSoundscape={handleToggleSoundscape}
         automationStopped={automationStopped}
         onAutomationStoppedChange={setAutomationStopped}
         onToggleGrayscale={() => {

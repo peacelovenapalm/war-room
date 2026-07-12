@@ -3,6 +3,7 @@ import type { EconomySnapshot } from '../state/economy';
 import { formatCashChip, formatRepChip } from '../state/economy';
 import type { AgentTally, RealSheetKind, WingCount } from '../state/hud';
 import { formatTally, formatWing, officeMood } from '../state/hud';
+import { soundscapeToggleLabel } from '../state/soundscape';
 import { StopAllControl } from './StopAllControl';
 
 const CONNECTION_CHIP: Record<ConnectionStatus, string> = {
@@ -21,6 +22,9 @@ export interface HudStripProps {
   economy: EconomySnapshot | null;
   grayscale: boolean;
   view: ViewMode;
+  /** T6 item 5 — SOUNDSCAPE V1, DEFAULT MUTED. */
+  soundscapeMuted: boolean;
+  onToggleSoundscape: () => void;
   /** Lifted STOP ALL state — shared with AutomationPanel's instance so the
    *  two can never disagree (state/stopAll.ts). */
   automationStopped: boolean;
@@ -49,6 +53,8 @@ export function HudStrip({
   economy,
   grayscale,
   view,
+  soundscapeMuted,
+  onToggleSoundscape,
   automationStopped,
   onAutomationStoppedChange,
   onToggleGrayscale,
@@ -155,6 +161,19 @@ export function HudStrip({
         onClick={onToggleGrayscale}
       >
         ◑ GRAYSCALE {grayscale ? 'ON' : 'OFF'}
+      </button>
+      {/* T6 item 5 — SOUNDSCAPE V1: DEFAULT MUTED, own localStorage
+          persistence (state/soundscape.ts), independent of SettingsModal's
+          pre-existing server-synced `soundEnabled` (a VS Code adapter
+          notification setting, a different subsystem entirely). */}
+      <button
+        type="button"
+        data-testid="hud-soundscape"
+        aria-pressed={!soundscapeMuted}
+        title="Ambience + event chirps (WebAudio, no assets) — default muted"
+        onClick={onToggleSoundscape}
+      >
+        {soundscapeToggleLabel(soundscapeMuted)}
       </button>
     </header>
   );
