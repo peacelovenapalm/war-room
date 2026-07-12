@@ -12,6 +12,7 @@ import { ContractsPanel } from './components/ContractsPanel';
 import { DebugView, type DiagnosticsRow } from './components/DebugView';
 import { DispatchTray } from './components/DispatchTray';
 import { FloorFeed } from './components/FloorFeed';
+import { GraphSearchPanel } from './components/GraphSearchPanel';
 import { HelpModal } from './components/HelpModal';
 import { HudStrip, type ViewMode } from './components/HudStrip';
 import { OpsReviewPanel } from './components/OpsReviewPanel';
@@ -1045,6 +1046,8 @@ export default function App() {
         dispatchEntries={dispatchEntries}
         sendFailures={sendFailures}
       />
+      <GraphSearchPanel isOpen={openPanel === 'graph-search'} onClose={closePanel} />
+
       {viewingResult && (
         <div className="modal-backdrop" onClick={() => setViewingResult(null)}>
           <div className="modal" role="dialog" onClick={(e) => e.stopPropagation()}>

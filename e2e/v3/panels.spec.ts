@@ -157,6 +157,10 @@ const REST_JSON: Record<string, unknown> = {
   '/api/chains/defs': [],
   '/api/chains/runs': [],
   '/api/standing-orders': [],
+  // GRAPH SEARCH (4C, T7 first slice) — default fixture world is an
+  // available-but-empty store; tests that need matches/resolved override
+  // via serveV3Dist's graphSearchOverride option below.
+  '/api/graph/search': { available: true, query: '', matches: [] },
 };
 
 interface StaticHost {
@@ -221,6 +225,10 @@ async function serveV3Dist(
     answerDenyReason?: string;
     /** T2/T4 remote-answer plane — canned GET /api/agents/answers receipts. */
     answerReceiptsOverride?: unknown[];
+    /** GRAPH SEARCH (4C) — overrides every GET /api/graph/search response
+     *  regardless of query string, so a single test can exercise the
+     *  NO-GRAPH honest state or a matches+resolved payload. */
+    graphSearchOverride?: unknown;
   } = {},
 ): Promise<StaticHost> {
   if (!fs.existsSync(path.join(V3_DIST, 'index.html'))) {
@@ -298,6 +306,11 @@ async function serveV3Dist(
       } else {
         res.end(JSON.stringify({ ok: true, dispatchId: 'd-99' }));
       }
+      return;
+    }
+    if (requestPath === '/api/graph/search' && options.graphSearchOverride !== undefined) {
+      res.writeHead(200, { 'Content-Type': 'application/json' });
+      res.end(JSON.stringify(options.graphSearchOverride));
       return;
     }
     if (requestPath === '/api/ops/auto' && options.autoStatusOverride !== undefined) {
@@ -448,6 +461,7 @@ test.describe('stage-3 panel ports (desktop chrome model)', () => {
         'shift',
         'briefing',
         'ops',
+        'graph-search',
         'settings',
         'debug',
         'help',
@@ -1221,6 +1235,96 @@ test.describe('stage-3 panel ports (desktop chrome model)', () => {
       await expect(page.getByTestId('call-submit')).toBeDisabled();
       await page.getByTestId('call-timeout-input').fill('300');
       await expect(page.getByTestId('call-submit')).toBeDisabled(); // still needs project + prompt
+    } finally {
+      await context.close();
+      await host.close();
+    }
+  });
+
+  test('GRAPH SEARCH: store not mounted renders the honest NO GRAPH line, never an empty-but-plausible result', async ({
+    browser,
+  }) => {
+    const host = await serveV3Dist({
+      graphSearchOverride: { available: false, query: 'foo', matches: [] },
+    });
+    const context = await browser.newContext({ viewport: VIEWPORT });
+    try {
+      const page = await context.newPage();
+      await page.goto(`${host.url}/`);
+      await expect(page.getByTestId('hud-connection')).toHaveText('● LIVE', { timeout: 20_000 });
+
+      await page.getByTestId('dock-graph-search').click();
+      await expect(page.getByTestId('graph-search-panel')).toBeVisible();
+      await expect(page.getByTestId('graph-search-hint')).toBeVisible();
+
+      await page.getByTestId('graph-search-input').fill('foo');
+      await expect(page.getByTestId('graph-search-unavailable')).toContainText(
+        '⊘ NO GRAPH — store not mounted on this deployment',
+      );
+      await expect(page.getByTestId('graph-search-matches')).toHaveCount(0);
+    } finally {
+      await context.close();
+      await host.close();
+    }
+  });
+
+  test('GRAPH SEARCH: matches render kind glyph + title, tapping a row re-queries the exact id, and resolved edges group by hop', async ({
+    browser,
+  }) => {
+    const host = await serveV3Dist({
+      graphSearchOverride: {
+        available: true,
+        query: 'ops',
+        matches: [{ id: 'note-ops-review', kind: 'note', title: 'Ops Review Design' }],
+        resolved: {
+          node: { id: 'note-ops-review', kind: 'note', title: 'Ops Review Design' },
+          edges: [
+            {
+              src: 'note-ops-review',
+              dst: 'project-war-room',
+              type: 'belongs-to',
+              provenance: 'frontmatter',
+              hop: 1,
+            },
+            {
+              src: 'project-war-room',
+              dst: 'mirror-war-room',
+              type: 'mirrors',
+              hop: 2,
+            },
+          ],
+        },
+      },
+    });
+    const context = await browser.newContext({ viewport: VIEWPORT });
+    try {
+      const page = await context.newPage();
+      await page.goto(`${host.url}/`);
+      await expect(page.getByTestId('hud-connection')).toHaveText('● LIVE', { timeout: 20_000 });
+
+      await page.getByTestId('dock-graph-search').click();
+      await page.getByTestId('graph-search-input').fill('ops');
+
+      const match = page.getByTestId('graph-search-match').first();
+      await expect(match).toContainText('▤');
+      await expect(match).toContainText('Ops Review Design');
+      await expect(match).toContainText('note-ops-review');
+
+      // Resolved block renders with hop-grouped edges — hop 1 before hop 2.
+      const resolved = page.getByTestId('graph-search-resolved');
+      await expect(resolved).toBeVisible();
+      const hopGroups = page.getByTestId('graph-search-hop-group');
+      await expect(hopGroups).toHaveCount(2);
+      await expect(hopGroups.nth(0)).toContainText('[hop 1]');
+      await expect(hopGroups.nth(0)).toContainText(
+        'note-ops-review -belongs-to-> project-war-room',
+      );
+      await expect(hopGroups.nth(1)).toContainText('[hop 2]');
+      await expect(hopGroups.nth(1)).toContainText('project-war-room -mirrors-> mirror-war-room');
+
+      // Tapping the match row re-queries with the exact id.
+      await match.click();
+      await expect(page.getByTestId('graph-search-input')).toHaveValue('note-ops-review');
     } finally {
       await context.close();
       await host.close();

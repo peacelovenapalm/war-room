@@ -1239,6 +1239,81 @@ body,
   border-bottom: 1px solid #232936;
 }
 
+/* ── Graph search panel ─────────────────────────────────────────────── */
+
+.graph-search__controls {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding-bottom: 8px;
+}
+
+.graph-search__input {
+  flex: 1;
+  min-width: 0;
+}
+
+.graph-search__depth {
+  display: flex;
+  gap: 4px;
+  flex-shrink: 0;
+}
+
+.graph-search__matches {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.graph-search__match {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 4px 0;
+  border-bottom: 1px solid #232936;
+  background: none;
+  border-left: none;
+  border-right: none;
+  border-top: none;
+  text-align: left;
+  cursor: pointer;
+  color: inherit;
+  font: inherit;
+}
+
+.graph-search__match-glyph {
+  flex-shrink: 0;
+}
+
+.graph-search__match-title {
+  flex: 1;
+  min-width: 0;
+}
+
+.graph-search__resolved {
+  padding-top: 8px;
+  border-top: 1px solid #232936;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.graph-search__resolved-head {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.graph-search__hop {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.graph-search__edge {
+  padding-left: 8px;
+}
+
 /* ── Shift panel ────────────────────────────────────────────────────── */
 
 .shift-rows {
