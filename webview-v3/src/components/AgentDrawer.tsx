@@ -31,9 +31,17 @@ import { formatAge } from '../state/crisis';
 import type { CrisisState } from '../state/crisisStore';
 import { compactTokens } from '../state/hud';
 import type { TailStreamState } from '../state/tailStore';
+import { currentActiveTool, sortedSubagents, type ToolActivityMap } from '../state/toolActivity';
 import { deriveVisualState, freshPoll, STATE_CHIPS } from '../state/visualState';
 import { ControlTip } from './ControlTip';
 import { TailSheet } from './TailSheet';
+
+/** Live elapsed-seconds display for the NOW RUNNING row — recomputed off
+ *  the same age tick every other drawer fact uses (`now` prop), never its
+ *  own timer. */
+function elapsedSeconds(startedAt: number, now: number): number {
+  return Math.max(0, Math.floor((now - startedAt) / 1000));
+}
 
 /** Refresh cadence for the live-runner check while the drawer is open. */
 const MACHINES_REFRESH_MS = 10_000;
@@ -55,6 +63,11 @@ type AnswerPhase = 'compose' | 'confirm' | 'sending' | 'delivered' | 'denied';
 export interface AgentDrawerProps {
   agentId: number;
   agents: AgentMap;
+  /** T1c (FACE-MERGE-PLAN.md) — current tool + subagent activity, keyed by
+   *  agentId. Many agents predate this store (it only starts filling once
+   *  the first tool event arrives), so its absence renders NOTHING — never
+   *  a fake IDLE row. */
+  toolActivity: ToolActivityMap;
   crisis: CrisisState;
   now: number;
   tail: TailStreamState | undefined;
@@ -88,6 +101,7 @@ function Row({ label, value }: { label: string; value: string }) {
 export function AgentDrawer({
   agentId,
   agents,
+  toolActivity,
   crisis,
   now,
   tail,
@@ -254,6 +268,14 @@ export function AgentDrawer({
   const canFocus = canFocusAgent(pid, machines, record.machine);
   const copyLine = buildCopyIdLine(record.machine, record.cwd, record.sessionId);
 
+  // T1c — NOW RUNNING: honest empty state. This agent's activity record
+  // (and every subagent's) is undefined until the first tool event
+  // actually arrives for it, so `activity`/`current`/`subagents` all fall
+  // back to "nothing to show" rather than a fabricated IDLE.
+  const activity = toolActivity.get(agentId);
+  const current = currentActiveTool(activity);
+  const subagents = sortedSubagents(activity);
+
   const handleCopy = () => {
     void navigator.clipboard.writeText(copyLine).then(
       () => setCopied(true),
@@ -375,6 +397,35 @@ export function AgentDrawer({
           }
         />
       </div>
+
+      {/* T1c (FACE-MERGE-PLAN.md) — NOW RUNNING: ported from webview-ui's
+          canvas tool rendering. Honest empty state: renders NOTHING when
+          this agent has no in-flight tool AND no subagents — many agents
+          predate this store (it only fills from the first tool event
+          onward), and a fake IDLE row would be worse than no row. */}
+      {(current !== undefined || subagents.length > 0) && (
+        <div className="drawer__facts" data-testid="drawer-now-running">
+          {current !== undefined && (
+            <Row
+              label="NOW RUNNING"
+              value={`▸ ${current.name} (${String(elapsedSeconds(current.startedAt, now))}s${
+                current.runInBackground ? ', background' : ''
+              })`}
+            />
+          )}
+          {subagents.length > 0 && (
+            <Row
+              label={`⧉ ${String(subagents.length)} SUBAGENT${subagents.length === 1 ? '' : 'S'}`}
+              value={subagents
+                .map((sub) => {
+                  const tool = currentActiveTool(sub);
+                  return tool ? `▸ ${tool.name}` : sub.permissionWait ? '⚠ permission' : '…';
+                })
+                .join('  ·  ')}
+            />
+          )}
+        </div>
+      )}
 
       {focusCapable && !canFocus && (
         <div className="drawer__warn" data-testid="focus-disabled-reason">

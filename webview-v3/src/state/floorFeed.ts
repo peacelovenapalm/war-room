@@ -45,3 +45,21 @@ export function appendFloorFeedEntry(
     ? next.slice(next.length - MAX_FLOOR_FEED_ENTRIES)
     : next;
 }
+
+/** Append an arbitrary telemetry line not sourced from an OutputChunk
+ *  (e.g. T1c tool-activity start lines) — same cap/append convention as
+ *  appendFloorFeedEntry, generalized for other real-telemetry sources.
+ *  Caller supplies a caller-unique `key` (this reducer has no chunk `seq`
+ *  to dedupe against for non-chunk lines). */
+export function appendFloorFeedLine(
+  entries: readonly FloorFeedEntry[],
+  key: string,
+  label: string,
+  text: string,
+  now: number,
+): readonly FloorFeedEntry[] {
+  const next = [...entries, { key, label, text, receivedAt: now }];
+  return next.length > MAX_FLOOR_FEED_ENTRIES
+    ? next.slice(next.length - MAX_FLOOR_FEED_ENTRIES)
+    : next;
+}

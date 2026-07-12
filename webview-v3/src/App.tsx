@@ -92,6 +92,7 @@ import { deriveDispatchVisitors, type DispatchVisitor } from './state/dispatchVi
 import { type EconomySnapshot, reduceEconomy } from './state/economy';
 import {
   appendFloorFeedEntry,
+  appendFloorFeedLine,
   EMPTY_FLOOR_FEED,
   type FloorFeedEntry,
   floorFeedLabel,
@@ -124,6 +125,13 @@ import {
   tailKey,
   type TailMap,
 } from './state/tailStore';
+import {
+  detectToolNameChanges,
+  EMPTY_TOOL_ACTIVITY,
+  reduceToolActivity,
+  type ToolActivityMap,
+  toolNameSnapshot,
+} from './state/toolActivity';
 import { installTestHooksIfE2E } from './testHooks';
 
 /** Board/HUD age tick — visible aging without RAF churn (v1 convention). */
@@ -257,6 +265,11 @@ export default function App() {
   // Source-of-truth refs for values reduced OUTSIDE render (WS callbacks +
   // the age tick); the matching useState mirrors them for rendering.
   const agentsRef = useRef<AgentMap>(EMPTY_AGENTS);
+  // T1c (FACE-MERGE-PLAN.md) — tool/subagent activity, reduced in the WS
+  // onMessage callback below alongside agentsRef (same ref-is-truth,
+  // useState-mirrors-for-render split as every other WS-reduced value).
+  const toolActivityRef = useRef<ToolActivityMap>(EMPTY_TOOL_ACTIVITY);
+  const prevToolNamesRef = useRef<Map<number, string | undefined>>(new Map());
   const crisisRef = useRef<CrisisState>(EMPTY_CRISIS_STATE);
   const acksRef = useRef<AckState>(EMPTY_ACKS);
   const dispatchEntriesRef = useRef<DispatchEntry[]>([]);
@@ -271,6 +284,7 @@ export default function App() {
   const [view, setView] = useState<ViewMode>('floor');
   const [connectionStatus, setConnectionStatus] = useState<ConnectionStatus>('connecting');
   const [agents, setAgents] = useState<AgentMap>(EMPTY_AGENTS);
+  const [toolActivity, setToolActivity] = useState<ToolActivityMap>(EMPTY_TOOL_ACTIVITY);
   const [economy, setEconomy] = useState<EconomySnapshot | null>(null);
   const [crisis, setCrisis] = useState<CrisisState>(EMPTY_CRISIS_STATE);
   const [acks, setAcks] = useState<AckState>(EMPTY_ACKS);
@@ -676,6 +690,50 @@ export default function App() {
           agentsRef.current = nextAgents;
           setAgents(nextAgents);
           applyCrisis(reduceCrisisState(crisisRef.current, nextAgents, at));
+        }
+        // T1c — tool/subagent activity (state/toolActivity.ts), ported
+        // from webview-ui's canvas rendering into ambient telemetry: a
+        // drawer "NOW RUNNING" row, plus rate-limited speech
+        // bubbles/FloorFeed lines on genuine tool-NAME changes only (never
+        // one per call — detectToolNameChanges is the rate limit).
+        const nextToolActivity = reduceToolActivity(toolActivityRef.current, message, at);
+        if (nextToolActivity !== toolActivityRef.current) {
+          toolActivityRef.current = nextToolActivity;
+          setToolActivity(nextToolActivity);
+          const toolChanges = detectToolNameChanges(prevToolNamesRef.current, nextToolActivity);
+          prevToolNamesRef.current = toolNameSnapshot(nextToolActivity);
+          if (toolChanges.length > 0) {
+            setSpeechBubbles((prev) => {
+              let next = prev;
+              for (const change of toolChanges) {
+                next = appendSpeechBubble(next, {
+                  id: `tool-${String(change.agentId)}-${String(at)}`,
+                  anchor: { kind: 'agent', agentId: change.agentId },
+                  text: `▸ ${change.toolName}`,
+                  createdAt: at,
+                });
+              }
+              return next;
+            });
+            setFloorFeed((previous) => {
+              let next = previous;
+              for (const change of toolChanges) {
+                const label = floorFeedLabel(
+                  'agent',
+                  String(change.agentId),
+                  agentsRef.current.get(change.agentId)?.name,
+                );
+                next = appendFloorFeedLine(
+                  next,
+                  `tool:${String(change.agentId)}:${String(at)}`,
+                  label,
+                  `▸ ${change.toolName}`,
+                  at,
+                );
+              }
+              return next;
+            });
+          }
         }
         setEconomy((previous) => reduceEconomy(previous, message));
         if (message.type === 'outputChunk') {
@@ -1184,6 +1242,7 @@ export default function App() {
             key={drawerAgentId}
             agentId={drawerAgentId}
             agents={agents}
+            toolActivity={toolActivity}
             crisis={crisis}
             now={now}
             tail={tails.get(drawerTailKey)}
