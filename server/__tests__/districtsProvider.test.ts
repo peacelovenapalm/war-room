@@ -235,6 +235,35 @@ describe('getDistricts — WAR_ROOM_DISTRICTS_DIR (v5 C1 data-driven scan)', () 
     expect(projects[0].source).toBe(`file:${legacyFile}`);
   });
 
+  it('legacy env override dedupe via the twe <-> two-wheel-events alias: scanned "two-wheel-events" + WAR_ROOM_DISTRICT_TWE_STATE set -> exactly ONE row, env-sourced (not two)', () => {
+    // Directory scan produces a real 'two-wheel-events' entry from the
+    // nexus clone (the actual directory name, NOT the legacy 'twe' key) --
+    // this is the collision the naive `p.key === seed.key` dedupe misses.
+    const scannedSub = path.join(tmpDir, 'two-wheel-events');
+    fs.mkdirSync(path.join(scannedSub, '.planning'), { recursive: true });
+    fs.writeFileSync(path.join(scannedSub, '.planning', 'STATE.md'), 'status: FROM SCAN\n');
+    process.env[DIR_ENV] = tmpDir;
+
+    // ...and the legacy TWE env var (keyed 'twe') is ALSO set for the same
+    // real project.
+    const legacyFile = path.join(tmpDir, 'legacy-twe-state.md');
+    fs.writeFileSync(legacyFile, 'status: FROM LEGACY ENV\n');
+    process.env[TWE_ENV] = legacyFile;
+
+    const snapshot = getDistricts();
+    // Exactly one row for this project -- no 'twe' AND 'two-wheel-events'
+    // duplicate pair.
+    expect(snapshot.projects).toHaveLength(1);
+    const project = snapshot.projects[0];
+    // The merged row keeps the scanned entry's identity (the directory-scan
+    // key already occupied that slot) ...
+    expect(project.key).toBe('two-wheel-events');
+    expect(project.label).toBe('TWE');
+    // ... but explicit env wins on content.
+    expect(project.phase).toBe('FROM LEGACY ENV');
+    expect(project.source).toBe(`file:${legacyFile}`);
+  });
+
   it('legacy env additive: a legacy var for a key the scan never produced is appended, not dropped', () => {
     fs.mkdirSync(path.join(tmpDir, 'some-other-project'), { recursive: true });
     process.env[DIR_ENV] = tmpDir;

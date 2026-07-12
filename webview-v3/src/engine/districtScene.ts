@@ -123,19 +123,30 @@ export function drawDistrictScene(
 
 /** Nearest plot to a world-space point within `radius` world px of its
  *  center (a generous fixed radius over the small footprint — precise
- *  polygon hit-testing is unnecessary at this scale/zoom). Returns the
- *  plot's key, or null when the point is outside every plot's radius. */
+ *  polygon hit-testing is unnecessary at this scale/zoom). At
+ *  PLOT_SPACING=2/TILE_W=64/TILE_H=32, adjacent plot centers sit ~71.6
+ *  world px apart — narrower than 2x radius, so neighboring hit circles
+ *  DO overlap at the boundary between two plots. Resolving to the
+ *  NEAREST center (not first-in-array) keeps a boundary tap deterministic
+ *  and visually correct instead of order-dependent. Returns the plot's
+ *  key, or null when the point is outside every plot's radius. */
 export function hitTestDistrict(
   worldX: number,
   worldY: number,
   plots: readonly DistrictPlot[],
   radius = 40,
 ): string | null {
+  let bestKey: string | null = null;
+  let bestDist = Infinity;
   for (const plot of plots) {
     const center = plotWorldCenter(plot);
     const dx = worldX - center.worldX;
     const dy = worldY - center.worldY;
-    if (Math.sqrt(dx * dx + dy * dy) <= radius) return plot.key;
+    const dist = Math.sqrt(dx * dx + dy * dy);
+    if (dist <= radius && dist < bestDist) {
+      bestDist = dist;
+      bestKey = plot.key;
+    }
   }
-  return null;
+  return bestKey;
 }

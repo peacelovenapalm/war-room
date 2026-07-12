@@ -101,12 +101,54 @@ describe('hitTestDistrict', () => {
     expect(hitTestDistrict(0, 0, [])).toBeNull();
   });
 
-  it('no two plots share a hit radius (no ambiguous overlap) across N projects', () => {
+  it('every plot center still resolves to its own key across N projects', () => {
     const plots = computeDistrictPlots(projectsOf(['a', 'b', 'c', 'd', 'e']));
     for (const plot of plots) {
       const center = plotWorldCenter(plot);
       expect(hitTestDistrict(center.worldX, center.worldY, plots)).toBe(plot.key);
     }
+  });
+
+  it('adjacent plots DO have overlapping hit circles at the default radius -- a boundary tap resolves to the NEAREST center, not the first plot in the array', () => {
+    const plots = computeDistrictPlots(projectsOf(['a', 'b']));
+    const [plotA, plotB] = plots;
+    const centerA = plotWorldCenter(plotA);
+    const centerB = plotWorldCenter(plotB);
+    const centerDist = Math.sqrt(
+      (centerB.worldX - centerA.worldX) ** 2 + (centerB.worldY - centerA.worldY) ** 2,
+    );
+    const defaultRadius = 40;
+    // Confirms the overlap this test is actually about (adjacent centers
+    // closer together than 2x the default radius) -- if plot spacing ever
+    // widens past this, the test below stops being meaningful and should
+    // be revisited rather than silently passing on a non-overlap.
+    expect(centerDist).toBeLessThan(defaultRadius * 2);
+
+    // A point 53% of the way from A to B: within radius of BOTH centers
+    // (linear interpolation puts it at t*centerDist from A and
+    // (1-t)*centerDist from B -- both must stay <= 40 given centerDist
+    // ~71.6, which bounds t to roughly (0.44, 0.56]), but strictly closer
+    // to B.
+    const t = 0.53;
+    const boundaryX = centerA.worldX + (centerB.worldX - centerA.worldX) * t;
+    const boundaryY = centerA.worldY + (centerB.worldY - centerA.worldY) * t;
+    const distToA = Math.sqrt(
+      (boundaryX - centerA.worldX) ** 2 + (boundaryY - centerA.worldY) ** 2,
+    );
+    const distToB = Math.sqrt(
+      (boundaryX - centerB.worldX) ** 2 + (boundaryY - centerB.worldY) ** 2,
+    );
+    expect(distToA).toBeLessThanOrEqual(defaultRadius);
+    expect(distToB).toBeLessThanOrEqual(defaultRadius);
+    expect(distToB).toBeLessThan(distToA);
+
+    expect(hitTestDistrict(boundaryX, boundaryY, plots, defaultRadius)).toBe(plotB.key);
+    // Order independence: reversing the plot array must not change the
+    // nearest-wins outcome (guards against an accidental first-match
+    // regression).
+    expect(hitTestDistrict(boundaryX, boundaryY, [...plots].reverse(), defaultRadius)).toBe(
+      plotB.key,
+    );
   });
 });
 

@@ -18,11 +18,15 @@
  *     discipline, size cap, and 60s TTL cache as before.
  *   - WAR_ROOM_DISTRICT_WARROOM_STATE / WAR_ROOM_DISTRICT_TWE_STATE
  *     (legacy, v4): when set, ADDITIVELY override the `war-room`/`twe`
- *     keys (dedupe by key, explicit env wins over a directory-scanned
- *     entry of the same key). When WAR_ROOM_DISTRICTS_DIR is UNSET, these
- *     two are the only source of projects — exactly today's (v4)
- *     behavior, including the honest-unknown fallback per seed when its
- *     own env var isn't set.
+ *     keys (dedupe by key -- or by the `twe` <-> `two-wheel-events` alias,
+ *     since the real nexus clone directory is named `two-wheel-events`,
+ *     see LEGACY_KEY_ALIASES -- explicit env wins on CONTENT over a
+ *     directory-scanned entry of the same real project; the merged row
+ *     keeps whichever key/label was already at that slot, so a project's
+ *     identity never jumps mid-flight). When WAR_ROOM_DISTRICTS_DIR is
+ *     UNSET, these two are the only source of projects — exactly today's
+ *     (v4) behavior, including the honest-unknown fallback per seed when
+ *     its own env var isn't set.
  *
  * Same env-var + tolerant-read + 60s-TTL-cache discipline as
  * briefingProvider.ts/graphProvider.ts: a missing env var, missing file, or
@@ -81,6 +85,19 @@ const LEGACY_SEEDS: readonly LegacySeed[] = [
   { key: 'twe', label: 'TWE', envVar: 'WAR_ROOM_DISTRICT_TWE_STATE' },
 ];
 
+/** A legacy seed's key doesn't always match the directory-scan key for the
+ *  SAME real project: 'twe' (v4 hardcoded) vs 'two-wheel-events' (the
+ *  actual nexus clone directory name). Without this alias, an explicit
+ *  WAR_ROOM_DISTRICT_TWE_STATE override would dedupe-miss the scanned
+ *  'two-wheel-events' entry and the board would render the same project
+ *  twice. When both are present, the merged row keeps the SCANNED entry's
+ *  key/label (the directory-scan identity is what the rest of the client
+ *  and future scans key off of) but the legacy file's parsed state wins
+ *  (explicit env still wins on CONTENT, per the doc'd contract). */
+const LEGACY_KEY_ALIASES: Readonly<Record<string, string>> = {
+  twe: 'two-wheel-events',
+};
+
 const CACHE_TTL_MS = 60_000;
 /** Per-file read cap (P5 review #3) — a STATE.md is a few KB of markdown. */
 export const STATE_FILE_MAX_BYTES = 1024 * 1024;
@@ -104,18 +121,28 @@ export function getDistricts(now: number = Date.now()): DistrictsSnapshot {
     }
   }
 
-  // Legacy env vars are ADDITIVE overrides, applied last: dedupe by key,
+  // Legacy env vars are ADDITIVE overrides, applied last: dedupe by key
+  // (or by the seed's directory-scan alias, see LEGACY_KEY_ALIASES),
   // explicit env wins over anything the directory scan produced for the
-  // same key. Only applied when the specific env var is actually set —
-  // when WAR_ROOM_DISTRICTS_DIR is set and a legacy var is NOT, the
+  // same real project. Only applied when the specific env var is actually
+  // set — when WAR_ROOM_DISTRICTS_DIR is set and a legacy var is NOT, the
   // directory-scanned entry (if any) stands untouched.
   if (root) {
     for (const seed of LEGACY_SEEDS) {
       if (!process.env[seed.envVar]) continue;
-      const project = loadLegacySeed(seed);
-      const idx = projects.findIndex((p) => p.key === seed.key);
-      if (idx === -1) projects.push(project);
-      else projects[idx] = project;
+      const alias = LEGACY_KEY_ALIASES[seed.key];
+      const idx = projects.findIndex((p) => p.key === seed.key || p.key === alias);
+      if (idx === -1) {
+        projects.push(loadLegacySeed(seed));
+      } else {
+        // Explicit env wins on CONTENT; the merged row keeps the identity
+        // (key/label) of whatever was already at this slot — almost always
+        // the directory-scanned entry, so the project's row never jumps
+        // key mid-flight if the legacy override is later removed.
+        const { key, label } = projects[idx];
+        const overridden = loadLegacySeed(seed);
+        projects[idx] = { ...overridden, key, label };
+      }
     }
   }
 
