@@ -23,6 +23,18 @@ export interface AnswerRequestResult {
   reason?: string;
 }
 
+// C8-6 pid-reuse follow-up (verified, not yet actionable): the server's
+// requestAnswer() now accepts an optional expectedStartTime and denies a
+// mismatch (server/src/dispatchStore.ts), but this client has no session
+// start-time to send. The webview only ever receives a managed session's
+// identity as a bare boolean (`agentManagedUpdate` broadcasts `{ id, managed
+// }`, and dispatchFacts.ts's per-agent `managed` flag carries nothing else)
+// — ManagedSessionAd.createdAt (dispatchStore.ts) is never put on the wire to
+// the client today. Wiring this live would mean exposing createdAt on that
+// broadcast (or a new GET), which is new advertisement-plane surface, not a
+// client-side plumbing fix — out of scope here. Until then this stays a
+// legacy pid-only request (server-side guard active only for callers that
+// can supply a start-identifier, e.g. a future managed-sessions listing).
 export async function requestAnswer(
   machine: string,
   pid: number,
