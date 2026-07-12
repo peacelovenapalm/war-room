@@ -957,3 +957,32 @@ managed flag not client-assertable; auth tiers correct; no 500-paths).
   preamble double-prefix, skills names-only wire, hook-primary reordering
   never masks a genuinely blocked agent (toolPermission/awaitingInput
   still force NEEDS_INPUT).
+
+## Post-Phase-4 live findings (2026-07-12, late)
+
+- **Status accuracy VERIFIED live**: raw-WS capture mid-work shows the
+  vault session broadcast `status=active awaitingInput=false` while its
+  tools ran; the waiting/blocked readout Greg pasted was captured while
+  that session sat at its own prompt (idle_prompt ≥60s) — accurate
+  NEEDS-INPUT, not a bug. UNVERIFIED remainder: the drawer's `since=`
+  anchor looked stale (16:34) — check what timestamp the debug panel
+  anchors "since" to.
+- **Dispatched jobs still invisible in the office (Greg, twice now)**:
+  CALL → job shows only as a bottom-left drawer chip and "disappears
+  after reading"; he wants dispatched agents to spawn in the office.
+  Jobs-not-sprites was the 2B design call; promote "dispatch jobs get
+  sprites (or a visible desk/ghost seat) + drawer entries persist until
+  dismissed" to TOP of the next phase's candidate list. Desktop remains
+  the primary surface — mobile affordances are additive only (Greg).
+- **codex model drift**: the Phase-4 review session ran on `gpt-5.6-sol`
+  (unpinned codex CLI 0.144.x default), which likely explains "my codex
+  usage has not moved" — tokens landed on a non-plan model. FIXED:
+  `model = "gpt-5.5"` pinned in ~/.codex/config.toml. Curious datum: a
+  00:26 board-dispatched codex job already recorded gpt-5.5 pre-pin
+  (inferred: entrypoint-dependent default).
+- **Mini runner shipped + restarted**: ship-to-mini.sh rsynced the 4B
+  bin/, runner kickstarted — MINI now advertises 91 skills. It still
+  advertises sessions:false (its dispatch.json has no "sessions": true);
+  Greg's call whether the Mini gets managed sessions.
+- Hook smoke-test hygiene: a synthetic PreToolUse POST mints a real agent
+  on the board; close it with a matching SessionEnd (done this time).
