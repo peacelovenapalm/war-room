@@ -69,7 +69,8 @@ function fakeTmux({ sessions = new Set(), version = 'tmux 3.4', panePid = 777, f
     }
     if (sub === 'list-panes') return { stdout: `${panePid}\n`, stderr: '' };
     if (sub === 'send-keys') {
-      const target = args[args.indexOf('-t') + 1].replace(/^=/, '');
+      // window-target form `=name:` — strip exact-match `=` and trailing `:`
+      const target = args[args.indexOf('-t') + 1].replace(/^=/, '').replace(/:$/, '');
       if (!live.has(target)) throw new Error(`can't find session: ${target}`);
       return { stdout: '', stderr: '' };
     }
@@ -214,12 +215,12 @@ test('deliverAnswer: literal -l send then a SEPARATE Enter send', async () => {
   assert.deepEqual(sends[0].args, [
     'send-keys',
     '-t',
-    '=war-room-d5',
+    '=war-room-d5:',
     '-l',
     '--',
     'option 2; $(echo pwned) `whoami`',
   ]);
-  assert.deepEqual(sends[1].args, ['send-keys', '-t', '=war-room-d5', 'Enter']);
+  assert.deepEqual(sends[1].args, ['send-keys', '-t', '=war-room-d5:', 'Enter']);
 });
 
 test('deliverAnswer: dead session denies before any keystroke is sent', async () => {

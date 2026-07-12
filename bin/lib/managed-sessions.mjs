@@ -207,7 +207,7 @@ export async function createManagedSession({ dispatchId, cwd, argv }, execFileIm
   try {
     const { stdout } = await execFileImpl(
       'tmux',
-      ['list-panes', '-t', `=${name}`, '-F', '#{pane_pid}'],
+      ['list-panes', '-t', `=${name}:`, '-F', '#{pane_pid}'],
       { timeout: TMUX_TIMEOUT_MS },
     );
     const parsed = Number.parseInt(String(stdout ?? '').trim(), 10);
@@ -248,16 +248,21 @@ export function validateAnswerText(text) {
  * separate send. The text lands as keyboard input to the CLI, never as
  * shell input. Caller has already done manifest + nonce checks; this
  * function re-checks liveness at send time (never cached, per design).
+ *
+ * Target syntax: `=name:` — `=` keeps exact-match (an answer must never
+ * prefix-match some other session); the trailing `:` makes it parse as a
+ * window target, which send-keys requires (tmux 3.6a rejects a bare
+ * `=name` pane target with "can't find pane").
  */
 export async function deliverAnswer({ tmuxSession, text }, execFileImpl) {
   if (!(await hasTmuxSession(tmuxSession, execFileImpl))) {
     return { ok: false, reason: 'session-dead' };
   }
   try {
-    await execFileImpl('tmux', ['send-keys', '-t', `=${tmuxSession}`, '-l', '--', text], {
+    await execFileImpl('tmux', ['send-keys', '-t', `=${tmuxSession}:`, '-l', '--', text], {
       timeout: TMUX_TIMEOUT_MS,
     });
-    await execFileImpl('tmux', ['send-keys', '-t', `=${tmuxSession}`, 'Enter'], {
+    await execFileImpl('tmux', ['send-keys', '-t', `=${tmuxSession}:`, 'Enter'], {
       timeout: TMUX_TIMEOUT_MS,
     });
   } catch (err) {
