@@ -1,5 +1,6 @@
 import { useEffect, useState } from 'react';
 
+import type { ClientMessage } from '../../../core/src/messages.js';
 import type { AgentMap } from '../net/agentStore';
 import {
   ANSWER_POLL_INTERVAL_MS,
@@ -12,13 +13,20 @@ import {
   pollAnswerOutcome,
   requestAnswer,
 } from '../net/answerFacts';
-import { buildCopyIdLine, canKillAgent, type DispatchMachine } from '../net/dispatchFacts';
+import {
+  buildCopyIdLine,
+  canFocusAgent,
+  canKillAgent,
+  type DispatchMachine,
+  machineSupportsFocus,
+} from '../net/dispatchFacts';
 import {
   KILL_POLL_INTERVAL_MS,
   KILL_RESULT_TIMEOUT_MS,
   pollKillOutcome,
   requestKill,
 } from '../net/killAgent';
+import { buildFocusMessage } from '../net/opsProposals';
 import { formatAge } from '../state/crisis';
 import type { CrisisState } from '../state/crisisStore';
 import { compactTokens } from '../state/hud';
@@ -28,6 +36,10 @@ import { TailSheet } from './TailSheet';
 
 /** Refresh cadence for the live-runner check while the drawer is open. */
 const MACHINES_REFRESH_MS = 10_000;
+/** How long the FOCUS button shows "▸ SENT" after a tap — dispatchRequest
+ *  has no ack on the wire (buildFocusMessage's doc), so this is honestly
+ *  labeled as a send confirmation, never a success/done claim. */
+const FOCUS_SENT_DISPLAY_MS = 2_000;
 /** Refresh cadence for the answer receipts list while the drawer is open. */
 const ANSWERS_REFRESH_MS = 5_000;
 
@@ -49,6 +61,10 @@ export interface AgentDrawerProps {
   onTogglePin: () => void;
   onTogglePause: () => void;
   onClose: () => void;
+  /** Real WS send — same function CallModal/OpsReviewPanel use. FOCUS has
+   *  no ack on the wire (buildFocusMessage's doc), so the drawer only ever
+   *  shows an honest transient "sent" state, never a fabricated success. */
+  send: (message: ClientMessage) => void;
 }
 
 function Row({ label, value }: { label: string; value: string }) {
@@ -78,12 +94,14 @@ export function AgentDrawer({
   onTogglePin,
   onTogglePause,
   onClose,
+  send,
 }: AgentDrawerProps) {
   const [machines, setMachines] = useState<DispatchMachine[]>([]);
   const [copied, setCopied] = useState(false);
   const [killPhase, setKillPhase] = useState<KillPhase>('idle');
   const [killReason, setKillReason] = useState<string | undefined>(undefined);
   const [killRequestId, setKillRequestId] = useState<string | null>(null);
+  const [focusSent, setFocusSent] = useState(false);
 
   // T2/T4 remote-answer plane — composer local state.
   const [answerPhase, setAnswerPhase] = useState<AnswerPhase>('compose');
@@ -114,6 +132,16 @@ export function AgentDrawer({
 
   // NOTE: App renders this drawer with key={agentId}, so switching agents
   // remounts and resets copied/kill state — no reset effect needed.
+
+  // FOCUS's "▸ SENT" is a transient send confirmation, not a lasting
+  // status — revert to the idle label after FOCUS_SENT_DISPLAY_MS.
+  useEffect(() => {
+    if (!focusSent) return;
+    const timeout = setTimeout(() => {
+      setFocusSent(false);
+    }, FOCUS_SENT_DISPLAY_MS);
+    return () => clearTimeout(timeout);
+  }, [focusSent]);
 
   // Poll the pid-kill outcome (no WS broadcast for this ephemeral lifecycle).
   useEffect(() => {
@@ -215,6 +243,14 @@ export function AgentDrawer({
   const blockedAge = since !== undefined ? formatAge(now - since) : '—';
   const pid = record.pid;
   const canKill = canKillAgent(pid, machines, record.machine);
+  // FOCUS button: same "hide, don't show a dead control" posture as v1 —
+  // a machine that never advertised focus:true has no plane for this verb
+  // at all, so the button doesn't render rather than sitting permanently
+  // disabled. When the machine DOES support focus, canFocus additionally
+  // requires a real pid (see canFocusAgent's doc) and the button stays
+  // visible-but-disabled with an honest reason in that case.
+  const focusCapable = machineSupportsFocus(machines, record.machine);
+  const canFocus = canFocusAgent(pid, machines, record.machine);
   const copyLine = buildCopyIdLine(record.machine, record.cwd, record.sessionId);
 
   const handleCopy = () => {
@@ -222,6 +258,18 @@ export function AgentDrawer({
       () => setCopied(true),
       () => setCopied(false),
     );
+  };
+
+  const handleFocus = () => {
+    if (!canFocus || record.machine === undefined || pid === undefined) return;
+    send(
+      buildFocusMessage({
+        verb: 'focus',
+        label: 'FOCUS',
+        params: { machine: record.machine, pid },
+      }),
+    );
+    setFocusSent(true);
   };
 
   const handleKill = () => {
@@ -327,6 +375,11 @@ export function AgentDrawer({
         />
       </div>
 
+      {focusCapable && !canFocus && (
+        <div className="drawer__warn" data-testid="focus-disabled-reason">
+          ⚠ NO PID — use COPY ID
+        </div>
+      )}
       {!canKill && (
         <div className="drawer__warn" data-testid="kill-disabled-reason">
           {pid === undefined
@@ -344,6 +397,20 @@ export function AgentDrawer({
         <button type="button" className="verb" data-testid="drawer-copy-id" onClick={handleCopy}>
           {copied ? '✓ COPIED' : '⧉ COPY ID'}
         </button>
+        {/* Hidden entirely (not a dead disabled control) when the machine
+            never advertised focus:true — v1's gate, see canFocusAgent. */}
+        {focusCapable && (
+          <button
+            type="button"
+            className="verb"
+            data-testid="drawer-focus"
+            disabled={!canFocus}
+            title={pid === undefined ? 'No PID available — use Copy ID instead' : undefined}
+            onClick={handleFocus}
+          >
+            {focusSent ? '▸ SENT' : '⌖ FOCUS'}
+          </button>
+        )}
         <button
           type="button"
           className={killPhase === 'confirm' ? 'verb verb--confirm' : 'verb'}

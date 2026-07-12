@@ -383,6 +383,20 @@ export function machineSupportsFocus(
   return machines.some((m) => m.machine === machine && m.focus);
 }
 
+/** Drawer FOCUS button eligibility — faithful port of webview-ui's v1
+ *  canFocusAgent (dispatch.ts): needs BOTH a real pid (from server hook
+ *  telemetry, AgentCreated/ExistingAgents/agentPidUpdate) AND a live
+ *  runner on that machine advertising focus support. Pure so the two
+ *  honest disabled states ("NO PID" vs "NO RUNNER") are unit-testable
+ *  without a rendering harness. */
+export function canFocusAgent(
+  pid: number | undefined,
+  machines: DispatchMachine[],
+  machine: string | undefined,
+): boolean {
+  return pid !== undefined && machineSupportsFocus(machines, machine);
+}
+
 /** True when `machine` has a live runner advertisement with the T2/T4
  *  managed-session capability enabled (deny-by-default — absent = false,
  *  same posture as machineSupportsFocus). */

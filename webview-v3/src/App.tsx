@@ -1195,6 +1195,7 @@ export default function App() {
               handleTogglePause(drawerTailKey);
             }}
             onClose={handleCloseDrawer}
+            send={send}
           />
         )}
       </div>
