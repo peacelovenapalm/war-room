@@ -11,6 +11,7 @@ import { type ChipFrame, ChipLayer } from './components/ChipLayer';
 import { ContractsPanel } from './components/ContractsPanel';
 import { DebugView, type DiagnosticsRow } from './components/DebugView';
 import { DispatchTray } from './components/DispatchTray';
+import { DistrictsView } from './components/DistrictsView';
 import { FloorFeed } from './components/FloorFeed';
 import { GraphSearchPanel } from './components/GraphSearchPanel';
 import { HelpModal } from './components/HelpModal';
@@ -1047,6 +1048,7 @@ export default function App() {
         sendFailures={sendFailures}
       />
       <GraphSearchPanel isOpen={openPanel === 'graph-search'} onClose={closePanel} />
+      <DistrictsView isOpen={openPanel === 'districts'} onClose={closePanel} />
 
       {viewingResult && (
         <div className="modal-backdrop" onClick={() => setViewingResult(null)}>
