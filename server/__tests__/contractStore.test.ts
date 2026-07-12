@@ -64,6 +64,7 @@ function briefingWithTodo(
   return {
     todo: { date, startNow, sections },
     tracker: null,
+    digest: null,
     generatedAt: new Date(DAY1).toISOString(),
   };
 }
@@ -74,6 +75,7 @@ function briefingWithGates(
   return {
     todo: null,
     tracker: { milestone: 'test', gates: gates.map((g) => ({ ...g, done: 0, total: 1 })) },
+    digest: null,
     generatedAt: new Date(DAY1).toISOString(),
   };
 }

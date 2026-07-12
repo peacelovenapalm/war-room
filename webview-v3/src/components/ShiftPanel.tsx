@@ -1,6 +1,7 @@
 import { useEffect, useState } from 'react';
 
 import { formatAge } from '../state/crisis';
+import { daysStale, isMorningSourceStale, type MorningBriefing } from '../state/morning';
 import { SEVERITY_GLYPHS } from '../state/opsReview';
 import {
   compactTokens,
@@ -13,6 +14,10 @@ import {
 import { Modal } from './Modal';
 
 const REFRESH_INTERVAL_MS = 60_000;
+// The MORNING fold refreshes on its own slower cadence (mirrors
+// BriefingPanel.tsx) — a digest/todo file changes once a day, not every
+// minute like the game-derived SHIFT stats.
+const MORNING_REFRESH_INTERVAL_MS = 5 * 60_000;
 
 export interface ShiftPanelProps {
   isOpen: boolean;
@@ -26,6 +31,60 @@ function Row({ glyph, word, value }: { glyph: string; word: string; value: strin
         {glyph} {word}
       </span>
       <span className="shift-row__value">{value}</span>
+    </div>
+  );
+}
+
+/** MORNING fold (v4 T7: "War Room IS morning") — today's daily-digest
+ *  summary + todo top-3, both read from the same GET /api/briefing path
+ *  BriefingPanel.tsx already uses. Absent sources render an honest
+ *  "no source" line, never an empty-but-plausible section; a source dated
+ *  before today renders a shape+word ◷ STALE marker (colorblind rule —
+ *  never color alone). */
+function MorningSection({ briefing }: { briefing: MorningBriefing | null }) {
+  const todo = briefing?.todo ?? null;
+  const digest = briefing?.digest ?? null;
+
+  return (
+    <div className="shift-morning" data-testid="shift-morning">
+      <h3 className="shift-morning__title">☀ MORNING</h3>
+      <div className="shift-morning__block" data-testid="shift-morning-digest">
+        <span className="shift-morning__label">FLAGS</span>
+        {!digest ? (
+          <span className="modal__muted">no digest source configured</span>
+        ) : (
+          <>
+            <span>{digest.flagsSummary || 'nothing flagged'}</span>
+            {isMorningSourceStale(digest.date) && (
+              <span className="modal__warn" data-testid="shift-morning-digest-stale">
+                {' '}
+                ◷ STALE {daysStale(digest.date)}d
+              </span>
+            )}
+          </>
+        )}
+      </div>
+      <div className="shift-morning__block" data-testid="shift-morning-todo">
+        <span className="shift-morning__label">START NOW</span>
+        {!todo ? (
+          <span className="modal__muted">no todo source configured</span>
+        ) : todo.startNow.length === 0 ? (
+          <span className="modal__muted">nothing flagged for right now</span>
+        ) : (
+          <>
+            <ol className="shift-morning__todo-list">
+              {todo.startNow.slice(0, 3).map((item, i) => (
+                <li key={i}>{item}</li>
+              ))}
+            </ol>
+            {isMorningSourceStale(todo.date) && (
+              <span className="modal__warn" data-testid="shift-morning-todo-stale">
+                ◷ STALE {daysStale(todo.date)}d
+              </span>
+            )}
+          </>
+        )}
+      </div>
     </div>
   );
 }
@@ -50,6 +109,7 @@ export function ShiftPanel({ isOpen, onClose }: ShiftPanelProps) {
   const [snapshot, setSnapshot] = useState<ShiftSnapshot | null>(null);
   const [error, setError] = useState(false);
   const [lastUpdatedAt, setLastUpdatedAt] = useState<number | null>(null);
+  const [morning, setMorning] = useState<MorningBriefing | null>(null);
 
   useEffect(() => {
     if (!isOpen) return;
@@ -76,6 +136,32 @@ export function ShiftPanel({ isOpen, onClose }: ShiftPanelProps) {
     };
   }, [isOpen]);
 
+  // MORNING fold: same GET /api/briefing path BriefingPanel.tsx uses,
+  // fetched independently on its own slower cadence — a failure here
+  // never blocks the game-derived SHIFT stats above from rendering.
+  useEffect(() => {
+    if (!isOpen) return;
+    let cancelled = false;
+    const load = async () => {
+      try {
+        const res = await fetch('/api/briefing');
+        if (!res.ok) throw new Error(`HTTP ${String(res.status)}`);
+        const data = (await res.json()) as MorningBriefing;
+        if (!cancelled) setMorning(data);
+      } catch {
+        // Honest empty state (no source configured) — MorningSection
+        // already renders "no source" for a null briefing; no separate
+        // error banner needed for a secondary fold.
+      }
+    };
+    void load();
+    const interval = setInterval(() => void load(), MORNING_REFRESH_INTERVAL_MS);
+    return () => {
+      cancelled = true;
+      clearInterval(interval);
+    };
+  }, [isOpen]);
+
   const report = snapshot?.today ?? null;
   const stale = isShiftReportStale(report !== null, error);
 
@@ -92,6 +178,7 @@ export function ShiftPanel({ isOpen, onClose }: ShiftPanelProps) {
           ⚠ STALE — last updated {lastUpdatedAt !== null ? formatClock(lastUpdatedAt) : '—'}
         </div>
       )}
+      <MorningSection briefing={morning} />
       {report && (
         <>
           <div className="shift-rows">

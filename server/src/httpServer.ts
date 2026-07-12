@@ -39,6 +39,7 @@ import { economyStore } from './economyStore.js';
 import type { Employee, ScoreTrack } from './employeeStore.js';
 import { employeeStore } from './employeeStore.js';
 import { searchGraph } from './graphProvider.js';
+import { getInboxListing, readInboxFile } from './inboxProvider.js';
 import { matchDayDerivation } from './matchDayDerivation.js';
 import { matchDayStore, toMatchDayEvent } from './matchDayStore.js';
 import {
@@ -74,6 +75,7 @@ import { renderTranscriptLine } from './transcriptOutputTap.js';
 import { applyTokenUsage, isRecentEnoughForShiftSpend } from './transcriptParser.js';
 import type { AgentState } from './types.js';
 import { v3StoreEnabled } from './v3Flags.js';
+import { getWiringSnapshot } from './wiringProvider.js';
 import { worldEventStore } from './worldEventStore.js';
 
 /** Options for creating the HTTP + WebSocket server. */
@@ -162,6 +164,8 @@ export async function createHttpServer(options: HttpServerOptions): Promise<Http
 
   registerHealthRoute(app);
   registerBriefingRoute(app, options);
+  registerInboxRoutes(app);
+  registerWiringRoute(app);
   registerHookRoute(app, options);
   registerPollRoute(app, options);
   registerAgentOutputRoute(app, options);
@@ -493,6 +497,39 @@ function registerBriefingRoute(app: FastifyInstance, options: HttpServerOptions)
   // configured STATE.md path renders honestly as source:'unknown', never a
   // fake number.
   app.get('/api/districts', async () => getDistricts());
+}
+
+// ── Routine inbox tray (v4 T7 slice 2) ──────────────────────────
+
+/** GET /api/inbox + GET /api/inbox/content -- unauthenticated, same
+ *  tailnet-read tier as /api/briefing and /api/graph/search. Reads the
+ *  vault's `_inbox/routines/` mount (inboxProvider.ts). */
+function registerInboxRoutes(app: FastifyInstance): void {
+  app.get('/api/inbox', async () => getInboxListing());
+  app.get<{ Querystring: { routine?: string; file?: string } }>(
+    '/api/inbox/content',
+    async (request, reply) => {
+      const routine = typeof request.query.routine === 'string' ? request.query.routine : '';
+      const file = typeof request.query.file === 'string' ? request.query.file : '';
+      const result = readInboxFile(routine, file);
+      if (result.ok) return { content: result.content };
+      // Every non-ok reason renders as an honest 404/400 body, never a 500 --
+      // same "tolerant read" posture as the rest of the briefing plane.
+      reply.code(result.reason === 'invalid' ? 400 : 404);
+      return { error: result.reason };
+    },
+  );
+}
+
+// ── WIRING auto-detect (v4 T7 slice 3) ──────────────────────────
+
+/** GET /api/wiring -- unauthenticated, same tailnet-read tier as
+ *  /api/briefing. Reads wiringProvider.ts's cached scan (WAR_ROOM_WIRING_
+ *  ROOTS env-configured, zero per-project listing needed). See WIRING.md
+ *  at the repo root for the full ingest-path documentation this endpoint
+ *  is one half of. */
+function registerWiringRoute(app: FastifyInstance): void {
+  app.get('/api/wiring', async () => getWiringSnapshot());
 }
 
 // ── Hook Events ────────────────────────────────────────────────
