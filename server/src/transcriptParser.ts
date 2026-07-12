@@ -424,6 +424,11 @@ export function processTranscriptLine(
 
       agent.isWaiting = true;
       agent.awaitingInput = false;
+      // Turn ended — clear the webview's permission flag too (mirrors the
+      // hook path's clear; suppressed when hooks own this agent's plane).
+      if (agent.permissionSent && !agent.hookDelivered) {
+        agents.broadcast({ type: 'agentToolPermissionClear', id: agentId });
+      }
       agent.permissionSent = false;
       agent.hadToolsInTurn = false;
       // Skip status post when hooks already handled it

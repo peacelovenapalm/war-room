@@ -43,10 +43,39 @@ describe('deriveVisualState', () => {
     expect(deriveVisualState(record({ status: 'active' }), NOW)).toBe('working');
   });
 
-  it('poll blocked is the loudest signal and beats active', () => {
+  it('poll blocked beats active when the hook plane is not provably fresher', () => {
     expect(deriveVisualState(record({ status: 'active', poll: poll('blocked') }), NOW)).toBe(
       'needs-input',
     );
+  });
+
+  it('hook-primary: an active transition NEWER than the poll snapshot outranks blocked', () => {
+    // Agent blocked (poll saw it), then resumed — the hook active landed
+    // AFTER the poll snapshot. The stale blocked must not spawn a fire.
+    const resumed = record({
+      status: 'active',
+      statusAt: NOW - 1_000,
+      poll: poll('blocked', 10_000), // snapshot is 10s old, older than statusAt
+    });
+    expect(deriveVisualState(resumed, NOW)).toBe('working');
+  });
+
+  it('hook-primary: a poll blocked NEWER than the last hook transition still wins', () => {
+    const reblocked = record({
+      status: 'active',
+      statusAt: NOW - 30_000,
+      poll: poll('blocked', 1_000), // snapshot is fresher than the hook status
+    });
+    expect(deriveVisualState(reblocked, NOW)).toBe('needs-input');
+  });
+
+  it('hook-primary: waiting status never suppresses a fresh blocked, regardless of recency', () => {
+    const waiting = record({
+      status: 'waiting',
+      statusAt: NOW - 1_000,
+      poll: poll('blocked', 10_000),
+    });
+    expect(deriveVisualState(waiting, NOW)).toBe('needs-input');
   });
 
   it('toolPermission and awaitingInput are NEEDS INPUT', () => {

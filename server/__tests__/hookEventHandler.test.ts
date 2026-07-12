@@ -204,6 +204,24 @@ describe('HookEventHandler', () => {
     expect(waitMsg?.awaitingInput).toBeFalsy();
   });
 
+  it('Stop broadcasts agentToolPermissionClear when a permission was pending (4A)', () => {
+    // Turn ended with the prompt unresolved on the wire — the webview flag
+    // must not survive into the next turn as a phantom NEEDS INPUT.
+    const agent = createTestAgent({ id: 1, permissionSent: true });
+    agents.set(1, agent);
+    handler.registerAgent('sess-1', 1);
+
+    handler.handleEvent('claude', {
+      hook_event_name: 'Stop',
+      session_id: 'sess-1',
+    });
+
+    const clearMsg = mockWebview.messages.find((m) => m.type === 'agentToolPermissionClear');
+    expect(clearMsg).toBeTruthy();
+    expect(clearMsg?.id).toBe(1);
+    expect(agent.permissionSent).toBe(false);
+  });
+
   it('Stop clears foreground tools but preserves background agents', () => {
     const agent = createTestAgent({ id: 1 });
     agent.activeToolIds.add('fg-tool');
@@ -586,6 +604,42 @@ describe('HookEventHandler', () => {
       (m) => m.type === 'agentStatus' && m.status === 'active',
     );
     expect(activeMsg).toBeTruthy();
+  });
+
+  it('PreToolUse broadcasts agentToolPermissionClear when a permission was pending (4A)', () => {
+    // The prompt was answered — the tool is actually running. Without the
+    // clear, hook-delivered agents keep toolPermission=true forever and
+    // the sprite reads NEEDS INPUT (and spawns a fire) while working.
+    const agent = createTestAgent({ id: 1, isWaiting: true, permissionSent: true });
+    agents.set(1, agent);
+    handler.registerAgent('sess-1', 1);
+
+    handler.handleEvent('claude', {
+      hook_event_name: 'PreToolUse',
+      session_id: 'sess-1',
+      tool_name: 'Bash',
+      tool_input: { command: 'npm test' },
+    });
+
+    const clearMsg = mockWebview.messages.find((m) => m.type === 'agentToolPermissionClear');
+    expect(clearMsg).toBeTruthy();
+    expect(clearMsg?.id).toBe(1);
+    expect(agent.permissionSent).toBe(false);
+  });
+
+  it('PreToolUse does NOT broadcast a clear when no permission was pending (4A)', () => {
+    const agent = createTestAgent({ id: 1, isWaiting: true });
+    agents.set(1, agent);
+    handler.registerAgent('sess-1', 1);
+
+    handler.handleEvent('claude', {
+      hook_event_name: 'PreToolUse',
+      session_id: 'sess-1',
+      tool_name: 'Bash',
+      tool_input: { command: 'npm test' },
+    });
+
+    expect(mockWebview.messages.find((m) => m.type === 'agentToolPermissionClear')).toBeUndefined();
   });
 
   it('PostToolUse sends agentToolDone and clears currentHookToolId', () => {

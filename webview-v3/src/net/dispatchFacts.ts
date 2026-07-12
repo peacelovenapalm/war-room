@@ -125,10 +125,17 @@ interface DispatchStatusSpec {
   word: string;
 }
 
-/** Colorblind rule: every tray chip is GLYPH + WORD, color reinforcement only. */
+/** Colorblind rule: every tray chip is GLYPH + WORD, color reinforcement only.
+ *
+ *  `answered` means only "a runner ACCEPTED the request" (it is set before
+ *  anything spawns) — the chip must never read as lasting success. The
+ *  word splits on the broadcast's pid: no pid yet → ACCEPTED (accepted,
+ *  not yet spawned), pid present (the runner's 'started' report) →
+ *  RUNNING. Neither gets the ✓ glyph — that stays reserved for a real
+ *  outcome. See dispatchChipLabel. */
 export const DISPATCH_STATUS_CHIPS: Record<DispatchStatusValue, DispatchStatusSpec> = {
   ringing: { glyph: '◎', word: 'RINGING' },
-  answered: { glyph: '✓', word: 'ANSWERED' },
+  answered: { glyph: '▸', word: 'ACCEPTED' },
   denied: { glyph: '⊘', word: 'DENIED' },
   expired: { glyph: '○', word: 'EXPIRED' },
   exited: { glyph: '■', word: 'EXITED' },
@@ -188,9 +195,14 @@ export function shouldAutoClear(status: DispatchStatusValue, ageMs: number): boo
 /** One line of tray chip text, e.g. "◎ RINGING", "⊘ DENIED — reason",
  *  "■ EXITED (code 0)", "✗ CAPPED (300s)", "⏸ HELD — reason". */
 export function dispatchChipLabel(
-  entry: Pick<DispatchEntry, 'status' | 'reason' | 'exitCode' | 'timeoutSec'>,
+  entry: Pick<DispatchEntry, 'status' | 'reason' | 'exitCode' | 'timeoutSec' | 'pid'>,
 ): string {
   const { glyph, word } = DISPATCH_STATUS_CHIPS[entry.status];
+  if (entry.status === 'answered' && entry.pid !== undefined) {
+    // pid arrives with the runner's 'started' report — the child is
+    // actually running, not merely accepted.
+    return `${glyph} RUNNING`;
+  }
   if (entry.status === 'denied' && entry.reason) return `${glyph} ${word} — ${entry.reason}`;
   if (entry.status === 'queued-budget' && entry.reason) return `${glyph} ${word} — ${entry.reason}`;
   if (entry.status === 'capped' && entry.timeoutSec !== undefined) {

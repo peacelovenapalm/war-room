@@ -68,6 +68,9 @@ describe('agent reducer (core generated types)', () => {
     let agents = reduceAgents(EMPTY_AGENTS, EXISTING, NOW);
     agents = reduceAgents(agents, { type: 'agentStatus', id: 1, status: 'active' }, NOW);
     expect(agents.get(1)?.status).toBe('active');
+    // 4A hook-primary: the transition is timestamped so the visual
+    // derivation can compare hook freshness against the poll snapshot.
+    expect(agents.get(1)?.statusAt).toBe(NOW);
     agents = reduceAgents(
       agents,
       { type: 'agentStatus', id: 2, status: 'waiting', awaitingInput: true },

@@ -120,6 +120,15 @@ describe('dispatchChipLabel', () => {
       '✕ KILLED',
     );
   });
+
+  it('4A status honesty: answered is ACCEPTED until a pid proves the child started', () => {
+    expect(dispatchChipLabel({ status: 'answered', reason: undefined, exitCode: undefined })).toBe(
+      '▸ ACCEPTED',
+    );
+    expect(
+      dispatchChipLabel({ status: 'answered', reason: undefined, exitCode: undefined, pid: 4242 }),
+    ).toBe('▸ RUNNING');
+  });
 });
 
 describe('upsertDispatchEntry', () => {

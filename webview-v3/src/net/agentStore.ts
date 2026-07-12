@@ -39,6 +39,10 @@ export interface AgentRecord {
   cwd?: string;
   pid?: number;
   status: 'active' | 'waiting';
+  /** Wall-clock of the last agentStatus transition — lets the visual
+   *  derivation compare hook-plane freshness against the poll snapshot
+   *  (a stale poll `blocked` must not outrank a newer hook `active`). */
+  statusAt?: number;
   awaitingInput: boolean;
   /** agentToolPermission … agentToolPermissionClear window. */
   toolPermission: boolean;
@@ -141,6 +145,7 @@ export function reduceAgents(agents: AgentMap, message: ServerMessage, now = Dat
       next.set(message.id, {
         ...existing,
         status: message.status,
+        statusAt: now,
         awaitingInput: message.awaitingInput ?? false,
       });
       return next;

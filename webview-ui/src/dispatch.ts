@@ -108,7 +108,9 @@ export interface DispatchStatusSpec {
 /** Colorblind rule: every tray chip is GLYPH + WORD, color reinforcement only. */
 export const DISPATCH_STATUS_CHIPS: Record<DispatchStatusValue, DispatchStatusSpec> = {
   ringing: { glyph: '◎', word: 'RINGING' },
-  answered: { glyph: '✓', word: 'ANSWERED' },
+  // `answered` = "a runner accepted", set BEFORE anything spawns — never a
+  // ✓-success chip. pid present (runner's 'started' report) → RUNNING.
+  answered: { glyph: '▸', word: 'ACCEPTED' },
   denied: { glyph: '⊘', word: 'DENIED' },
   expired: { glyph: '○', word: 'EXPIRED' },
   exited: { glyph: '■', word: 'EXITED' },
@@ -156,9 +158,12 @@ export function shouldAutoClear(status: DispatchStatusValue, ageMs: number): boo
 /** One line of tray chip text, e.g. "◎ RINGING", "⊘ DENIED — path-not-allowlisted",
  *  "■ EXITED (code 0)". */
 export function dispatchChipLabel(
-  entry: Pick<DispatchEntry, 'status' | 'reason' | 'exitCode'>,
+  entry: Pick<DispatchEntry, 'status' | 'reason' | 'exitCode' | 'pid'>,
 ): string {
   const { glyph, word } = DISPATCH_STATUS_CHIPS[entry.status];
+  if (entry.status === 'answered' && entry.pid !== undefined) {
+    return `${glyph} RUNNING`;
+  }
   if (entry.status === 'denied' && entry.reason) {
     return `${glyph} ${word} — ${entry.reason}`;
   }

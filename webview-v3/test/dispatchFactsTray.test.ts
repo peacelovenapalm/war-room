@@ -36,6 +36,18 @@ describe('dispatchChipLabel', () => {
     expect(dispatchChipLabel(entry({ status: 'exited', exitCode: 0 }))).toBe('■ EXITED (code 0)');
   });
 
+  it('4A status honesty: answered is ACCEPTED until a pid proves the child started', () => {
+    // 'answered' = the runner ACCEPTED, set before anything spawns — never
+    // a ✓-success chip (a launch that then fails would have read as done).
+    expect(dispatchChipLabel(entry({ status: 'answered' }))).toBe('▸ ACCEPTED');
+    expect(dispatchChipLabel(entry({ status: 'answered', pid: 4242 }))).toBe('▸ RUNNING');
+  });
+
+  it('4A status honesty: the ✓ glyph is reserved for real terminal outcomes', () => {
+    expect(dispatchChipLabel(entry({ status: 'answered' }))).not.toContain('✓');
+    expect(dispatchChipLabel(entry({ status: 'answered', pid: 4242 }))).not.toContain('✓');
+  });
+
   it('T5 fleet controls: capped renders the cap duration; queued-budget renders its held reason', () => {
     expect(dispatchChipLabel(entry({ status: 'capped', timeoutSec: 300 }))).toBe('✗ CAPPED (300s)');
     expect(dispatchChipLabel(entry({ status: 'capped' }))).toBe('✗ CAPPED'); // no timeoutSec echo — never fabricate a duration

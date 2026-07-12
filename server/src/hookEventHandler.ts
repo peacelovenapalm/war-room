@@ -501,6 +501,13 @@ export class HookEventHandler {
     cancelWaitingTimer(agentId, this.waitingTimers);
     agent.isWaiting = false;
     agent.awaitingInput = false;
+    // A tool actually running means any permission prompt was answered —
+    // broadcast the clear, or the webview's toolPermission flag sticks
+    // forever on hook-delivered agents (fileWatcher's clear is skipped for
+    // them) and the sprite reads NEEDS INPUT while visibly working.
+    if (agent.permissionSent) {
+      this.agents.broadcast({ type: 'agentToolPermissionClear', id: agentId });
+    }
     agent.permissionSent = false;
     agent.hadToolsInTurn = true;
 
@@ -888,6 +895,12 @@ export class HookEventHandler {
 
     agent.isWaiting = true;
     agent.awaitingInput = awaitingInput;
+    // Turn ended — a permission prompt from this turn is over either way;
+    // clear the webview flag (it survives forever otherwise, see
+    // handlePreToolUse's matching clear).
+    if (agent.permissionSent) {
+      this.agents.broadcast({ type: 'agentToolPermissionClear', id: agentId });
+    }
     agent.permissionSent = false;
     agent.hadToolsInTurn = false;
     agent.currentHookToolId = undefined;

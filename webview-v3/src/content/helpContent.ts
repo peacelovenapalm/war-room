@@ -172,7 +172,8 @@ export const HELP_SECTIONS: HelpSection[] = [
       'Opens from the ☎ phone prop or the dock. Machine/provider/project choices come ONLY from live runner advertisements (GET /api/dispatch/machines) — a machine with no runner is honestly absent, never a dead dropdown entry.',
     entries: [
       { glyph: '◎', word: 'RINGING', text: 'Sent, waiting on the runner to pick it up.' },
-      { glyph: '✓', word: 'ANSWERED', text: 'The runner accepted and is starting the session.' },
+      { glyph: '▸', word: 'ACCEPTED', text: 'The runner accepted — nothing has spawned yet.' },
+      { glyph: '▸', word: 'RUNNING', text: 'The child process actually started (pid reported).' },
       {
         glyph: '⊘',
         word: 'DENIED',

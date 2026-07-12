@@ -56,17 +56,27 @@ export function freshPoll(
 /**
  * Derive the chip state from the record's verbatim telemetry.
  *
- * needs-input = poll `blocked` (loudest, always wins) OR a pending tool
- * permission OR the hook plane's awaitingInput. failed/stopped only ever
- * come from the poller. An `active` status is WORKING; a fresh poll
- * working/done lifts an otherwise-WAITING agent (hooks-silent remotes).
+ * needs-input = poll `blocked` OR a pending tool permission OR the hook
+ * plane's awaitingInput — BUT the hook plane is primary: a poll `blocked`
+ * snapshot only wins when it is NEWER than the record's last hook status
+ * transition. The poller samples every ~15s and a snapshot stays "fresh"
+ * for 60s, so an agent that blocked and then resumed (hook `active`)
+ * otherwise reads NEEDS INPUT — and spawns a fire — for up to a minute
+ * while visibly working. failed/stopped only ever come from the poller.
+ * An `active` status is WORKING; a fresh poll working/done lifts an
+ * otherwise-WAITING agent (hooks-silent remotes).
  */
 export function deriveVisualState(
-  record: Pick<AgentRecord, 'status' | 'awaitingInput' | 'toolPermission' | 'poll'>,
+  record: Pick<AgentRecord, 'status' | 'statusAt' | 'awaitingInput' | 'toolPermission' | 'poll'>,
   now: number,
 ): AgentVisualState {
   const poll = freshPoll(record, now);
-  if (poll?.state === 'blocked') return AgentVisualState.NEEDS_INPUT;
+  const hookOutranksPoll =
+    record.status === 'active' &&
+    record.statusAt !== undefined &&
+    poll !== undefined &&
+    record.statusAt > poll.receivedAt;
+  if (poll?.state === 'blocked' && !hookOutranksPoll) return AgentVisualState.NEEDS_INPUT;
   if (record.toolPermission || record.awaitingInput) return AgentVisualState.NEEDS_INPUT;
   if (poll?.state === 'failed') return AgentVisualState.FAILED;
   if (poll?.state === 'stopped') return AgentVisualState.STOPPED;
