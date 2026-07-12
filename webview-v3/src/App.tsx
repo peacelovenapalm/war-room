@@ -15,6 +15,7 @@ import { FloorFeed } from './components/FloorFeed';
 import { GraphSearchPanel } from './components/GraphSearchPanel';
 import { HelpModal } from './components/HelpModal';
 import { HudStrip, type ViewMode } from './components/HudStrip';
+import { InboxPanel } from './components/InboxPanel';
 import { OpsReviewPanel } from './components/OpsReviewPanel';
 import { type DockPanelKind, PanelDock } from './components/PanelDock';
 import { PinDock } from './components/PinDock';
@@ -1047,6 +1048,7 @@ export default function App() {
         sendFailures={sendFailures}
       />
       <GraphSearchPanel isOpen={openPanel === 'graph-search'} onClose={closePanel} />
+      <InboxPanel isOpen={openPanel === 'inbox'} onClose={closePanel} />
 
       {viewingResult && (
         <div className="modal-backdrop" onClick={() => setViewingResult(null)}>

@@ -1314,6 +1314,76 @@ body,
   padding-left: 8px;
 }
 
+/* ── Inbox panel (v4 T7 slice 2) ────────────────────────────────────── */
+
+.inbox__list {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.inbox__entry {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 5px 0;
+  border-bottom: 1px solid #232936;
+  background: none;
+  border-left: none;
+  border-right: none;
+  border-top: none;
+  text-align: left;
+  cursor: pointer;
+  color: inherit;
+  font: inherit;
+  width: 100%;
+}
+
+.inbox__entry-glyph {
+  flex-shrink: 0;
+}
+
+.inbox__entry-main {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.inbox__entry-routine {
+  font-weight: 700;
+}
+
+.inbox__entry-age {
+  flex-shrink: 0;
+  font-variant-numeric: tabular-nums;
+}
+
+.inbox__content {
+  margin-top: 8px;
+  padding-top: 8px;
+  border-top: 1px solid #232936;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.inbox__content-head {
+  font-size: 11px;
+  font-weight: 700;
+  opacity: 0.7;
+}
+
+.inbox__content-body {
+  max-height: 40vh;
+  overflow-y: auto;
+  white-space: pre-wrap;
+  word-break: break-word;
+  font: inherit;
+  margin: 0;
+}
+
 /* ── Shift panel ────────────────────────────────────────────────────── */
 
 .shift-rows {
@@ -1349,6 +1419,44 @@ body,
   font-weight: 700;
   opacity: 0.7;
   margin-bottom: 3px;
+}
+
+.shift-morning {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  padding-bottom: 8px;
+  margin-bottom: 8px;
+  border-bottom: 1px solid #232936;
+}
+
+.shift-morning__title {
+  margin: 0;
+  font-size: 12px;
+  font-weight: 700;
+  letter-spacing: 0.04em;
+}
+
+.shift-morning__block {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.shift-morning__label {
+  font-size: 10px;
+  font-weight: 700;
+  opacity: 0.6;
+  letter-spacing: 0.05em;
+}
+
+.shift-morning__todo-list {
+  list-style: decimal;
+  padding-left: 18px;
+  margin: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
 }
 
 /* ── Signal chip (contracts, real/sim distinction) ─────────────────── */

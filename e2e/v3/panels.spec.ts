@@ -49,6 +49,22 @@ const REST_JSON: Record<string, unknown> = {
       milestone: 'v3',
       gates: [{ id: 'g1', label: 'stage-3', status: 'IN_PROGRESS', done: 2, total: 5 }],
     },
+    // v4 T7 "SHIFT absorbs morning" — the digest fold consumed by the
+    // panel's MORNING section (ShiftPanel.tsx).
+    digest: {
+      date: '2026-07-10',
+      flagsSummary: 'vault-health: 2 issues · project-pulse: 1 flagged',
+      topStandingFlags: ['oldest-flag — open 10d (project-pulse)'],
+    },
+    generatedAt: '2026-07-10T00:00:00Z',
+  },
+  // v4 T7 routine inbox tray — newest-first fixture across two routines.
+  '/api/inbox': {
+    available: true,
+    entries: [
+      { routine: 'summary', filename: '2026-07-10-digest.md', mtimeMs: 0, ageMs: 3_600_000 },
+      { routine: 'todo', filename: '2026-07-10.md', mtimeMs: 0, ageMs: 7_200_000 },
+    ],
     generatedAt: '2026-07-10T00:00:00Z',
   },
   '/api/shift': {
@@ -229,6 +245,9 @@ async function serveV3Dist(
      *  regardless of query string, so a single test can exercise the
      *  NO-GRAPH honest state or a matches+resolved payload. */
     graphSearchOverride?: unknown;
+    /** INBOX (v4 T7 slice 2) — overrides REST_JSON's default GET
+     *  /api/inbox fixture, e.g. the honest available:false state. */
+    inboxOverride?: unknown;
   } = {},
 ): Promise<StaticHost> {
   if (!fs.existsSync(path.join(V3_DIST, 'index.html'))) {
@@ -241,6 +260,20 @@ async function serveV3Dist(
   const answerRequestId = 'answer-req-1';
   const server = http.createServer((req, res) => {
     const requestPath = decodeURIComponent((req.url ?? '/').split('?')[0]);
+    const requestQuery = new URLSearchParams((req.url ?? '').split('?')[1] ?? '');
+
+    // v4 T7 routine inbox tray — the one fixture entry the panel opens by
+    // default (routine=summary, file=2026-07-10-digest.md, per
+    // REST_JSON['/api/inbox']'s newest fixture row above).
+    if (
+      requestPath === '/api/inbox/content' &&
+      requestQuery.get('routine') === 'summary' &&
+      requestQuery.get('file') === '2026-07-10-digest.md'
+    ) {
+      res.writeHead(200, { 'Content-Type': 'application/json' });
+      res.end(JSON.stringify({ content: '# Daily digest — 2026-07-10\n\nsome digest body\n' }));
+      return;
+    }
 
     if (requestPath === '/api/automation/stop-all' && req.method === 'POST') {
       if (options.stopAllFails) {
@@ -311,6 +344,11 @@ async function serveV3Dist(
     if (requestPath === '/api/graph/search' && options.graphSearchOverride !== undefined) {
       res.writeHead(200, { 'Content-Type': 'application/json' });
       res.end(JSON.stringify(options.graphSearchOverride));
+      return;
+    }
+    if (requestPath === '/api/inbox' && options.inboxOverride !== undefined) {
+      res.writeHead(200, { 'Content-Type': 'application/json' });
+      res.end(JSON.stringify(options.inboxOverride));
       return;
     }
     if (requestPath === '/api/ops/auto' && options.autoStatusOverride !== undefined) {
@@ -462,6 +500,7 @@ test.describe('stage-3 panel ports (desktop chrome model)', () => {
         'briefing',
         'ops',
         'graph-search',
+        'inbox',
         'settings',
         'debug',
         'help',
@@ -506,6 +545,12 @@ test.describe('stage-3 panel ports (desktop chrome model)', () => {
       // T3 rung 3: SHIFT fold's honest auto-action count — zero on this
       // fixture's shipped-empty whitelist.
       await expect(page.getByTestId('shift-auto-line')).toContainText('0 auto-actions today');
+      // v4 T7 "SHIFT absorbs morning": the MORNING fold's digest summary +
+      // todo top-3, both sourced from the same GET /api/briefing fixture.
+      await expect(page.getByTestId('shift-morning-digest')).toContainText(
+        'vault-health: 2 issues · project-pulse: 1 flagged',
+      );
+      await expect(page.getByTestId('shift-morning-todo')).toContainText('ship the panel ports');
       await page.getByTestId('modal-close').click();
 
       // OPS REVIEW (T3 self-healing ladder, rung 1): real /api/ops/review
@@ -532,6 +577,18 @@ test.describe('stage-3 panel ports (desktop chrome model)', () => {
       await page.getByTestId('dock-briefing').click();
       await expect(page.getByTestId('briefing-panel')).toContainText('ship the panel ports');
       await expect(page.getByTestId('briefing-panel')).toContainText('stage-3');
+      await page.getByTestId('modal-close').click();
+
+      // INBOX (v4 T7 slice 2): newest-first routine list, one-tap open
+      // renders the real markdown body inline.
+      await page.getByTestId('dock-inbox').click();
+      await expect(page.getByTestId('inbox-panel')).toBeVisible();
+      const entries = page.getByTestId('inbox-entry');
+      await expect(entries).toHaveCount(2);
+      await expect(entries.first()).toContainText('summary');
+      await expect(entries.first()).toContainText('2026-07-10-digest.md');
+      await entries.first().click();
+      await expect(page.getByTestId('inbox-content')).toContainText('some digest body');
       await page.getByTestId('modal-close').click();
 
       // CONTRACTS: real /api/contracts row + honest DISPATCH bridge into CALL.
@@ -1325,6 +1382,28 @@ test.describe('stage-3 panel ports (desktop chrome model)', () => {
       // Tapping the match row re-queries with the exact id.
       await match.click();
       await expect(page.getByTestId('graph-search-input')).toHaveValue('note-ops-review');
+    } finally {
+      await context.close();
+      await host.close();
+    }
+  });
+
+  test('INBOX: routines mount absent renders the honest NO INBOX SOURCE line, never an empty-but-plausible list', async ({
+    browser,
+  }) => {
+    const host = await serveV3Dist({ inboxOverride: { available: false, entries: [] } });
+    const context = await browser.newContext({ viewport: VIEWPORT });
+    try {
+      const page = await context.newPage();
+      await page.goto(`${host.url}/`);
+      await expect(page.getByTestId('hud-connection')).toHaveText('● LIVE', { timeout: 20_000 });
+
+      await page.getByTestId('dock-inbox').click();
+      await expect(page.getByTestId('inbox-panel')).toBeVisible();
+      await expect(page.getByTestId('inbox-unavailable')).toContainText(
+        '⊘ NO INBOX SOURCE — routines mount not present on this deployment',
+      );
+      await expect(page.getByTestId('inbox-list')).toHaveCount(0);
     } finally {
       await context.close();
       await host.close();

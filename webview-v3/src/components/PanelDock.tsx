@@ -8,7 +8,8 @@ export type DockPanelKind =
   | 'shift'
   | 'briefing'
   | 'ops'
-  | 'graph-search';
+  | 'graph-search'
+  | 'inbox';
 
 export interface PanelDockProps {
   onOpen: (kind: DockPanelKind) => void;
@@ -34,6 +35,7 @@ const ENTRIES: DockEntry[] = [
   { kind: 'briefing', glyph: '▥', label: 'BRIEFING' },
   { kind: 'ops', glyph: '◈', label: 'OPS REVIEW' },
   { kind: 'graph-search', glyph: '⌕', label: 'SEARCH' },
+  { kind: 'inbox', glyph: '✉', label: 'INBOX' },
   { kind: 'settings', glyph: '⚙', label: 'SETTINGS' },
   { kind: 'debug', glyph: '⌗', label: 'DEBUG' },
   { kind: 'help', glyph: '?', label: 'HELP' },
