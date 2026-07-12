@@ -74,6 +74,7 @@ import { renderTranscriptLine } from './transcriptOutputTap.js';
 import { applyTokenUsage, isRecentEnoughForShiftSpend } from './transcriptParser.js';
 import type { AgentState } from './types.js';
 import { v3StoreEnabled } from './v3Flags.js';
+import { getWiringSnapshot } from './wiringProvider.js';
 import { worldEventStore } from './worldEventStore.js';
 
 /** Options for creating the HTTP + WebSocket server. */
@@ -163,6 +164,7 @@ export async function createHttpServer(options: HttpServerOptions): Promise<Http
   registerHealthRoute(app);
   registerBriefingRoute(app, options);
   registerInboxRoutes(app);
+  registerWiringRoute(app);
   registerHookRoute(app, options);
   registerPollRoute(app, options);
   registerAgentOutputRoute(app, options);
@@ -510,6 +512,17 @@ function registerInboxRoutes(app: FastifyInstance): void {
       return { error: result.reason };
     },
   );
+}
+
+// ── WIRING auto-detect (v4 T7 slice 3) ──────────────────────────
+
+/** GET /api/wiring -- unauthenticated, same tailnet-read tier as
+ *  /api/briefing. Reads wiringProvider.ts's cached scan (WAR_ROOM_WIRING_
+ *  ROOTS env-configured, zero per-project listing needed). See WIRING.md
+ *  at the repo root for the full ingest-path documentation this endpoint
+ *  is one half of. */
+function registerWiringRoute(app: FastifyInstance): void {
+  app.get('/api/wiring', async () => getWiringSnapshot());
 }
 
 // ── Hook Events ────────────────────────────────────────────────
