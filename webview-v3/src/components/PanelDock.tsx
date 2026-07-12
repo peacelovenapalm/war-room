@@ -1,16 +1,6 @@
-export type DockPanelKind =
-  | 'help'
-  | 'settings'
-  | 'debug'
-  | 'call'
-  | 'automation'
-  | 'contracts'
-  | 'shift'
-  | 'briefing'
-  | 'ops'
-  | 'graph-search'
-  | 'districts'
-  | 'inbox';
+import type { DockPanelKind } from '../state/dockPanelKind';
+
+export type { DockPanelKind } from '../state/dockPanelKind';
 
 export interface PanelDockProps {
   onOpen: (kind: DockPanelKind) => void;

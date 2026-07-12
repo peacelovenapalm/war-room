@@ -1,15 +1,15 @@
 import { describe, expect, it } from 'vitest';
 
 import {
-  COMPUTE_MAX_ARGS_CEILING,
-  parseComputeArgs,
   applySkillPrefix,
   buildCopyIdLine,
   canKillAgent,
+  COMPUTE_MAX_ARGS_CEILING,
   DISPATCH_PERMISSION_MODE_OPTIONS,
   type DispatchMachine,
   machineHasLiveRunner,
   machineSupportsSessions,
+  parseComputeArgs,
 } from '../src/net/dispatchFacts';
 
 const MACHINES: DispatchMachine[] = [
