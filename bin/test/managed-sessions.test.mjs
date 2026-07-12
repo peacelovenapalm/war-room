@@ -315,7 +315,8 @@ function baseCfg(port, overrides = {}) {
 }
 
 function freshState() {
-  return { handled: new Set(), children: new Map(), consumedNonces: new Set() };
+  // C9-4: consumedNonces is now a Map<nonce, consumedAtMs> (TTL-bounded).
+  return { handled: new Set(), children: new Map(), consumedNonces: new Map() };
 }
 
 /** Poll until `cond()` is true (or ~1s passes) — for fire-and-forget POSTs. */

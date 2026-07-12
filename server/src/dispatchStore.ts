@@ -432,6 +432,16 @@ export const ANSWER_TTL_MS = DISPATCH_TTL_MS;
 /** Receipts kept per machine (in-memory ring; the audit JSONL is the
  *  unbounded durable record). */
 const ANSWER_RECEIPTS_MAX = 50;
+/** C9-4: how long a TERMINAL (delivered/denied) answer record is retained in
+ *  the in-memory answerRequests Map before sweepExpiredAnswers() deletes it.
+ *  Before this, the Map only ever grew — sweepExpiredAnswers flipped pending
+ *  records to denied but never removed anything, so a long-lived server
+ *  accumulated one entry per answer forever. The audit JSONL remains the
+ *  unbounded DURABLE record; this Map is a live-lookup cache the drawer polls
+ *  (getAnswerStatus/getAnswerReceipts), which only needs recent records. A
+ *  terminal record older than this is past any realistic drawer poll window
+ *  (the same 10-min horizon everything else here uses). */
+export const ANSWER_RECORD_RETENTION_MS = ANSWER_TTL_MS;
 
 /** Control characters are rejected server-side too (the runner re-checks) —
  *  Enter is delivered separately by the runner, never embedded. */
@@ -617,6 +627,29 @@ export class DispatchStore {
       // action === 'focus'
       if (!input.sessionId && !input.pid) {
         return { ok: false, reason: 'missing-focus-target' };
+      }
+      // C8-5: server-side focus capability gate. A focus request against a
+      // machine whose CURRENT (live, TTL-fresh) advertisement is focus:false —
+      // or a machine with no live advertisement at all — can never be honored
+      // by the runner, so reject it here rather than ringing a plane the
+      // runner will never front. Uses the SAME TTL filter as getMachines() so
+      // a silent runner is honestly "no focus plane", not stale-trusted. The
+      // rejection is audited as a receipt (mirrors decide()'s
+      // 'decision-unknown-id' synthetic-record audit pattern).
+      const liveAd = this.getMachines(now).find((m) => m.machine === input.machine);
+      if (!liveAd || !liveAd.focus) {
+        this.audit('focus-rejected', {
+          id: randomUUID(),
+          action: 'focus',
+          machine: input.machine,
+          sessionId: input.sessionId,
+          pid: input.pid,
+          status: 'denied',
+          reason: liveAd ? 'focus-not-supported' : 'no-live-machine',
+          createdAt: now,
+          updatedAt: now,
+        } as DispatchRecord);
+        return { ok: false, reason: 'focus-not-supported' };
       }
     }
 
@@ -907,6 +940,17 @@ export class DispatchStore {
     pid: number,
     text: string,
     now: number = Date.now(),
+    // C8-6: optional stable start-identifier the board observed for the target
+    // process. When supplied, the resolved managed session's start time (its
+    // advertised `createdAt` — the runner sets it at session creation, so it
+    // IS the process/session start time, never reused across a pid-reuse
+    // boundary) MUST match, else the request is denied. This closes the
+    // pid-reuse hole: a recycled pid now maps to a DIFFERENT session whose
+    // start time won't match the stale one the operator was looking at, so a
+    // forged/stale identifier can never deliver an answer to the wrong agent.
+    // Omitted = legacy pid-only match (unchanged), for callers that can't yet
+    // observe a start time.
+    expectedStartTime?: number,
   ): { ok: true; id: string } | { ok: false; reason: string } {
     if (typeof machine !== 'string' || machine.trim() === '') {
       return { ok: false, reason: 'missing-machine' };
@@ -926,6 +970,14 @@ export class DispatchStore {
     const managed = this.getManagedFor(machine, now).find((s) => s.panePid === pid);
     if (!managed) {
       return { ok: false, reason: 'not-managed' };
+    }
+    // C8-6: pid-reuse guard. When the caller presented a start identifier,
+    // require it to agree with the resolved session's advertised start time.
+    // A session that can't prove its start time (legacy runner, no createdAt)
+    // is unverifiable — deny fail-closed rather than trust a bare pid the
+    // caller explicitly asked us to double-check.
+    if (expectedStartTime !== undefined && managed.createdAt !== expectedStartTime) {
+      return { ok: false, reason: 'stale-target' };
     }
     const record: AnswerRecord = {
       id: randomUUID(),
@@ -1017,15 +1069,30 @@ export class DispatchStore {
   /** Sweep pending answers past the TTL to a terminal denied/'expired' —
    *  the board must never render DELIVERING… forever for a vanished
    *  runner. Piggybacked on the dispatch sweep timer. */
-  sweepExpiredAnswers(now: number = Date.now(), ttlMs: number = ANSWER_TTL_MS): number {
+  sweepExpiredAnswers(
+    now: number = Date.now(),
+    ttlMs: number = ANSWER_TTL_MS,
+    retentionMs: number = ANSWER_RECORD_RETENTION_MS,
+  ): number {
     let count = 0;
-    for (const record of this.answerRequests.values()) {
+    for (const [id, record] of this.answerRequests) {
       if (record.status === 'pending' && now - record.createdAt > ttlMs) {
         record.status = 'denied';
         record.reason = 'expired';
         record.updatedAt = now;
         this.auditAnswer('answer-expired', record);
         count++;
+        continue;
+      }
+      // C9-4: prune TERMINAL records past the retention window so the in-memory
+      // Map stays bounded (the audit JSONL keeps the durable receipt). A record
+      // just flipped to denied above is skipped this pass (updatedAt === now)
+      // and pruned on a later sweep. Safe to delete mid-iteration on a Map.
+      if (
+        (record.status === 'delivered' || record.status === 'denied') &&
+        now - record.updatedAt > retentionMs
+      ) {
+        this.answerRequests.delete(id);
       }
     }
     return count;

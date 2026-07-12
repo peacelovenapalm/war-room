@@ -27,6 +27,7 @@ import {
   requestKill,
 } from '../net/killAgent';
 import { buildFocusMessage } from '../net/opsProposals';
+import { blockedAgeAnchor } from '../state/blockedAge';
 import { formatAge } from '../state/crisis';
 import type { CrisisState } from '../state/crisisStore';
 import { compactTokens } from '../state/hud';
@@ -254,7 +255,11 @@ export function AgentDrawer({
 
   const chip = STATE_CHIPS[deriveVisualState(record, now)];
   const poll = freshPoll(record, now);
-  const since = crisis.fires.get(agentId)?.since ?? poll?.since;
+  // C9-3: BLOCKED AGE anchors ONLY to the needs-input fire's onset — never a
+  // fall-back to poll?.since, which is the CURRENT poll snapshot's age (not a
+  // blocked age) and made non-blocked agents show a stale, ever-growing
+  // duration. A non-blocked agent has no fire → "—".
+  const since = blockedAgeAnchor(crisis.fires.get(agentId));
   const blockedAge = since !== undefined ? formatAge(now - since) : '—';
   const pid = record.pid;
   const canKill = canKillAgent(pid, machines, record.machine);

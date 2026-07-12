@@ -54,6 +54,18 @@ export function stoppedFromOrders(orders: Array<{ stoppedByKillSwitch?: boolean 
   return orders.some((order) => order.stoppedByKillSwitch === true);
 }
 
+/** C9-1: durable-latch hydration — GET /api/automation/stop-all-state returns
+ *  `{ engaged }`, the server's persisted STOP-ALL record. This is the anchor
+ *  that closes stoppedFromOrders' chain-only-halt gap: a STOP ALL that halted
+ *  zero standing orders still sets the latch, so a fresh mount reads stopped.
+ *  Anything but an explicit `engaged: true` is NOT stopped (a missing/garbled
+ *  body must never fabricate a halt). */
+export function stoppedFromLatch(body: unknown): boolean {
+  return (
+    typeof body === 'object' && body !== null && (body as { engaged?: unknown }).engaged === true
+  );
+}
+
 /** WS reducer: `automationStopped` latches stopped for every client. */
 export function reduceAutomationStopped(prev: boolean, message: ServerMessage): boolean {
   if (message.type === 'automationStopped') return true;

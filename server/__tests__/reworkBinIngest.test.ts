@@ -136,6 +136,8 @@ describe('DispatchStore.getRedispatchInput', () => {
       permissionMode: undefined,
     });
 
+    // C8-5: focus now requires a live focus:true advertisement.
+    store.recordAdvertisement('TESTMACH', { providers: ['claude'], roots: ['/repo'], focus: true });
     const focus = store.enqueue({ action: 'focus', machine: 'TESTMACH', sessionId: 'sess-1' });
     if (!focus.ok) throw new Error('focus enqueue failed');
     expect(store.getRedispatchInput(focus.record.id)).toBeUndefined();

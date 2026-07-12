@@ -97,6 +97,8 @@ describe('DispatchStore.enqueue', () => {
 
   it('enqueues a valid focus request identified by sessionId', () => {
     const s = new DispatchStore(statePath, auditPath);
+    // C8-5: focus now requires a live focus:true advertisement for the target.
+    s.recordAdvertisement('MACBOOK', { providers: ['claude'], roots: ['/x'], focus: true });
     const result = s.enqueue({ action: 'focus', machine: 'MACBOOK', sessionId: 'sess-1' });
     expect(result.ok).toBe(true);
   });
@@ -839,5 +841,44 @@ describe('DispatchStore audit log', () => {
     s.decide('ghost-id', 'deny', { reason: 'unknown' });
     const lines = readAuditLines();
     expect(lines[0].event).toBe('decision-unknown-id');
+  });
+});
+
+describe('DispatchStore.enqueue focus capability gate (C8-5)', () => {
+  it('rejects a focus request against a machine advertised focus:false + audits the receipt', () => {
+    const s = new DispatchStore(statePath, auditPath);
+    const now = 1000;
+    s.recordAdvertisement('MINI', { providers: ['claude'], roots: ['/x'], focus: false }, now);
+    const res = s.enqueue({ action: 'focus', machine: 'MINI', pid: 999 }, now);
+    expect(res).toEqual({ ok: false, reason: 'focus-not-supported' });
+    const rejection = readAuditLines().find((l) => l.event === 'focus-rejected');
+    expect(rejection).toBeTruthy();
+    expect(rejection?.reason).toBe('focus-not-supported');
+    expect(rejection?.machine).toBe('MINI');
+  });
+
+  it('rejects a focus request against a machine with NO live advertisement', () => {
+    const s = new DispatchStore(statePath, auditPath);
+    const res = s.enqueue({ action: 'focus', machine: 'GHOST', pid: 999 });
+    expect(res).toEqual({ ok: false, reason: 'focus-not-supported' });
+    const rejection = readAuditLines().find((l) => l.event === 'focus-rejected');
+    expect(rejection?.reason).toBe('no-live-machine');
+  });
+
+  it('rejects when the machine advertised focus:true but the ad is now stale (TTL)', () => {
+    const s = new DispatchStore(statePath, auditPath);
+    const t0 = 1000;
+    s.recordAdvertisement('MACBOOK', { providers: ['claude'], roots: ['/x'], focus: true }, t0);
+    // Past DISPATCH_MACHINE_AD_TTL_MS (30s) — the focus plane is honestly gone.
+    const res = s.enqueue({ action: 'focus', machine: 'MACBOOK', pid: 7 }, t0 + 60_000);
+    expect(res).toEqual({ ok: false, reason: 'focus-not-supported' });
+  });
+
+  it('accepts a focus request against a machine advertised focus:true (live)', () => {
+    const s = new DispatchStore(statePath, auditPath);
+    const now = 1000;
+    s.recordAdvertisement('MACBOOK', { providers: ['claude'], roots: ['/x'], focus: true }, now);
+    const res = s.enqueue({ action: 'focus', machine: 'MACBOOK', pid: 7 }, now);
+    expect(res.ok).toBe(true);
   });
 });

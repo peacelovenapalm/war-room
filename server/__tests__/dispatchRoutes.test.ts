@@ -472,6 +472,13 @@ describe('dispatch WebSocket broadcast + replay', () => {
   it('replays a still-ringing entry to a freshly connected client', async () => {
     const config = await server.start({ embedded: false, store: new AgentStateStore() });
     const machine = uniqueMachine('MINI');
+    // C8-5: focus now requires a live focus:true advertisement for the target.
+    const { dispatchStore } = await import('../src/dispatchStore.js');
+    dispatchStore.recordAdvertisement(machine, {
+      providers: ['claude'],
+      roots: ['/x'],
+      focus: true,
+    });
 
     const firstClient = new WebSocket(`ws://127.0.0.1:${config.port}/ws`);
     await new Promise((resolve) => firstClient.addEventListener('open', resolve, { once: true }));

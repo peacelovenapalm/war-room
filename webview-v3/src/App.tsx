@@ -114,7 +114,7 @@ import {
   pruneSpeechBubbles,
   type SpeechBubbleEvent,
 } from './state/speechBubbles';
-import { reduceAutomationStopped, stoppedFromOrders } from './state/stopAll';
+import { reduceAutomationStopped, stoppedFromLatch, stoppedFromOrders } from './state/stopAll';
 import {
   appendChunk,
   dropStream,
@@ -813,6 +813,13 @@ export default function App() {
   // record of a halt awaiting RESUME. A fetch failure (or a chain-only halt
   // — state/stopAll.ts header) hydrates not-stopped: showing STOP ALL when
   // already stopped is a harmless idempotent re-halt, the safe direction.
+  //
+  // C9-1: the standing-orders check alone misses a STOP ALL that halted ZERO
+  // standing orders (chain-only halt) — that's exactly the gap the durable
+  // server latch (stopAllLatch.ts, GET /api/automation/stop-all-state) closes.
+  // Both fetches run independently; either one finding "stopped" wins (OR),
+  // so a fresh page load reflects the true server state regardless of which
+  // signal carries it.
   useEffect(() => {
     let cancelled = false;
     void fetch('/api/standing-orders')
@@ -822,6 +829,13 @@ export default function App() {
         if (stoppedFromOrders(orders as { stoppedByKillSwitch?: boolean }[])) {
           setAutomationStopped(true);
         }
+      })
+      .catch(() => undefined);
+    void fetch('/api/automation/stop-all-state')
+      .then(async (res) => (res.ok ? ((await res.json()) as unknown) : null))
+      .then((body) => {
+        if (cancelled) return;
+        if (stoppedFromLatch(body)) setAutomationStopped(true);
       })
       .catch(() => undefined);
     return () => {

@@ -225,6 +225,72 @@ describe('DispatchStore: managed advertisement + answer plane', () => {
     expect(receipts[0].managedSessionRef).toBe('sess-1');
     expect(store.getAnswerReceipts('M1', 'other-ref')).toHaveLength(0);
   });
+
+  it('C8-6: a forged start-identifier for a recycled pid is DENIED (pid-reuse guard)', () => {
+    const store = new DispatchStore();
+    // Session A occupied pid 4242 with start time T1.
+    const T1 = 1_000_000;
+    const T2 = 2_000_000;
+    store.recordManagedSessions('M1', [
+      { dispatchId: 'sess-A', tmuxSession: 'war-room-sess-A', panePid: 4242, createdAt: T1 },
+    ]);
+    // The operator holds a stale identifier (T2, e.g. from a later session
+    // that recycled the pid) — targeting pid 4242 with the wrong start time is
+    // denied, never delivered.
+    expect(store.requestAnswer('M1', 4242, 'to the wrong agent', Date.now(), T2)).toEqual({
+      ok: false,
+      reason: 'stale-target',
+    });
+    // The matching identifier (T1) is accepted.
+    const ok = store.requestAnswer('M1', 4242, 'to the right agent', Date.now(), T1);
+    expect(ok.ok).toBe(true);
+    // No identifier supplied = legacy pid-only match still works (back-compat).
+    const legacy = store.requestAnswer('M1', 4242, 'legacy path');
+    expect(legacy.ok).toBe(true);
+  });
+
+  it('C8-6: an identifier presented against a session with no advertised start time is denied', () => {
+    const store = new DispatchStore();
+    store.recordManagedSessions('M1', [
+      // Legacy runner: no createdAt advertised (unverifiable start time).
+      { dispatchId: 'sess-L', tmuxSession: 'war-room-sess-L', panePid: 4242 },
+    ]);
+    expect(store.requestAnswer('M1', 4242, 'demand proof', Date.now(), 12345)).toEqual({
+      ok: false,
+      reason: 'stale-target',
+    });
+  });
+
+  it('C9-4: answerRequests Map stays bounded — terminal records prune past retention', () => {
+    const store = new DispatchStore();
+    const t0 = 1_000_000;
+    // Advertise 300 managed sessions (one per pid) and answer + terminalize
+    // each — a naive Map would hold all 300 forever.
+    const N = 300;
+    const ads = [];
+    for (let i = 0; i < N; i++) {
+      ads.push({
+        dispatchId: `sess-${i}`,
+        tmuxSession: `war-room-sess-${i}`,
+        panePid: 5000 + i,
+        createdAt: t0,
+      });
+    }
+    store.recordManagedSessions('M1', ads, t0);
+    for (let i = 0; i < N; i++) {
+      const req = store.requestAnswer('M1', 5000 + i, `answer ${String(i)}`, t0);
+      if (!req.ok) throw new Error(`expected ok for ${String(i)}`);
+      store.reportAnswerStatus(req.id, 'delivered', undefined, t0);
+    }
+    // All 300 present before the retention window elapses.
+    expect(store.getAnswerReceipts('M1')).toHaveLength(50); // capped ring view
+    // Sweep past the retention window — every terminal record is pruned.
+    const swept = store.sweepExpiredAnswers(t0 + 700_000);
+    expect(swept).toBe(0); // none were pending; all were terminal → deleted
+    // The underlying Map is now empty (proven via the receipts view, which
+    // reads it directly): bounded, not linear in the 300 total.
+    expect(store.getAnswerReceipts('M1')).toHaveLength(0);
+  });
 });
 
 // ── Route-level (wired server) ─────────────────────────────────────

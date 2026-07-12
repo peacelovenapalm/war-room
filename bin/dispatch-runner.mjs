@@ -140,6 +140,31 @@ const RESULT_TAIL_MAX_BYTES = 8 * 1024;
  *  Overridable via deps.killGraceMs for tests (real timers would otherwise
  *  make an escalation test slow). */
 const KILL_GRACE_MS = 5_000;
+/** C9-4: consumed-nonce retention. `state.consumedNonces` (the one-shot
+ *  answer-nonce replay guard) was an unbounded Set that grew for the runner's
+ *  entire process lifetime. A nonce only needs guarding while its answer
+ *  record could still be replayed server-side; that record sweeps to a
+ *  terminal state after the server's ANSWER_TTL_MS (600_000 ms). Keying
+ *  consumed nonces by consumption time and evicting past this SAME window
+ *  bounds the map without ever narrowing the real replay defense (an evicted
+ *  nonce's server record is already terminal). */
+const CONSUMED_NONCE_TTL_MS = 600_000;
+
+/**
+ * Consume a one-shot answer nonce with TTL-bounded replay protection (C9-4).
+ * `consumed` is a Map<nonce, consumedAtMs>. Expired entries are pruned on
+ * every call (keeping the map bounded to at most one TTL window's worth of
+ * nonces), then the nonce is checked: a still-live prior consumption is a
+ * replay; otherwise it is recorded. Returns `{ replayed }`.
+ */
+export function consumeNonce(consumed, nonce, now = Date.now(), ttlMs = CONSUMED_NONCE_TTL_MS) {
+  for (const [n, at] of consumed) {
+    if (now - at > ttlMs) consumed.delete(n);
+  }
+  if (consumed.has(nonce)) return { replayed: true };
+  consumed.set(nonce, now);
+  return { replayed: false };
+}
 
 // ── Config ──────────────────────────────────────────────────────
 
@@ -875,11 +900,12 @@ async function processAnswerInstructions(cfg, state, answers, deps) {
         await deny(textCheck.reason);
         continue;
       }
-      if (state.consumedNonces.has(instr.nonce)) {
+      // C9-4: TTL-bounded one-shot consume (prunes expired nonces first).
+      const nowMs = deps.now?.() ?? Date.now();
+      if (consumeNonce(state.consumedNonces, instr.nonce, nowMs).replayed) {
         await deny('nonce-replayed');
         continue;
       }
-      state.consumedNonces.add(instr.nonce);
       audit(cfg, 'answer-nonce-consumed', { id: instr.id, nonce: instr.nonce });
 
       const entry = readManifest(cfg.manifestPath).find(
@@ -1083,7 +1109,9 @@ async function main() {
   process.on('unhandledRejection', (err) => log(`⚠ unhandled rejection: ${shortErr(err)}`));
   process.on('uncaughtException', (err) => log(`⚠ uncaught exception: ${shortErr(err)}`));
 
-  const state = { handled: new Set(), children: new Map(), consumedNonces: new Set() };
+  // C9-4: consumedNonces is a Map<nonce, consumedAtMs> (was an unbounded Set)
+  // so consumeNonce() can evict entries past CONSUMED_NONCE_TTL_MS.
+  const state = { handled: new Set(), children: new Map(), consumedNonces: new Map() };
   // setTimeout chain (not setInterval) so slow ticks never overlap.
   for (;;) {
     await tick(cfg, state);

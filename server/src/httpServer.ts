@@ -69,6 +69,7 @@ import { rivalryStore } from './rivalryStore.js';
 import { shiftStats } from './shiftStats.js';
 import type { StandingOrderSchedule } from './standingOrderStore.js';
 import { standingOrderStore } from './standingOrderStore.js';
+import { stopAllLatch } from './stopAllLatch.js';
 import { STUDIO_CONTRACT_SWEEP_INTERVAL_MS, studioContractIngest } from './studioContractIngest.js';
 import { studioContractStore } from './studioContractStore.js';
 import { renderTranscriptLine } from './transcriptOutputTap.js';
@@ -1326,11 +1327,15 @@ function registerAgentAnswerRoutes(app: FastifyInstance, options: HttpServerOpti
     const machine = sanitizeMachineLabel(body.machine);
     const pid = typeof body.pid === 'number' ? body.pid : undefined;
     const text = typeof body.text === 'string' ? body.text : undefined;
+    // C8-6: optional start-identifier the board observed for the target — when
+    // present, requestAnswer requires it to match the resolved session's start
+    // time (pid-reuse guard). Absent = legacy pid-only match.
+    const startTime = typeof body.startTime === 'number' ? body.startTime : undefined;
     if (!machine || pid === undefined || text === undefined) {
       reply.send({ ok: false, reason: 'missing-machine-pid-or-text' });
       return;
     }
-    reply.send(dispatchStore.requestAnswer(machine, pid, text));
+    reply.send(dispatchStore.requestAnswer(machine, pid, text, Date.now(), startTime));
   });
 
   // GET /api/agents/answer/:id -- the drawer's delivery-outcome poll
@@ -1794,6 +1799,11 @@ function registerAutomationStopAllRoutes(app: FastifyInstance, options: HttpServ
     // proposal tap or /release override still works — the kill switch
     // targets unattended automation, never a conscious human action.
     autoExecutorStore.haltAll();
+    // C9-1: durable STOP-ALL latch — engaged in the SAME transaction so a
+    // fresh webview (or a server restart) hydrates "stopped" even when this
+    // STOP ALL halted ONLY chain runs and left zero durable order flags (the
+    // limitation stopAll.ts's header called out). Idempotent.
+    stopAllLatch.engage();
     options.store.broadcast({
       type: 'automationStopped',
       haltedOrderIds: haltedOrders.map((o) => o.id),
@@ -1811,7 +1821,17 @@ function registerAutomationStopAllRoutes(app: FastifyInstance, options: HttpServ
     // Codex fix round finding 1 — mirrors standingOrderStore's resumeAll
     // exactly: restores the auto-executor + HELD-rollover release.
     autoExecutorStore.resumeAll();
+    // C9-1: clear the durable latch in the SAME resume transaction.
+    stopAllLatch.release();
     reply.send({ ok: true, resumedOrders: resumedOrders.length });
+  });
+
+  // C9-1: GET /api/automation/stop-all-state — mount-time hydration source for
+  // the webview STOP-ALL control. Same unauthenticated tailnet read plane as
+  // the other player-facing GETs; reads the durable latch so a page reload
+  // (or a fresh server after a restart) never silently shows "not stopped".
+  app.get('/api/automation/stop-all-state', async (_request, reply) => {
+    reply.send({ engaged: stopAllLatch.isEngaged() });
   });
 }
 

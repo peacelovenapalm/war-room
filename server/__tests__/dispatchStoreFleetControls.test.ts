@@ -200,6 +200,8 @@ describe('DispatchStore — budgetGate / HELD ("queued-budget") state', () => {
   it('a "focus" action is never held (only dispatch spends fleet tokens)', () => {
     const s = new DispatchStore(statePath, auditPath);
     s.setBudgetGate(() => ({ ceiling: 0, spend: 1_000_000 }));
+    // C8-5: focus now requires a live focus:true advertisement.
+    s.recordAdvertisement('MACBOOK', { providers: ['claude'], roots: ['/x'], focus: true });
     const result = s.enqueue({ action: 'focus', machine: 'MACBOOK', pid: 123 });
     expect(result.ok).toBe(true);
     if (!result.ok) throw new Error('unreachable');
