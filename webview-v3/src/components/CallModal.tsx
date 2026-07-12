@@ -2,15 +2,18 @@ import { useEffect, useState } from 'react';
 
 import type { ClientMessage } from '../../../core/src/messages.js';
 import {
+  applySkillPrefix,
   DISPATCH_EFFORT_PROVIDERS,
   DISPATCH_EFFORT_VALUES,
   DISPATCH_MODEL_OPTIONS,
+  DISPATCH_PERMISSION_MODE_OPTIONS,
   DISPATCH_PROMPT_MAX_CHARS,
   DISPATCH_TIMEOUT_MAX_SEC,
   DISPATCH_UI_PROVIDERS,
   type DispatchActionValue,
   type DispatchEffort,
   type DispatchMachine,
+  type DispatchPermissionMode,
   type DispatchProvider,
   joinRootSubpath,
   promptRemaining,
@@ -63,6 +66,13 @@ export function CallModal({ isOpen, onClose, prefill, send, onSend, budget }: Ca
   const [prompt, setPrompt] = useState('');
   const [model, setModel] = useState('');
   const [effort, setEffort] = useState<DispatchEffort | ''>('');
+  // 4B SKILL picker (claude provider only) — '' means "— none —"; the
+  // dropdown mutates `prompt` directly (applySkillPrefix), it never rides
+  // the wire as its own field.
+  const [skill, setSkill] = useState('');
+  // 4B PERMISSION MODE toggle (claude provider only) — 'default' is the
+  // implicit/omitted wire value, only 'plan' is ever sent.
+  const [permissionMode, setPermissionMode] = useState<DispatchPermissionMode>('default');
   // T5 fleet controls, PER-DISPATCH TIME CAP — free text so an empty field
   // reads unambiguously as "no cap" (current behavior), never a fabricated
   // default number.
@@ -112,6 +122,8 @@ export function CallModal({ isOpen, onClose, prefill, send, onSend, budget }: Ca
       setPrompt(prefill?.prompt ?? '');
       setModel('');
       setEffort('');
+      setSkill('');
+      setPermissionMode('default');
       setTimeoutSecInput('');
       setPendingPrefillCwd(prefill?.cwd ?? '');
     }
@@ -189,6 +201,7 @@ export function CallModal({ isOpen, onClose, prefill, send, onSend, budget }: Ca
       ...(mode === 'dispatch' && timeoutTrimmed !== '' && timeoutParsed !== undefined
         ? { timeoutSec: timeoutParsed }
         : {}),
+      ...(provider === 'claude' && permissionMode === 'plan' ? { permissionMode } : {}),
     });
     onSend(machine, mode, requestId);
     onClose();
@@ -241,6 +254,9 @@ export function CallModal({ isOpen, onClose, prefill, send, onSend, budget }: Ca
                 setProvider('');
                 setRoot('');
                 setSubpath('');
+                setPrompt((p) => applySkillPrefix(p, skill || undefined, undefined));
+                setSkill('');
+                setPermissionMode('default');
               }}
             >
               <option value="">— choose a machine —</option>
@@ -272,8 +288,18 @@ export function CallModal({ isOpen, onClose, prefill, send, onSend, budget }: Ca
                 <select
                   value={provider}
                   onChange={(e) => {
-                    setProvider(e.target.value as DispatchProvider);
+                    const nextProvider = e.target.value as DispatchProvider;
+                    setProvider(nextProvider);
                     setModel('');
+                    if (nextProvider !== 'claude') {
+                      // SKILL + PERMISSION are claude-only concepts — strip
+                      // any inserted skill prefix and reset the toggle
+                      // honestly rather than leaving stale state armed for
+                      // a provider that can't act on it.
+                      setPrompt((p) => applySkillPrefix(p, skill || undefined, undefined));
+                      setSkill('');
+                      setPermissionMode('default');
+                    }
                   }}
                 >
                   <option value="">— choose a provider —</option>
@@ -342,6 +368,63 @@ export function CallModal({ isOpen, onClose, prefill, send, onSend, budget }: Ca
                       </option>
                     ))}
                   </select>
+                </label>
+              )}
+
+              {/* 4B SKILL picker — claude only (a claude CLI concept), and
+                  only when the machine actually advertises skills (honest
+                  absence, matching the sessions-capability gate above). */}
+              {provider === 'claude' &&
+                selectedMachine.skills !== undefined &&
+                selectedMachine.skills.length > 0 && (
+                  <label className="field">
+                    <span className="field__label">SKILL (optional)</span>
+                    <select
+                      value={skill}
+                      data-testid="call-skill-select"
+                      onChange={(e) => {
+                        const next = e.target.value;
+                        setPrompt((p) =>
+                          applySkillPrefix(p, skill || undefined, next || undefined),
+                        );
+                        setSkill(next);
+                      }}
+                    >
+                      <option value="">— none —</option>
+                      {[...selectedMachine.skills].sort().map((s) => (
+                        <option key={s} value={s}>
+                          {s}
+                        </option>
+                      ))}
+                    </select>
+                  </label>
+                )}
+
+              {/* 4B PERMISSION MODE toggle — claude only, both DISPATCH and
+                  PERSISTENT SESSION modes. Colorblind rule: uppercase word
+                  is the primary signal, verb--confirm color is reinforcement
+                  only. */}
+              {provider === 'claude' && (
+                <label className="field">
+                  <span className="field__label">PERMISSION</span>
+                  <div className="modal__actions" data-testid="call-permission-toggle">
+                    {DISPATCH_PERMISSION_MODE_OPTIONS.map((option) => (
+                      <button
+                        key={option}
+                        type="button"
+                        className={permissionMode === option ? 'verb verb--confirm' : 'verb'}
+                        data-testid={`call-permission-${option}`}
+                        onClick={() => setPermissionMode(option)}
+                      >
+                        {option.toUpperCase()}
+                      </button>
+                    ))}
+                  </div>
+                  {permissionMode === 'plan' && (
+                    <span className="field__hint" data-testid="call-permission-plan-hint">
+                      Agent will propose a plan and block for approval — answer it from the drawer.
+                    </span>
+                  )}
                 </label>
               )}
             </>

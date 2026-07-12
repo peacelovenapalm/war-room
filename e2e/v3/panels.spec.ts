@@ -838,6 +838,135 @@ test.describe('stage-3 panel ports (desktop chrome model)', () => {
     }
   });
 
+  test('4B: CALL modal SKILL dropdown prefixes the prompt and PERMISSION plan mode adds permissionMode to the outgoing dispatchRequest', async ({
+    browser,
+  }) => {
+    const host = await serveV3Dist({
+      dispatchMachinesOverride: [
+        {
+          machine: 'MACBOOK',
+          providers: ['claude'],
+          roots: ['/Users/dev/war-room'],
+          focus: true,
+          sessions: true,
+          skills: ['plan-review', 'code-review'],
+        },
+        {
+          machine: 'NEXUS',
+          providers: ['claude'],
+          roots: ['/data'],
+          focus: false,
+          sessions: false,
+          skills: [],
+        },
+      ],
+    });
+    const context = await browser.newContext({ viewport: VIEWPORT });
+    try {
+      const page = await context.newPage();
+      await page.goto(`${host.url}/`);
+      await expect(page.getByTestId('hud-connection')).toHaveText('● LIVE', { timeout: 20_000 });
+
+      await page.getByTestId('dock-call').click();
+      await expect(page.getByTestId('call-modal')).toBeVisible();
+
+      const machineSelect = page.locator('select').first();
+      await machineSelect.selectOption('MACBOOK');
+      await page.locator('select').nth(1).selectOption('claude'); // PROVIDER
+      await page.locator('select').nth(2).selectOption('/Users/dev/war-room'); // PROJECT
+
+      // Machine advertises skills -> the dropdown is present, sorted,
+      // "— none —" first.
+      const skillSelect = page.getByTestId('call-skill-select');
+      await expect(skillSelect).toBeVisible();
+      const optionTexts = await skillSelect.locator('option').allTextContents();
+      expect(optionTexts).toEqual(['— none —', 'code-review', 'plan-review']);
+
+      const promptBox = page.getByPlaceholder('What should this session do?');
+      await promptBox.fill('fix the bug');
+
+      // Picking a skill visibly prefixes the prompt textarea.
+      await skillSelect.selectOption('plan-review');
+      await expect(promptBox).toHaveValue('/plan-review fix the bug');
+
+      // Switching picks replaces the prefix, not stacks it.
+      await skillSelect.selectOption('code-review');
+      await expect(promptBox).toHaveValue('/code-review fix the bug');
+
+      // Picking "— none —" removes the prefix, leaving user text intact.
+      await skillSelect.selectOption('');
+      await expect(promptBox).toHaveValue('fix the bug');
+
+      // Re-insert for the PLAN mode send below.
+      await skillSelect.selectOption('plan-review');
+
+      // PERMISSION defaults to DEFAULT; switching to PLAN shows the hint.
+      await expect(page.getByTestId('call-permission-default')).toBeVisible();
+      await expect(page.getByTestId('call-permission-plan-hint')).toHaveCount(0);
+      await page.getByTestId('call-permission-plan').click();
+      await expect(page.getByTestId('call-permission-plan-hint')).toContainText(
+        'Agent will propose a plan and block for approval — answer it from the drawer.',
+      );
+
+      await page.getByTestId('call-submit').click();
+      const planMessage = host.receivedMessages.find(
+        (m) => m.type === 'dispatchRequest' && m.action === 'dispatch',
+      );
+      expect(planMessage).toBeDefined();
+      expect(planMessage?.permissionMode).toBe('plan');
+      expect(planMessage?.prompt).toBe('/plan-review fix the bug');
+    } finally {
+      await context.close();
+      await host.close();
+    }
+  });
+
+  test('4B: a machine advertising no skills shows no SKILL dropdown, and DEFAULT permission omits the field entirely', async ({
+    browser,
+  }) => {
+    const host = await serveV3Dist({
+      dispatchMachinesOverride: [
+        {
+          machine: 'NEXUS',
+          providers: ['claude'],
+          roots: ['/data'],
+          focus: false,
+          sessions: false,
+          skills: [],
+        },
+      ],
+    });
+    const context = await browser.newContext({ viewport: VIEWPORT });
+    try {
+      const page = await context.newPage();
+      await page.goto(`${host.url}/`);
+      await expect(page.getByTestId('hud-connection')).toHaveText('● LIVE', { timeout: 20_000 });
+
+      await page.getByTestId('dock-call').click();
+      await expect(page.getByTestId('call-modal')).toBeVisible();
+
+      await page.locator('select').first().selectOption('NEXUS');
+      await page.locator('select').nth(1).selectOption('claude'); // PROVIDER
+      await expect(page.getByTestId('call-skill-select')).toHaveCount(0);
+      // PERMISSION toggle still renders (claude provider) — assert DEFAULT
+      // send omits permissionMode from the wire payload entirely.
+      await expect(page.getByTestId('call-permission-toggle')).toBeVisible();
+
+      await page.locator('select').nth(2).selectOption('/data'); // PROJECT
+      await page.getByPlaceholder('What should this session do?').fill('quick check');
+      await page.getByTestId('call-submit').click();
+
+      const defaultMessage = host.receivedMessages.find(
+        (m) => m.type === 'dispatchRequest' && m.action === 'dispatch',
+      );
+      expect(defaultMessage).toBeDefined();
+      expect(defaultMessage && 'permissionMode' in defaultMessage).toBe(false);
+    } finally {
+      await context.close();
+      await host.close();
+    }
+  });
+
   test('OPS REVIEW rung 2: each gated proposal arms a confirm step, then fires the exact reused endpoint/message per verb', async ({
     browser,
   }) => {

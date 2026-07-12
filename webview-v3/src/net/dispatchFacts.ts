@@ -13,6 +13,13 @@ export interface DispatchMachine {
   focus: boolean;
   /** T2/T4 managed sessions — deny-by-default, same posture as `focus`. */
   sessions: boolean;
+  /** 4B — the machine's registered launch-script ids (dispatchStore.ts
+   *  scriptIds), optional so older/partial advertisements still parse. */
+  scriptIds?: string[];
+  /** 4B skill picker — the machine's global ~/.claude/skills NAMES,
+   *  claude-provider-only concept, optional so a machine that hasn't
+   *  upgraded its advertisement still parses. */
+  skills?: string[];
 }
 
 /** One-line copy-able identity for the drawer's COPY ID button:
@@ -113,6 +120,33 @@ export const DISPATCH_MODEL_OPTIONS: Partial<Record<DispatchProvider, DispatchMo
     { value: 'gpt-5.5', label: 'gpt-5.5 (verified — ChatGPT plan)' },
   ],
 };
+
+/** 4B PERMISSION MODE toggle (claude provider only) — mirrors
+ *  server/src/dispatchStore.ts's DISPATCH_PERMISSION_MODE_VALUES exactly.
+ *  'default' is omitted from the wire payload entirely (the existing
+ *  behavior); only 'plan' is ever sent. */
+export const DISPATCH_PERMISSION_MODE_OPTIONS = ['default', 'plan'] as const;
+export type DispatchPermissionMode = (typeof DISPATCH_PERMISSION_MODE_OPTIONS)[number];
+
+/** 4B SKILL picker mechanic — selecting a skill does NOT add a wire field;
+ *  it visibly inserts `/<skillName> ` at the START of the prompt text,
+ *  replacing a previously-inserted `/<prevSkill> ` prefix if the user
+ *  switches picks, and removing it entirely on "— none —" (nextSkill
+ *  undefined). Anything the user typed after/around the prefix survives
+ *  untouched — what's in the textarea is exactly what gets sent. Pure so
+ *  it's unit-testable without a DOM. */
+export function applySkillPrefix(
+  prompt: string,
+  prevSkill: string | undefined,
+  nextSkill: string | undefined,
+): string {
+  const withoutPrev =
+    prevSkill !== undefined && prompt.startsWith(`/${prevSkill} `)
+      ? prompt.slice(prevSkill.length + 2)
+      : prompt;
+  if (nextSkill === undefined) return withoutPrev;
+  return `/${nextSkill} ${withoutPrev}`;
+}
 
 /** DENIED chips are sticky (dismiss only); every other terminal status
  *  auto-clears after this long. */

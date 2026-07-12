@@ -1,8 +1,10 @@
 import { describe, expect, it } from 'vitest';
 
 import {
+  applySkillPrefix,
   buildCopyIdLine,
   canKillAgent,
+  DISPATCH_PERMISSION_MODE_OPTIONS,
   type DispatchMachine,
   machineHasLiveRunner,
   machineSupportsSessions,
@@ -57,5 +59,48 @@ describe('machineSupportsSessions (T2/T4 CALL modal session mode)', () => {
     expect(machineSupportsSessions(MACHINES, 'GHOST')).toBe(false);
     expect(machineSupportsSessions(MACHINES, undefined)).toBe(false);
     expect(machineSupportsSessions([], 'MACBOOK')).toBe(false);
+  });
+});
+
+describe('DISPATCH_PERMISSION_MODE_OPTIONS (4B PERMISSION toggle)', () => {
+  it('is exactly the two enum-validated values, default first', () => {
+    expect(DISPATCH_PERMISSION_MODE_OPTIONS).toEqual(['default', 'plan']);
+  });
+});
+
+describe('applySkillPrefix (4B SKILL picker mechanic)', () => {
+  it('inserts "/<skill> " at the start of an empty prompt', () => {
+    expect(applySkillPrefix('', undefined, 'plan-review')).toBe('/plan-review ');
+  });
+
+  it('inserts the prefix ahead of existing prompt text', () => {
+    expect(applySkillPrefix('fix the bug', undefined, 'plan-review')).toBe(
+      '/plan-review fix the bug',
+    );
+  });
+
+  it('replaces a previously-inserted prefix when the user switches picks', () => {
+    const withFirst = applySkillPrefix('fix the bug', undefined, 'plan-review');
+    expect(applySkillPrefix(withFirst, 'plan-review', 'code-review')).toBe(
+      '/code-review fix the bug',
+    );
+  });
+
+  it('removes the prefix entirely when the user picks "— none —" (nextSkill undefined)', () => {
+    const withSkill = applySkillPrefix('fix the bug', undefined, 'plan-review');
+    expect(applySkillPrefix(withSkill, 'plan-review', undefined)).toBe('fix the bug');
+  });
+
+  it('leaves free-edited text untouched if it no longer matches the tracked prefix exactly', () => {
+    // The user hand-edited the inserted prefix (e.g. added a trailing
+    // character) — the mechanic must not mangle text it doesn't recognize;
+    // it just prepends the new prefix instead of guessing.
+    expect(applySkillPrefix('/plan-reviewX fix the bug', 'plan-review', 'code-review')).toBe(
+      '/code-review /plan-reviewX fix the bug',
+    );
+  });
+
+  it('is a no-op pass-through when neither prevSkill nor nextSkill is set', () => {
+    expect(applySkillPrefix('just a prompt', undefined, undefined)).toBe('just a prompt');
   });
 });
