@@ -1,8 +1,9 @@
 # Face Merge Plan — retire `/` (webview-ui), serve v3 at root
 
-**Date:** 2026-07-12 · **Status:** PROPOSED — awaiting Greg's Tier-2 kill-list
-gate. **Origin:** Greg noticed tooltips exist only on the old face at `/`
-while he lives on `/v3`.
+**Date:** 2026-07-12 · **Status:** APPROVED (Greg, 2026-07-12: "execute the
+3 decisions. Port the 4 features from the old version first"). Tier-2 kill
+list = DEFAULT: every Tier-2 item is DECLARED DEAD. **Origin:** Greg noticed
+tooltips exist only on the old face at `/` while he lives on `/v3`.
 
 ## Diagnosis (verified)
 
