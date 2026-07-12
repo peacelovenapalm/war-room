@@ -36,16 +36,18 @@ if [ -z "${EXPECTED_SHA}" ]; then
 fi
 [ -n "${EXPECTED_SHA}" ] || fail "could not determine expected sha (pass it explicitly as \$1)"
 
-ssh -n "${SSH_OPTS[@]}" "${MINI}" 'echo ok' >/dev/null 2>&1 \
+ssh -n "${SSH_OPTS[@]}" -- "${MINI}" 'echo ok' >/dev/null 2>&1 \
   || fail "cannot reach ${MINI} over SSH — cannot verify, treat as UNKNOWN drift risk"
 
-IS_GIT_REPO="$(ssh -n "${SSH_OPTS[@]}" "${MINI}" \
+IS_GIT_REPO="$(ssh -n "${SSH_OPTS[@]}" -- "${MINI}" \
   'git -C ~/code/war-room rev-parse --is-inside-work-tree 2>/dev/null || echo no')"
 [ "${IS_GIT_REPO}" = "true" ] \
   || fail "~/code/war-room on ${MINI} is not a git repo (rsync-copy regression?) — cannot verify sha, re-clone required"
 
-MINI_SHA="$(ssh -n "${SSH_OPTS[@]}" "${MINI}" 'git -C ~/code/war-room rev-parse HEAD')"
-MINI_DIRTY="$(ssh -n "${SSH_OPTS[@]}" "${MINI}" 'git -C ~/code/war-room status --porcelain')"
+MINI_SHA="$(ssh -n "${SSH_OPTS[@]}" -- "${MINI}" 'git -C ~/code/war-room rev-parse HEAD')" \
+  || fail "could not read MINI HEAD over SSH (transient drop?) — cannot verify, treat as UNKNOWN drift risk"
+MINI_DIRTY="$(ssh -n "${SSH_OPTS[@]}" -- "${MINI}" 'git -C ~/code/war-room status --porcelain')" \
+  || fail "could not read MINI tree status over SSH (transient drop?) — cannot verify, treat as UNKNOWN drift risk"
 
 [ "${MINI_SHA}" = "${EXPECTED_SHA}" ] \
   || fail "MINI HEAD (${MINI_SHA}) != expected (${EXPECTED_SHA}) — MINI has drifted, re-run ship-to-mini.sh or re-clone"
