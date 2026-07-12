@@ -254,6 +254,15 @@ describe('DispatchStore.enqueue', () => {
       skills: ['gsd-health', 42 as unknown as string, 'graphify'],
     });
     expect(s.getMachines()[0].skills).toEqual(['gsd-health', 'graphify']);
+    // codex P4 review: names failing the token pattern are dropped — a
+    // compromised runner can't advertise a prompt-breaking "name".
+    s.recordAdvertisement('EVIL', {
+      providers: ['claude'],
+      roots: ['/x'],
+      focus: false,
+      skills: ['ok-name', 'bad name!\ninjected', 'x'.repeat(65), '/slash'],
+    });
+    expect(s.getMachines().find((m) => m.machine === 'EVIL')?.skills).toEqual(['ok-name']);
     // An advertisement without skills is honestly empty, never undefined.
     s.recordAdvertisement('MINI', { providers: ['claude'], roots: ['/x'], focus: false });
     expect(s.getMachines().find((m) => m.machine === 'MINI')?.skills).toEqual([]);

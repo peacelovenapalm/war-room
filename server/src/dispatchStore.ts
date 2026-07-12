@@ -38,6 +38,10 @@ export const DISPATCH_RINGING_CAP = 5;
  *  is treated as absent — a machine without a live runner is honestly
  *  missing from GET /api/dispatch/machines rather than stale-listed. */
 export const DISPATCH_MACHINE_AD_TTL_MS = 30_000;
+/** Cap on the HUMAN-typed prompt (validated at enqueue, before the 4B
+ *  context preamble is prefixed) — the persisted/runner-bound prompt may
+ *  exceed this by DISPATCH_CONTEXT_PREAMBLE.length, a server-owned
+ *  constant cost, never wire-controlled. */
 export const DISPATCH_PROMPT_MAX_CHARS = 4000;
 /** promptPreview length on the broadcast plane — the full prompt never
  *  travels here (only on the Bearer-authed runner poll). */
@@ -69,6 +73,11 @@ const COMPUTE_MAX_ARGS_CEILING = 16;
  *  trust the wire for a limit the runner already holds, twice-enforced is a
  *  limit actually held (same discipline as DISPATCH_RESULT_TAIL_MAX_CHARS). */
 const COMPUTE_ARG_PATTERN = /^[a-zA-Z0-9._/=:@,+-]{1,256}$/;
+/** 4B skill advertisement — MIRRORS the runner's SKILL_NAME_PATTERN
+ *  (bin/dispatch-runner.mjs): dir-name tokens only. Re-enforced here
+ *  because the CALL modal inserts these names into editable prompt text. */
+const SKILL_NAME_PATTERN = /^[a-zA-Z0-9_-]{1,64}$/;
+const SKILLS_ADVERTISED_MAX = 200;
 
 /** Providers a runner actually has an `--effort`-equivalent flag for
  *  (bin/lib/dispatch-rules.mjs buildArgv is the enforcement point) — the
@@ -779,9 +788,15 @@ export class DispatchStore {
       scriptIds: Array.isArray(ad.scriptIds)
         ? ad.scriptIds.filter((s) => typeof s === 'string')
         : [],
-      // 4B skill picker — names only, re-filtered here (never trust the
-      // wire for a shape the picker will render).
-      skills: Array.isArray(ad.skills) ? ad.skills.filter((s) => typeof s === 'string') : [],
+      // 4B skill picker — names only, re-filtered here with the runner's
+      // own token pattern + cap (never trust the wire for a shape the
+      // picker inserts into editable prompt text — a compromised runner
+      // must not be able to advertise a prompt-breaking "name").
+      skills: Array.isArray(ad.skills)
+        ? ad.skills
+            .filter((s) => typeof s === 'string' && SKILL_NAME_PATTERN.test(s))
+            .slice(0, SKILLS_ADVERTISED_MAX)
+        : [],
       lastSeenAt: now,
     });
   }

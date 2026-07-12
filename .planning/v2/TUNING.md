@@ -938,3 +938,22 @@ managed flag not client-assertable; auth tiers correct; no 500-paths).
   exists only for managed sessions; hook-registered terminals are
   read-only by T2 design (no adopt). A launcher shim or per-session
   opt-in needs its own design gate before any build.
+
+## Phase 4 codex review reconcile (2026-07-12)
+
+- Verdict: SHIP (reviewer downgraded codex's BLOCK — the "unauthenticated
+  /api/graph/search" finding matches the app's deliberate tailnet-read
+  tier used by ~15 routes; depth/edge caps bound the DoS angle).
+- FIXED post-deploy (rides the next deploy): (a) skill-name advertisement
+  now re-filtered server-side with the runner's token pattern + cap —
+  the prior comment claimed re-filtering it didn't do; (b)
+  DISPATCH_PROMPT_MAX_CHARS doc now states the persisted prompt may
+  exceed the cap by the preamble's length (server-owned constant, not
+  wire-controlled) — behavior unchanged, docs made honest.
+- OPEN QUESTION FOR GREG (design, not a defect): does knowledge-graph
+  content deserve a higher trust tier than briefing/shift data, or is
+  tailnet-only fine like everywhere else? Current answer: same tier.
+- Confirmed non-issues: permissionMode triple-layer enum validation, no
+  preamble double-prefix, skills names-only wire, hook-primary reordering
+  never masks a genuinely blocked agent (toolPermission/awaitingInput
+  still force NEEDS_INPUT).
