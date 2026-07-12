@@ -1,6 +1,6 @@
 # STATE v4 — run ledger (machine-updated, newest log entries first)
 
-status: BLOCKED-AWAITING-GREG <!-- IN PROGRESS | RUN COMPLETE | BLOCKED-AWAITING-GREG -->
+status: RUN COMPLETE <!-- IN PROGRESS | RUN COMPLETE | BLOCKED-AWAITING-GREG -->
 
 Contract: `.planning/v4/KICKOFF-v4.md` (approved by Greg via /goal 2026-07-11;
 EDITS: none; Mini Q2 = hand-edit dispatch.json; Mini Q3 = interruptible, no
@@ -44,6 +44,8 @@ by the agent — Greg-run only.
 ## Log
 
 <!-- one line per event: ISO time — what happened / what's next -->
+
+- 2026-07-12T07:15:00Z — PHASE 4 COMPLETE + DEPLOYED (Greg-authorized in-session: "deploy it when the gate is green"). 4B UI e0d243b (SKILL picker inserts a visible /name prompt prefix — never a wire field; DEFAULT/PLAN toggle sends only the typed 'plan' literal, orchestrator-verified) + 4C UI c53b21d (GRAPH SEARCH dock panel ⌕ — lane correctly deviated from the briefed ◈, already owned by OPS REVIEW). FULL GATE GREEN re-derived on c53b21d: server 911/911, webview-ui 294/294, webview-v3 350/350, poller 190/190, e2e 25/25, types/lint/drift/build clean. DEPLOYED via runbook, all [OK] incl. new graph preflight; /api/version == c53b21d verified via loopback curl; /api/graph/search?q=waypoint LIVE against the mounted store (available:true, project:waypoint, 25 edges). MACBOOK runner restarted (2B lesson) — advertises 84 skills + sessions:true live. codex cross-model review of the full Phase-4 diff launched, review-on-return → TUNING. REMAINING: MINI runner restart (advertises 0 skills until then), codex verdict reconcile, T6 aesthetics + rest of T7 (rolled forward), TUNING backlog (nonce growth, pid-reuse, asset-gen skill, free-form remote prompting design gate).
 
 - 2026-07-12T06:55:00Z — PHASE 4 PROGRESS: (4A) COMPLETE f416c5b — ACCEPTED/RUNNING chips (pid splits the word; ✓ reserved for real outcomes), agentToolPermissionClear now broadcast on PreToolUse/Stop/turn_duration (was NEVER emitted on the hook path — root cause of stuck NEEDS-INPUT fires), deriveVisualState hook-primary (fresh hook active outranks a STALER poll blocked; fresh blocked still wins). (4B seams) COMPLETE 3c1616d, Fable-authored — runner advertises ~/.claude/skills names (pattern+cap+TTL cache, names-only wire), permissionMode CLOSED enum default|plan validated server + member-checked runner (free text NEVER reaches a flag; verified 'bypassPermissions' and '--dangerously-skip-permissions' both deny), context preamble prefixed at enqueue (audit/preview honest — preview strips it; double-prefix guarded for re-dispatch; bare-TUI sessions stay bare). asyncapi +DispatchPermissionModeValue (121 models). Server 905→911. (4C server) COMPLETE 5ace568 — graphProvider.ts (JSONL port of graph_query.py, no python), GET /api/graph/search (unauth tailnet-read tier), runbook +graph :ro mount + preflight; real-store smoke: 'waypoint'→project:waypoint, 25 edges. NOTE: graph search goes LIVE only at next deploy (new mount). IN FLIGHT: Sonnet UI lane (CallModal skill dropdown + AUTO/PLAN toggle + drift fix). REMAINING: 4C search-prop UI, full gate, codex review, ledger close.
 
