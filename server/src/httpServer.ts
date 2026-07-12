@@ -92,10 +92,12 @@ export interface HttpServerOptions {
   store: AgentStateStore;
   /** Shared agent lifecycle core (for toggle side effects + standalone restore). Optional in embedded mode. */
   runtime?: AgentRuntime;
-  /** Path to SPA dist directory for static serving (standalone only) */
+  /** Path to the ROOT face dist (standalone only). Since the face-merge
+   *  cutover (FACE-MERGE-PLAN Tier 3) this is the v3 "Living Studio" build. */
   staticDir?: string;
-  /** Path to the v3 "Living Studio" face dist, served at /v3/ (standalone only) */
-  staticDirV3?: string;
+  /** Path to the LEGACY (v1) face dist, served at /v1/ for one grace
+   *  release post-cutover (standalone only). Absent → /v1/ falls through. */
+  staticDirLegacy?: string;
   /** Cached assets loaded at startup (standalone only) */
   assetCache?: AssetCache;
   /** TEXT label identifying the machine this server runs on (e.g. "MACBOOK").
@@ -130,30 +132,35 @@ export async function createHttpServer(options: HttpServerOptions): Promise<Http
   await app.register(fastifyCors, { origin: true });
   await app.register(fastifyWebsocket);
 
-  // Static SPA serving (standalone mode only)
+  // Static SPA serving (standalone mode only).
+  // Face-merge cutover (FACE-MERGE-PLAN Tier 3): the v3 "Living Studio"
+  // build is the ROOT face; the old v1 face survives at /v1/ for one grace
+  // release; every old /v3 URL 301s to the root equivalent WITH its query
+  // string (phone bookmarks + push-notification deep links like
+  // /v3/?agentId=5 keep working). The old face's root service worker heals
+  // itself: its registration re-fetches /sw.js, gets v3's SW (autoUpdate +
+  // skipWaiting/clientsClaim), and the next navigation serves v3.
   if (!options.embedded && options.staticDir) {
     await app.register(fastifyStatic, {
       root: options.staticDir,
       prefix: '/',
     });
-    // v3 "Living Studio" face at /v3/ — sibling build, old face stays the
-    // root fallback until the parity gate closes (KICKOFF-v3.1).
-    const staticDirV3 = options.staticDirV3;
-    if (staticDirV3) {
+    const staticDirLegacy = options.staticDirLegacy;
+    if (staticDirLegacy) {
       await app.register(fastifyStatic, {
-        root: staticDirV3,
-        prefix: '/v3/',
+        root: staticDirLegacy,
+        prefix: '/v1/',
         decorateReply: false,
       });
     }
-    // HTML5 history fallback: serve the matching face's index.html.
-    // Bare /v3 redirects to /v3/ so the face's RELATIVE asset URLs resolve
-    // under its own prefix (relative-to-document semantics).
     app.setNotFoundHandler((req, reply) => {
-      if (staticDirV3 && (req.url === '/v3' || req.url.startsWith('/v3?'))) {
-        reply.redirect('/v3/', 301);
-      } else if (staticDirV3 && req.url.startsWith('/v3/')) {
-        reply.sendFile('index.html', staticDirV3);
+      if (req.url === '/v3' || req.url.startsWith('/v3?') || req.url.startsWith('/v3/')) {
+        // '/v3' → '/', '/v3?q' → '/?q', '/v3/x?q' → '/x?q' — never strip
+        // the query (deep links ride it).
+        reply.redirect(req.url.replace(/^\/v3\/?/, '/'), 301);
+      } else if (staticDirLegacy && req.url.startsWith('/v1/')) {
+        // HTML5 history fallback for the legacy face's own routes.
+        reply.sendFile('index.html', staticDirLegacy);
       } else {
         reply.sendFile('index.html');
       }
