@@ -68,7 +68,7 @@ export class PixelAgentsServer {
     host?: string;
     port?: number;
     staticDir?: string;
-    staticDirV3?: string;
+    staticDirLegacy?: string;
     assetCache?: AssetCache;
     onSetHooksEnabled?: SetHooksEnabledSideEffect;
     /** Stable bearer token (e.g. from WAR_ROOM_TOKEN env). Default: random UUID per start. */
@@ -111,7 +111,7 @@ export class PixelAgentsServer {
       store: store!,
       runtime: options?.runtime,
       staticDir: options?.staticDir,
-      staticDirV3: options?.staticDirV3,
+      staticDirLegacy: options?.staticDirLegacy,
       assetCache: options?.assetCache,
       machineLabel: options?.machineLabel,
       onHookEvent: (providerId, event) => this.callback?.(providerId, event),

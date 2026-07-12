@@ -12,6 +12,14 @@
       content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover"
     />
     <meta name="theme-color" content="#20242c" />
+    <!-- iOS add-to-home-screen (face-merge T1b): Safari ignores parts of
+         the webmanifest, so the apple-* tags carry standalone mode. The
+         icon href is RELATIVE (no leading slash) — correct at /v3/ now and
+         at / after the Tier-3 cutover, same reasoning as base './'. -->
+    <meta name="apple-mobile-web-app-capable" content="yes" />
+    <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent" />
+    <meta name="apple-mobile-web-app-title" content="War Room" />
+    <link rel="apple-touch-icon" href="icons/apple-touch-icon-TEMP.png" />
     <title>War Room V3</title>
   </head>
   <body>

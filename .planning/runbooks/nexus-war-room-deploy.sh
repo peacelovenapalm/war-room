@@ -188,10 +188,28 @@ ssh "${NEXUS_HOST}" "tailscale funnel status 2>/dev/null | grep -v '(tailnet onl
   || ok "funnel check clean — :${SERVE_PORT} is tailnet-only"
 
 # ── PWA manifest reachable over the real tailnet path (G6, BUILD-PLAN §G6 task 5) ──
+# Post face-merge (FACE-MERGE-PLAN Tier 3) this is the V3 face's manifest —
+# the old face's manifest lives under /v1/ during the grace release.
 if curl -sf -m 8 "https://${TAILNET_FQDN}:${SERVE_PORT}/manifest.webmanifest" >/dev/null; then
   ok "manifest.webmanifest reachable over tailnet HTTPS"
 else
   warn "manifest.webmanifest not reachable from this machine over tailnet HTTPS — check this Mac's tailscale connection, then verify by hand"
+fi
+
+# ── face-merge cutover checks (FACE-MERGE-PLAN Tier 3) ──────────────────────
+# Root must serve the V3 face (its index title is "War Room V3"; the legacy
+# face's is plain "War Room") and /v3 must 301 home with the query intact —
+# a silent regression here strands every phone bookmark.
+if ssh "${NEXUS_HOST}" "curl -sf -m 8 http://127.0.0.1:${APP_PORT}/ | grep -q 'War Room V3'"; then
+  ok "root serves the V3 face"
+else
+  fail "root is NOT serving the V3 face — check dist/webview-v3 in the image"
+fi
+V3_REDIRECT=$(ssh "${NEXUS_HOST}" "curl -s -o /dev/null -m 8 -w '%{http_code} %{redirect_url}' 'http://127.0.0.1:${APP_PORT}/v3/?agentId=5'")
+if printf '%s' "${V3_REDIRECT}" | grep -q '301 .*/?agentId=5'; then
+  ok "/v3 301s to root with query preserved (${V3_REDIRECT})"
+else
+  fail "/v3 redirect broken (got: ${V3_REDIRECT}) — old bookmarks/deep links would strand"
 fi
 
 echo

@@ -73,12 +73,19 @@ function resolveMachineLabel(): string {
 async function main(): Promise<void> {
   const args = parseArgs(process.argv.slice(2));
 
-  // dist/ contains both the CLI bundle and the assets/ + webview/ directories
+  // dist/ contains both the CLI bundle and the assets/ + webview/ directories.
+  // Face-merge cutover (FACE-MERGE-PLAN Tier 3): v3 is the root face; the
+  // old v1 build is the /v1/ grace mount — and the honest fallback root if a
+  // dist somehow ships without the v3 build (never a blank site).
   const distRoot = __dirname;
-  const staticDir = path.join(distRoot, 'webview');
-  // v3 face is optional: served at /v3/ only when its build is present.
+  const legacyDir = path.join(distRoot, 'webview');
   const v3Candidate = path.join(distRoot, 'webview-v3');
-  const staticDirV3 = fs.existsSync(path.join(v3Candidate, 'index.html')) ? v3Candidate : undefined;
+  const v3Present = fs.existsSync(path.join(v3Candidate, 'index.html'));
+  const staticDir = v3Present ? v3Candidate : legacyDir;
+  const staticDirLegacy = v3Present ? legacyDir : undefined;
+  if (!v3Present) {
+    console.log('[Pixel Agents] ⚠ dist/webview-v3 missing — serving the LEGACY face at root');
+  }
 
   // ── Load assets on startup (same pipeline as VS Code extension) ──
   console.log('[Pixel Agents] Loading assets...');
@@ -147,7 +154,7 @@ async function main(): Promise<void> {
       host: args.host,
       port: args.port,
       staticDir,
-      staticDirV3,
+      staticDirLegacy,
       assetCache,
       onSetHooksEnabled,
       token: envToken,
