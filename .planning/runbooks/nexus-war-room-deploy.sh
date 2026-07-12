@@ -54,6 +54,17 @@ GRAPH_DIR_NEXUS="/data/repos/vault-notifier/vault/vault/_meta/graph"
 #    (inboxProvider.ts, GET /api/inbox). Additive mount — TODO_DIR_NEXUS
 #    stays its own mount so existing WAR_ROOM_TODO_DIR wiring is untouched.
 ROUTINES_DIR_NEXUS="/data/repos/vault-notifier/vault/vault/_inbox/routines"
+#  - districts (v4 Phase 5 Lane C, GET /api/districts): DELIBERATELY UNWIRED.
+#    Both candidate sources on nexus are stale or absent — the TWE checkout
+#    at /data/repos/two-wheel-events last pulled 2026-03-13 (mounting it
+#    would render plausible-but-wrong March state), and no war-room checkout
+#    exists on nexus at all. Until a FRESH auto-pulling source exists,
+#    districts honestly render "NO DATA". To wire later, uncomment BOTH the
+#    env line and the mount line below AND ensure the source auto-pulls:
+# DISTRICT_TWE_STATE_NEXUS="/data/repos/two-wheel-events/.planning/STATE.md"
+#    plus in the docker run block:
+#      -e WAR_ROOM_DISTRICT_TWE_STATE=/briefing/districts/twe/STATE.md
+#      -v $(dirname ${DISTRICT_TWE_STATE_NEXUS}):/briefing/districts/twe:ro
 TRACKER_STATE_LOCAL="/Users/greg/code/completion-2026-07/STATE.md"
 
 ok()   { printf '[OK]   %s\n' "$1"; }
