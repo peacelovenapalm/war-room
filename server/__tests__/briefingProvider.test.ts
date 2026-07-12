@@ -15,6 +15,7 @@ import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import {
   clearBriefingCache,
   getBriefing,
+  parseDigestMarkdown,
   parseTodoMarkdown,
   parseTrackerState,
 } from '../src/briefingProvider.js';
@@ -171,10 +172,54 @@ describe('parseTrackerState', () => {
   });
 });
 
+describe('parseDigestMarkdown', () => {
+  const DIGEST_FIXTURE = `---
+title: daily digest 2026-07-11
+routine: daily-digest
+---
+
+# Daily digest — 2026-07-11
+
+## Morning flags (from today's flag routines)
+- vault-health: 4 issues (Δ +0/-0, no change since 07-10) · project-pulse: 4 flagged (Δ none) · docs-tracker: 9 flagged (Δ +0/-0, no change since 07-10)
+
+## Standing flags (top 10 by age)
+- \`ecliptic-lunar\` — missing-state — open 33d (project-pulse)
+- \`Projects/Current/two-wheel-events/\` — stale-siblings — open 31d (docs-tracker)
+- \`_meta/MOC Template.md\` — stale-siblings — open 31d (docs-tracker)
+- \`_meta/Vault Design v2.md\` — stale-siblings — open 31d (docs-tracker)
+
+## ✓ Cleared since yesterday
+- nothing
+`;
+
+  it('extracts the morning-flags summary line and top 3 standing flags', () => {
+    const result = parseDigestMarkdown(DIGEST_FIXTURE, '2026-07-11');
+    expect(result.date).toBe('2026-07-11');
+    expect(result.flagsSummary).toBe(
+      'vault-health: 4 issues (Δ +0/-0, no change since 07-10) · project-pulse: 4 flagged (Δ none) · docs-tracker: 9 flagged (Δ +0/-0, no change since 07-10)',
+    );
+    expect(result.topStandingFlags).toEqual([
+      'ecliptic-lunar — missing-state — open 33d (project-pulse)',
+      'Projects/Current/two-wheel-events/ — stale-siblings — open 31d (docs-tracker)',
+      '_meta/MOC Template.md — stale-siblings — open 31d (docs-tracker)',
+    ]);
+  });
+
+  it('never throws on empty or headerless input', () => {
+    expect(parseDigestMarkdown('', '2026-01-01')).toEqual({
+      date: '2026-01-01',
+      flagsSummary: '',
+      topStandingFlags: [],
+    });
+  });
+});
+
 describe('getBriefing (env-wired, cached)', () => {
   let tmpDir: string;
   const originalTodoDir = process.env['WAR_ROOM_TODO_DIR'];
   const originalTrackerState = process.env['WAR_ROOM_TRACKER_STATE'];
+  const originalRoutinesDir = process.env['WAR_ROOM_ROUTINES_DIR'];
 
   beforeEach(() => {
     tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'war-room-briefing-test-'));
@@ -187,17 +232,45 @@ describe('getBriefing (env-wired, cached)', () => {
     else process.env['WAR_ROOM_TODO_DIR'] = originalTodoDir;
     if (originalTrackerState === undefined) delete process.env['WAR_ROOM_TRACKER_STATE'];
     else process.env['WAR_ROOM_TRACKER_STATE'] = originalTrackerState;
+    if (originalRoutinesDir === undefined) delete process.env['WAR_ROOM_ROUTINES_DIR'];
+    else process.env['WAR_ROOM_ROUTINES_DIR'] = originalRoutinesDir;
     clearBriefingCache();
   });
 
-  it('returns both halves null when neither env var is set', () => {
+  it('returns all three parts null when no env var is set', () => {
     delete process.env['WAR_ROOM_TODO_DIR'];
     delete process.env['WAR_ROOM_TRACKER_STATE'];
+    delete process.env['WAR_ROOM_ROUTINES_DIR'];
     const briefing = getBriefing();
     expect(briefing.todo).toBeNull();
     expect(briefing.tracker).toBeNull();
+    expect(briefing.digest).toBeNull();
     expect(typeof briefing.generatedAt).toBe('string');
     expect(new Date(briefing.generatedAt).toString()).not.toBe('Invalid Date');
+  });
+
+  it('picks the lexicographically-latest YYYY-MM-DD-digest.md file under routines/summary', () => {
+    const summaryDir = path.join(tmpDir, 'summary');
+    fs.mkdirSync(summaryDir);
+    fs.writeFileSync(
+      path.join(summaryDir, '2026-07-10-digest.md'),
+      '## Morning flags\n- old summary\n',
+    );
+    fs.writeFileSync(
+      path.join(summaryDir, '2026-07-11-digest.md'),
+      '## Morning flags\n- newest summary\n',
+    );
+    process.env['WAR_ROOM_ROUTINES_DIR'] = tmpDir;
+
+    const briefing = getBriefing();
+    expect(briefing.digest).not.toBeNull();
+    expect(briefing.digest!.date).toBe('2026-07-11');
+    expect(briefing.digest!.flagsSummary).toBe('newest summary');
+  });
+
+  it('never crashes when WAR_ROOM_ROUTINES_DIR has no summary subdir', () => {
+    process.env['WAR_ROOM_ROUTINES_DIR'] = tmpDir; // empty dir, no summary/
+    expect(getBriefing().digest).toBeNull();
   });
 
   it('picks the lexicographically-latest YYYY-MM-DD.md file and returns null for a missing tracker file', () => {

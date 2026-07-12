@@ -38,6 +38,7 @@ import { economyStore } from './economyStore.js';
 import type { Employee, ScoreTrack } from './employeeStore.js';
 import { employeeStore } from './employeeStore.js';
 import { searchGraph } from './graphProvider.js';
+import { getInboxListing, readInboxFile } from './inboxProvider.js';
 import { matchDayDerivation } from './matchDayDerivation.js';
 import { matchDayStore, toMatchDayEvent } from './matchDayStore.js';
 import {
@@ -161,6 +162,7 @@ export async function createHttpServer(options: HttpServerOptions): Promise<Http
 
   registerHealthRoute(app);
   registerBriefingRoute(app, options);
+  registerInboxRoutes(app);
   registerHookRoute(app, options);
   registerPollRoute(app, options);
   registerAgentOutputRoute(app, options);
@@ -486,6 +488,28 @@ function registerBriefingRoute(app: FastifyInstance, options: HttpServerOptions)
   // trust level, same "no new polling loop" posture — reads the executor's
   // own already-persisted state.
   app.get('/api/ops/auto', async () => autoExecutorStore.getStatus());
+}
+
+// ── Routine inbox tray (v4 T7 slice 2) ──────────────────────────
+
+/** GET /api/inbox + GET /api/inbox/content -- unauthenticated, same
+ *  tailnet-read tier as /api/briefing and /api/graph/search. Reads the
+ *  vault's `_inbox/routines/` mount (inboxProvider.ts). */
+function registerInboxRoutes(app: FastifyInstance): void {
+  app.get('/api/inbox', async () => getInboxListing());
+  app.get<{ Querystring: { routine?: string; file?: string } }>(
+    '/api/inbox/content',
+    async (request, reply) => {
+      const routine = typeof request.query.routine === 'string' ? request.query.routine : '';
+      const file = typeof request.query.file === 'string' ? request.query.file : '';
+      const result = readInboxFile(routine, file);
+      if (result.ok) return { content: result.content };
+      // Every non-ok reason renders as an honest 404/400 body, never a 500 --
+      // same "tolerant read" posture as the rest of the briefing plane.
+      reply.code(result.reason === 'invalid' ? 400 : 404);
+      return { error: result.reason };
+    },
+  );
 }
 
 // ── Hook Events ────────────────────────────────────────────────
