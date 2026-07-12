@@ -48,6 +48,23 @@ TRACKER_DIR_NEXUS="/data/repos/completion-2026-07"
 #    clone — nodes.jsonl + edges.jsonl, git-tracked so the notifier cron's
 #    hard-reset keeps it as fresh as the last committed graph_build run
 GRAPH_DIR_NEXUS="/data/repos/vault-notifier/vault/vault/_meta/graph"
+#  - routines (v4 T7): the whole `_inbox/routines/` root — one level above
+#    TODO_DIR_NEXUS, same vault clone. Feeds the daily-digest fold in the
+#    SHIFT panel (briefingProvider.ts) AND the routine inbox tray
+#    (inboxProvider.ts, GET /api/inbox). Additive mount — TODO_DIR_NEXUS
+#    stays its own mount so existing WAR_ROOM_TODO_DIR wiring is untouched.
+ROUTINES_DIR_NEXUS="/data/repos/vault-notifier/vault/vault/_inbox/routines"
+#  - districts (v4 Phase 5 Lane C, GET /api/districts): DELIBERATELY UNWIRED.
+#    Both candidate sources on nexus are stale or absent — the TWE checkout
+#    at /data/repos/two-wheel-events last pulled 2026-03-13 (mounting it
+#    would render plausible-but-wrong March state), and no war-room checkout
+#    exists on nexus at all. Until a FRESH auto-pulling source exists,
+#    districts honestly render "NO DATA". To wire later, uncomment BOTH the
+#    env line and the mount line below AND ensure the source auto-pulls:
+# DISTRICT_TWE_STATE_NEXUS="/data/repos/two-wheel-events/.planning/STATE.md"
+#    plus in the docker run block:
+#      -e WAR_ROOM_DISTRICT_TWE_STATE=/briefing/districts/twe/STATE.md
+#      -v $(dirname ${DISTRICT_TWE_STATE_NEXUS}):/briefing/districts/twe:ro
 TRACKER_STATE_LOCAL="/Users/greg/code/completion-2026-07/STATE.md"
 
 ok()   { printf '[OK]   %s\n' "$1"; }
@@ -78,6 +95,8 @@ ssh "${NEXUS_HOST}" "test -d ${TRACKER_DIR_NEXUS}" \
   && ok "tracker dir present: ${TRACKER_DIR_NEXUS}" || warn "tracker dir missing on nexus — briefing panel will show no gates"
 ssh "${NEXUS_HOST}" "test -f ${GRAPH_DIR_NEXUS}/nodes.jsonl" \
   && ok "graph store present: ${GRAPH_DIR_NEXUS}" || warn "graph store missing on nexus — graph search will report available:false"
+ssh "${NEXUS_HOST}" "test -d ${ROUTINES_DIR_NEXUS}" \
+  && ok "routines dir present: ${ROUTINES_DIR_NEXUS}" || warn "routines dir missing on nexus — digest fold + inbox tray will report no source"
 
 # ── Refresh the tracker copy (laptop is canonical; also feeds projects-board) ─
 if [ -f "${TRACKER_STATE_LOCAL}" ]; then
@@ -131,9 +150,11 @@ ssh "${NEXUS_HOST}" "docker run -d --name war-room --restart unless-stopped \
   -e WAR_ROOM_TODO_DIR=/briefing/todo \
   -e WAR_ROOM_TRACKER_STATE=/briefing/tracker/STATE.md \
   -e WAR_ROOM_GRAPH_DIR=/briefing/graph \
+  -e WAR_ROOM_ROUTINES_DIR=/briefing/routines \
   -v ${TODO_DIR_NEXUS}:/briefing/todo:ro \
   -v ${TRACKER_DIR_NEXUS}:/briefing/tracker:ro \
   -v ${GRAPH_DIR_NEXUS}:/briefing/graph:ro \
+  -v ${ROUTINES_DIR_NEXUS}:/briefing/routines:ro \
   -v ${REMOTE_STATE_DIR}:/root/.pixel-agents \
   -p 127.0.0.1:${APP_PORT}:3141 war-room:latest" >/dev/null \
   && ok "container war-room running (127.0.0.1:${APP_PORT}, briefing ro, state vol rw)" || fail "docker run failed"
@@ -178,6 +199,7 @@ echo "=============================================================="
 ok "DEPLOY COMPLETE"
 echo "  Dashboard : https://${TAILNET_FQDN}:${SERVE_PORT}  (tailnet devices only)"
 echo "  Briefing  : https://${TAILNET_FQDN}:${SERVE_PORT}/api/briefing"
+echo "  Inbox     : https://${TAILNET_FQDN}:${SERVE_PORT}/api/inbox"
 echo "  Ingest    : POST https://${TAILNET_FQDN}:${SERVE_PORT}/api/hooks/claude"
 echo "              Authorization: Bearer <WAR_ROOM_TOKEN from nexus war-room.env>"
 echo "              X-Machine: MACBOOK | MINI"

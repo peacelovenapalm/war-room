@@ -204,7 +204,10 @@ export function CallModal({ isOpen, onClose, prefill, send, onSend, budget }: Ca
   const resetHint = budgetResetHintLine(budget, provider || undefined);
 
   const handleSubmit = () => {
-    if (!canSubmit || provider === '') return;
+    // canSubmit's own definition checks provider !== '' — TS's
+    // aliased-condition narrowing carries that forward, so `provider`
+    // below is CallProvider, never ''.
+    if (!canSubmit) return;
     // Correlation id (asyncapi DispatchRequest.requestId): echoed on every
     // dispatchUpdate for this queue entry, so the silent-drop detector can
     // tell exactly which send a broadcast answers.
