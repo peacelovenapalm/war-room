@@ -51,6 +51,8 @@ agent-orchestrator.yaml
 .serena/
 tasks/
 
-# webview-v3: generated mirror of webview-v3-assets/ (source of truth),
-# copied in by scripts/sync-assets.mjs — never a second source of truth.
-webview-v3/public/
+# webview-v3: public/assets/ is a generated mirror of webview-v3-assets/
+# (source of truth), copied in by scripts/sync-assets.mjs — never a second
+# source of truth. public/icons/ (PWA icons) IS git-tracked, same as
+# webview-ui/public/icons — only the assets mirror is generated.
+webview-v3/public/assets/
