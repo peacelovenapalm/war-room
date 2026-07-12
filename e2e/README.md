@@ -198,16 +198,16 @@ This section is auto-generated. Do not edit between the markers; CI fails on dri
 
 ### `@area:standalone` (10 tests)
 
-- `e2e/standalone/budget-pause.spec.ts:38` — a real budget-paused chain step 2 renders distinctly from real step-1 running (Standalone / budget-pause visibility (KICKOFF v1.1 item 5))
-- `e2e/standalone/budget-pause.spec.ts:130` — the 4 standing-order pause reasons render distinctly, not a generic string (Standalone / budget-pause visibility (KICKOFF v1.1 item 5))
-- `e2e/standalone/disappearing-view.spec.ts:68` — view switch, furniture edit, zoom, and resize all keep exactly one Pixi Application and a non-blank canvas (Standalone / disappearing view (KICKOFF v1.1 item 2))
-- `e2e/standalone/help-discoverability.spec.ts:53` — tooltips on the ~10 most-used controls appear on hover AND keyboard focus (Standalone / help discoverability (KICKOFF v1.1 item 8))
-- `e2e/standalone/help-discoverability.spec.ts:265` — quick-menu and rotating tip render at the iPhone-14 viewport (Standalone / help discoverability (KICKOFF v1.1 item 8))
+- `e2e/standalone/budget-pause.spec.ts:39` — a real budget-paused chain step 2 renders distinctly from real step-1 running (Standalone / budget-pause visibility (KICKOFF v1.1 item 5))
+- `e2e/standalone/budget-pause.spec.ts:138` — the 4 standing-order pause reasons render distinctly, not a generic string (Standalone / budget-pause visibility (KICKOFF v1.1 item 5))
+- `e2e/standalone/disappearing-view.spec.ts:69` — view switch, furniture edit, zoom, and resize all keep exactly one Pixi Application and a non-blank canvas (Standalone / disappearing view (KICKOFF v1.1 item 2))
+- `e2e/standalone/help-discoverability.spec.ts:54` — tooltips on the ~10 most-used controls appear on hover AND keyboard focus (Standalone / help discoverability (KICKOFF v1.1 item 8))
+- `e2e/standalone/help-discoverability.spec.ts:277` — quick-menu and rotating tip render at the iPhone-14 viewport (Standalone / help discoverability (KICKOFF v1.1 item 8))
 - `e2e/standalone/hooks.spec.ts:10` — propagates hook-driven lifecycle into the browser UI (Standalone / hooks)
-- `e2e/standalone/hud-layout.spec.ts:123` — no HUD overlay overlaps at desktop across idle/crisis/stop-all/edit states (Standalone / HUD overlay layout (KICKOFF v1.1 item 4))
-- `e2e/standalone/hud-layout.spec.ts:123` — no HUD overlay overlaps at mobile across idle/crisis/stop-all/edit states (Standalone / HUD overlay layout (KICKOFF v1.1 item 4))
-- `e2e/standalone/kill.spec.ts:31` — kill button: disabled+reason with no pid, then enabled -> CONFIRM -> KILLED once machine+pid telemetry and a live runner exist (Standalone / worker session kill (AgentDrawer))
-- `e2e/standalone/triage.spec.ts:18` — clicking a crisis card opens the same agent drawer a normal click would (Standalone / triage board click-through)
+- `e2e/standalone/hud-layout.spec.ts:124` — no HUD overlay overlaps at desktop across idle/crisis/stop-all/edit states (Standalone / HUD overlay layout (KICKOFF v1.1 item 4))
+- `e2e/standalone/hud-layout.spec.ts:124` — no HUD overlay overlaps at mobile across idle/crisis/stop-all/edit states (Standalone / HUD overlay layout (KICKOFF v1.1 item 4))
+- `e2e/standalone/kill.spec.ts:32` — kill button: disabled+reason with no pid, then enabled -> CONFIRM -> KILLED once machine+pid telemetry and a live runner exist (Standalone / worker session kill (AgentDrawer))
+- `e2e/standalone/triage.spec.ts:19` — clicking a crisis card opens the same agent drawer a normal click would (Standalone / triage board click-through)
 
 ### `@area:pets` (3 tests)
 
