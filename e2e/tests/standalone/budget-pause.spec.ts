@@ -1,4 +1,5 @@
 import { expect, test } from '../../fixtures/standalone';
+import { gotoLegacyFace } from '../../helpers/standalone';
 
 /**
  * KICKOFF v1.1 item 5: budget-pause visibility. Before this fix, a
@@ -39,6 +40,13 @@ test.describe('Standalone / budget-pause visibility (KICKOFF v1.1 item 5)', () =
     page,
     standalone,
   }) => {
+    // webview-ui's ChainTray renders chain-run-chip as a persistent HUD
+    // element; v3's equivalent lives inside the AutomationPanel modal
+    // (gated on isOpen) — so this must run against the legacy face. See
+    // FACE-MERGE-PLAN Tier 3 (df3a039): webview-v3 is the root face
+    // post-cutover, so the shared `standalone` fixture boots there.
+    await gotoLegacyFace(page, standalone);
+
     const base = `http://127.0.0.1:${standalone.hookServerConfig.port}`;
     const token = standalone.hookServerConfig.token;
 
@@ -131,6 +139,10 @@ test.describe('Standalone / budget-pause visibility (KICKOFF v1.1 item 5)', () =
     page,
     standalone,
   }) => {
+    // See test 1's comment — the legacy face's StandingOrdersPanel is a
+    // dedicated dock panel; v3's equivalent lives inside AutomationPanel.
+    await gotoLegacyFace(page, standalone);
+
     // Component-level constructed-state screenshot (network response
     // mocked) — see file header for why this half doesn't drive the real
     // 60s tick cadence end-to-end.
@@ -154,7 +166,10 @@ test.describe('Standalone / budget-pause visibility (KICKOFF v1.1 item 5)', () =
       await route.fulfill({ json: orders });
     });
 
-    await page.locator('button[title="Standing orders"]').click();
+    // "Standing orders" moved from a native `title` attr to a
+    // ControlTooltip label (KICKOFF v1.1 item 8, bc186a3) — the button's
+    // accessible name is just its visible text ("Orders") now.
+    await page.getByRole('button', { name: 'Orders', exact: true }).click();
     const statuses = page.locator('[data-testid="standing-order-status"]');
     await expect(statuses).toHaveCount(4);
     const texts = await statuses.allTextContents();

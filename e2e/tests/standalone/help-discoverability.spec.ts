@@ -8,6 +8,7 @@ import {
   sessionStartStartup,
 } from '../../helpers/hooks';
 import { expectOverlayCount, readAgentOverlayIds } from '../../helpers/office';
+import { gotoLegacyFace } from '../../helpers/standalone';
 import { setSettings } from '../../helpers/webview';
 
 /**
@@ -54,6 +55,17 @@ test.describe('Standalone / help discoverability (KICKOFF v1.1 item 8)', () => {
     page,
     standalone,
   }) => {
+    // ControlTooltip ("control-tooltip" testid), RotatingTip
+    // (getRotatingTips hook), the categorized HelpModal, and
+    // window.__pixelAgentsTestHooks.openAgentDrawer/setCrisis /
+    // [data-testid="agent-overlay"] are all legacy-only — v3 has its own
+    // ControlTip (different testid: "control-tip-bubble") and HelpModal
+    // (matching "help-category-*" testids) but no equivalent rotating-tip
+    // hook, drawer-open-by-id hook, or DOM agent overlay to drive this
+    // suite's setup from. C4-retirement-bound: a real v3 port is a rewrite
+    // of this spec against v3's own tooltip/help/drawer surface, not a
+    // selector swap.
+    await gotoLegacyFace(page, standalone);
     await page.setViewportSize(DESKTOP_VIEWPORT);
     await setSettings(page, {
       alwaysShowLabels: true,
@@ -264,8 +276,10 @@ test.describe('Standalone / help discoverability (KICKOFF v1.1 item 8)', () => {
 
   test('quick-menu and rotating tip render at the iPhone-14 viewport @area:standalone', async ({
     page,
-    standalone: _standalone,
+    standalone,
   }) => {
+    // See the desktop test's comment — same legacy-only surface.
+    await gotoLegacyFace(page, standalone);
     await page.setViewportSize(MOBILE_VIEWPORT);
     await setSettings(page, {
       alwaysShowLabels: true,

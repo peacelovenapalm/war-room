@@ -1,9 +1,9 @@
 import path from 'node:path';
 
 import { expect, test } from '../../fixtures/standalone';
-import { expectOverlayCount, expectOverlayVisible } from '../../helpers/office';
 import { sendHookEvent, sessionEndExit, sessionStartStartup } from '../../helpers/hooks';
-import type { RecordedServerMessage } from '../../helpers/standalone';
+import { expectOverlayCount, expectOverlayVisible } from '../../helpers/office';
+import { gotoLegacyFace, type RecordedServerMessage } from '../../helpers/standalone';
 import { setSettings } from '../../helpers/webview';
 
 test.describe('Standalone / hooks', () => {
@@ -11,6 +11,13 @@ test.describe('Standalone / hooks', () => {
     page,
     standalone,
   }) => {
+    // [data-testid="agent-overlay"] (expectOverlayCount/expectOverlayVisible)
+    // is a legacy-only DOM concept — webview-v3 renders agents on a single
+    // canvas (App.tsx's iso-canvas) with no per-agent DOM node at all, so
+    // there's no mechanical selector port. C4-retirement-bound: a real v3
+    // port needs new instrumentation (e.g. reading agent state off
+    // __warRoomV3TestHooks) rather than a selector swap.
+    await gotoLegacyFace(page, standalone);
     await setSettings(page, {
       alwaysShowLabels: true,
       hooksEnabled: true,

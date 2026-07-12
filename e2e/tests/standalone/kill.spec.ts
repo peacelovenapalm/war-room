@@ -1,6 +1,7 @@
 import { expect, test } from '../../fixtures/standalone';
-import { expectOverlayCount, readAgentOverlayIds } from '../../helpers/office';
 import { preToolUseBash, sendHookEvent, sessionStartStartup } from '../../helpers/hooks';
+import { expectOverlayCount, readAgentOverlayIds } from '../../helpers/office';
+import { gotoLegacyFace } from '../../helpers/standalone';
 import { setSettings } from '../../helpers/webview';
 
 /**
@@ -32,6 +33,13 @@ test.describe('Standalone / worker session kill (AgentDrawer)', () => {
     page,
     standalone,
   }) => {
+    // window.__pixelAgentsTestHooks.openAgentDrawer and
+    // [data-testid="agent-overlay"] / "kill-control" are legacy-only — v3's
+    // AgentDrawer.tsx has its own drawer (testid "agent-drawer"/"drawer-kill")
+    // but no equivalent open-by-id test hook or DOM agent overlay to drive
+    // it from (agents render on a single canvas). C4-retirement-bound: a
+    // real v3 port needs new instrumentation, not a selector swap.
+    await gotoLegacyFace(page, standalone);
     await setSettings(page, {
       alwaysShowLabels: true,
       hooksEnabled: true,

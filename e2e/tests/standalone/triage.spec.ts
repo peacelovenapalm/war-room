@@ -1,11 +1,12 @@
 import { expect, test } from '../../fixtures/standalone';
-import { expectOverlayCount, readAgentOverlayIds } from '../../helpers/office';
 import {
   permissionRequest,
   preToolUseBash,
   sendHookEvent,
   sessionStartStartup,
 } from '../../helpers/hooks';
+import { expectOverlayCount, readAgentOverlayIds } from '../../helpers/office';
+import { gotoLegacyFace } from '../../helpers/standalone';
 import { setSettings } from '../../helpers/webview';
 
 /**
@@ -19,6 +20,13 @@ test.describe('Standalone / triage board click-through', () => {
     page,
     standalone,
   }) => {
+    // window.__pixelAgentsTestHooks.setCrisis and [data-testid="agent-overlay"]
+    // are legacy-only — v3's TriageBoard.tsx does have a matching
+    // "triage-row"/"drawer-row" testid, but there's no equivalent way to
+    // force the crisis flag or read agent overlay ids (agents render on a
+    // single canvas, no DOM overlay). C4-retirement-bound: a real v3 port
+    // needs new instrumentation, not a selector swap.
+    await gotoLegacyFace(page, standalone);
     await setSettings(page, {
       alwaysShowLabels: true,
       hooksEnabled: true,

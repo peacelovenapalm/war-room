@@ -8,6 +8,7 @@ import {
   sessionStartStartup,
 } from '../../helpers/hooks';
 import { expectOverlayCount, readAgentOverlayIds } from '../../helpers/office';
+import { gotoLegacyFace } from '../../helpers/standalone';
 import { setSettings } from '../../helpers/webview';
 
 /**
@@ -124,6 +125,11 @@ test.describe('Standalone / HUD overlay layout (KICKOFF v1.1 item 4)', () => {
       page,
       standalone,
     }) => {
+      // This suite exercises legacy-face-only internals (HudStack testids,
+      // EditActionBar) that have no v3 equivalent — see FACE-MERGE-PLAN
+      // Tier 3 (df3a039): webview-v3 is the root face post-cutover, so the
+      // shared `standalone` fixture boots there and this must opt into /v1/.
+      await gotoLegacyFace(page, standalone);
       await page.setViewportSize(viewport);
       await setSettings(page, {
         alwaysShowLabels: true,
@@ -172,7 +178,10 @@ test.describe('Standalone / HUD overlay layout (KICKOFF v1.1 item 4)', () => {
       // 4. Edit mode + a real dirty edit (EditActionBar, top-center) plus a
       // zoom change (ZoomLevelBadge, top-center) — the exact corner the
       // original zoom-%-chip-vs-EditActionBar collision happened in.
-      await page.locator('button[title="Edit office layout"]').click();
+      // "Edit office layout" moved from a native `title` attr to a
+      // ControlTooltip label (KICKOFF v1.1 item 8, bc186a3) — the button's
+      // accessible name is just its visible text now.
+      await page.getByRole('button', { name: 'Layout', exact: true }).click();
       await page.locator('button[title="Paint floor tiles"]').click();
       const canvasBox = await page.locator('[data-testid="office-canvas"]').boundingBox();
       if (canvasBox) {

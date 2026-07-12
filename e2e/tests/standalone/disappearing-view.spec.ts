@@ -1,8 +1,9 @@
 import { PNG } from 'pngjs';
 
 import { expect, test } from '../../fixtures/standalone';
-import { expectOverlayCount } from '../../helpers/office';
 import { preToolUseBash, sendHookEvent, sessionStartStartup } from '../../helpers/hooks';
+import { expectOverlayCount } from '../../helpers/office';
+import { gotoLegacyFace } from '../../helpers/standalone';
 import { setSettings } from '../../helpers/webview';
 
 /**
@@ -69,6 +70,11 @@ test.describe('Standalone / disappearing view (KICKOFF v1.1 item 2)', () => {
     page,
     standalone,
   }) => {
+    // This suite counts Pixi Application mounts — a legacy-face-only
+    // concept (webview-v3 has no Pixi canvas). See FACE-MERGE-PLAN Tier 3
+    // (df3a039): webview-v3 is the root face post-cutover, so the shared
+    // `standalone` fixture boots there and this must opt into /v1/.
+    await gotoLegacyFace(page, standalone);
     await setSettings(page, {
       alwaysShowLabels: true,
       hooksEnabled: true,
@@ -93,7 +99,10 @@ test.describe('Standalone / disappearing view (KICKOFF v1.1 item 2)', () => {
     // Trigger 1: view switch (isEditMode toggle — the original G2 path).
     // EditorToolbar (and its "Paint floor tiles" tool button) only renders
     // in edit mode, so its visibility is the real signal the toggle landed.
-    await page.locator('button[title="Edit office layout"]').click();
+    // "Edit office layout" moved from a native `title` attr to a
+    // ControlTooltip label (KICKOFF v1.1 item 8, bc186a3) — the button's
+    // accessible name is just its visible text now.
+    await page.getByRole('button', { name: 'Layout', exact: true }).click();
     await expect(page.locator('button[title="Paint floor tiles"]')).toBeVisible();
     await expect.poll(() => getPixiInitCount(page)).toBe(initialCount);
     expect(await canvasShowsContent(page)).toBe(true);
@@ -109,7 +118,7 @@ test.describe('Standalone / disappearing view (KICKOFF v1.1 item 2)', () => {
     await grayscale(page, 'test-results/e2e/disappearing-view-02-furniture-edit-grayscale.png');
 
     // Back to view mode before the remaining triggers.
-    await page.locator('button[title="Edit office layout"]').click();
+    await page.getByRole('button', { name: 'Layout', exact: true }).click();
 
     // Trigger 3: zoom change.
     await page.locator('button[title="Zoom in (Ctrl+Scroll)"]').click();

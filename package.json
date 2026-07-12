@@ -37,7 +37,7 @@
     "asyncapi:generate": "tsx scripts/generate-messages.ts",
     "asyncapi:validate": "asyncapi validate core/asyncapi.yaml",
     "asyncapi:docs": "asyncapi start studio --file core/asyncapi.yaml",
-    "check-types": "tsc --noEmit && tsc --noEmit -p server/tsconfig.test.json",
+    "check-types": "tsc --noEmit && tsc --noEmit -p server/tsconfig.test.json && cd webview-v3 && tsc -b --noEmit",
     "prepare": "husky",
     "lint": "eslint adapters/vscode server core && cd webview-ui && eslint . && cd ../webview-v3 && eslint .",
     "lint:fix": "eslint adapters/vscode server core --fix && cd webview-ui && eslint . --fix && cd ../webview-v3 && eslint . --fix",

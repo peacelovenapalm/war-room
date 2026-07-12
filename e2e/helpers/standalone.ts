@@ -166,6 +166,19 @@ async function openStandalonePage(page: Page, hostUrl: string): Promise<void> {
   await expect(page.getByRole('button', { name: 'Settings' })).toBeVisible({ timeout: 30_000 });
 }
 
+/**
+ * Navigate to the LEGACY (v1) face at /v1/. Since the face-merge cutover
+ * (FACE-MERGE-PLAN Tier 3, df3a039) webview-v3 is the ROOT face and the
+ * `standalone` fixture itself boots there — this is only for specs that
+ * exercise legacy-only internals with no v3 equivalent (Pixi canvas mount
+ * counting, HudStack testids, EditActionBar). Call this first thing in the
+ * test body, before driving any other webview helper.
+ */
+export async function gotoLegacyFace(page: Page, standalone: StandaloneSession): Promise<void> {
+  await page.goto(`${standalone.hostUrl}/v1/`);
+  await expect(page.getByRole('button', { name: 'Settings' })).toBeVisible({ timeout: 30_000 });
+}
+
 export async function launchStandalone(page: Page): Promise<StandaloneSession> {
   const tmpHome = fs.mkdtempSync(path.join(os.tmpdir(), 'pixel-standalone-e2e-home-'));
   const workspaceDir = fs.mkdtempSync(path.join(os.tmpdir(), 'pixel-standalone-e2e-workspace-'));
