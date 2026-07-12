@@ -2,6 +2,7 @@ import { useEffect, useRef } from 'react';
 
 import type { TailStreamState } from '../state/tailStore';
 import { pausedCount } from '../state/tailStore';
+import { ControlTip } from './ControlTip';
 
 /** "Near bottom" band for autoscroll — scrolled within this many px of the
  *  end keeps following; scrolled further up never yanks the reader down. */
@@ -46,13 +47,17 @@ export function TailSheet({ state, onTogglePause, onTogglePin, pinned }: TailShe
           </span>
         )}
         <span className="tail-sheet__bar-spacer" />
-        <button type="button" className="verb" data-testid="tail-pause" onClick={onTogglePause}>
-          {paused ? '▶ RESUME' : '⏸ PAUSE'}
-        </button>
-        {onTogglePin && (
-          <button type="button" className="verb" data-testid="tail-pin" onClick={onTogglePin}>
-            {pinned ? '✕ UNPIN' : '⊞ PIN TAIL'}
+        <ControlTip label="Freezes the live tail — new lines buffer as +N NEW WHILE PAUSED (lossless).">
+          <button type="button" className="verb" data-testid="tail-pause" onClick={onTogglePause}>
+            {paused ? '▶ RESUME' : '⏸ PAUSE'}
           </button>
+        </ControlTip>
+        {onTogglePin && (
+          <ControlTip label="Docks this agent's tail in the desktop pin strip (3 slots max).">
+            <button type="button" className="verb" data-testid="tail-pin" onClick={onTogglePin}>
+              {pinned ? '✕ UNPIN' : '⊞ PIN TAIL'}
+            </button>
+          </ControlTip>
         )}
       </div>
       <div

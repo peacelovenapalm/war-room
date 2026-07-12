@@ -24,6 +24,7 @@ import type { CrisisState } from '../state/crisisStore';
 import { compactTokens } from '../state/hud';
 import type { TailStreamState } from '../state/tailStore';
 import { deriveVisualState, freshPoll, STATE_CHIPS } from '../state/visualState';
+import { ControlTip } from './ControlTip';
 import { TailSheet } from './TailSheet';
 
 /** Refresh cadence for the live-runner check while the drawer is open. */
@@ -341,22 +342,25 @@ export function AgentDrawer({
       )}
 
       <div className="drawer__verbs">
-        <button type="button" className="verb" data-testid="drawer-copy-id" onClick={handleCopy}>
-          {copied ? '✓ COPIED' : '⧉ COPY ID'}
-        </button>
-        <button
-          type="button"
-          className={killPhase === 'confirm' ? 'verb verb--confirm' : 'verb'}
-          data-testid="drawer-kill"
-          disabled={!canKill || killPhase === 'pending' || killPhase === 'killed'}
-          title="End this worker's session for real — two-step confirm"
-          onClick={handleKill}
-        >
-          {killPhase === 'confirm' && '⚠ CONFIRM KILL'}
-          {killPhase === 'pending' && '⏳ KILLING…'}
-          {killPhase === 'killed' && '✕ KILLED'}
-          {(killPhase === 'idle' || killPhase === 'denied') && '✕ KILL'}
-        </button>
+        <ControlTip label="Copies MACHINE · project dir · session id — works even when KILL is unavailable.">
+          <button type="button" className="verb" data-testid="drawer-copy-id" onClick={handleCopy}>
+            {copied ? '✓ COPIED' : '⧉ COPY ID'}
+          </button>
+        </ControlTip>
+        <ControlTip label="End this worker's session for real — two-step confirm, real /api/agents/kill.">
+          <button
+            type="button"
+            className={killPhase === 'confirm' ? 'verb verb--confirm' : 'verb'}
+            data-testid="drawer-kill"
+            disabled={!canKill || killPhase === 'pending' || killPhase === 'killed'}
+            onClick={handleKill}
+          >
+            {killPhase === 'confirm' && '⚠ CONFIRM KILL'}
+            {killPhase === 'pending' && '⏳ KILLING…'}
+            {killPhase === 'killed' && '✕ KILLED'}
+            {(killPhase === 'idle' || killPhase === 'denied') && '✕ KILL'}
+          </button>
+        </ControlTip>
       </div>
 
       {/* T2/T4 remote-answer plane (REMOTE-ANSWER-DESIGN.md): ANSWER only
@@ -406,15 +410,17 @@ export function AgentDrawer({
               />
               <div className="drawer__verbs">
                 <span className="field__hint">{answerRemaining} chars remaining</span>
-                <button
-                  type="button"
-                  className="verb verb--confirm"
-                  data-testid="answer-next"
-                  disabled={!canSendAnswer}
-                  onClick={handleAnswerNext}
-                >
-                  ANSWER…
-                </button>
+                <ControlTip label="Types this text into the live session — shows the exact text before it sends.">
+                  <button
+                    type="button"
+                    className="verb verb--confirm"
+                    data-testid="answer-next"
+                    disabled={!canSendAnswer}
+                    onClick={handleAnswerNext}
+                  >
+                    ANSWER…
+                  </button>
+                </ControlTip>
               </div>
             </>
           )}

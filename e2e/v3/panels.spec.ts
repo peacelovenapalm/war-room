@@ -508,6 +508,17 @@ test.describe('stage-3 panel ports (desktop chrome model)', () => {
         await expect(page.getByTestId(`dock-${kind}`)).toBeVisible();
       }
 
+      // T1a tooltip system: keyboard focus (the deterministic path in
+      // Playwright — hover-delay/long-press timing are covered by
+      // controlTip.test.ts's pure-function unit tests) reveals a
+      // shape+text bubble for a dock entry, and it clears again on blur.
+      await page.getByTestId('dock-call').focus();
+      const callTip = page.getByTestId('control-tip-bubble');
+      await expect(callTip).toBeVisible();
+      await expect(callTip).toContainText('Dispatch a coworker');
+      await page.getByTestId('dock-call').blur();
+      await expect(callTip).toBeHidden();
+
       // HELP: full vocabulary, categorized, `?` key also opens it.
       await page.getByTestId('dock-help').click();
       await expect(page.getByTestId('help-modal')).toBeVisible();

@@ -4,6 +4,7 @@ import { formatCashChip, formatRepChip } from '../state/economy';
 import type { AgentTally, RealSheetKind, WingCount } from '../state/hud';
 import { formatTally, formatWing, officeMood } from '../state/hud';
 import { soundscapeToggleLabel } from '../state/soundscape';
+import { ControlTip } from './ControlTip';
 import { StopAllControl } from './StopAllControl';
 
 const CONNECTION_CHIP: Record<ConnectionStatus, string> = {
@@ -67,9 +68,11 @@ export function HudStrip({
   return (
     <header className="hud">
       <span className="brand">WAR ROOM · V3</span>
-      <span className="chip" data-testid="hud-connection">
-        {CONNECTION_CHIP[connectionStatus]}
-      </span>
+      <ControlTip label="WS connection to the real server.">
+        <span className="chip" data-testid="hud-connection">
+          {CONNECTION_CHIP[connectionStatus]}
+        </span>
+      </ControlTip>
       <button
         type="button"
         className="chip chip--tap"
@@ -166,15 +169,16 @@ export function HudStrip({
           persistence (state/soundscape.ts), independent of SettingsModal's
           pre-existing server-synced `soundEnabled` (a VS Code adapter
           notification setting, a different subsystem entirely). */}
-      <button
-        type="button"
-        data-testid="hud-soundscape"
-        aria-pressed={!soundscapeMuted}
-        title="Ambience + event chirps (WebAudio, no assets) — default muted"
-        onClick={onToggleSoundscape}
-      >
-        {soundscapeToggleLabel(soundscapeMuted)}
-      </button>
+      <ControlTip label="Ambience + event chirps (WebAudio, no assets) — default muted.">
+        <button
+          type="button"
+          data-testid="hud-soundscape"
+          aria-pressed={!soundscapeMuted}
+          onClick={onToggleSoundscape}
+        >
+          {soundscapeToggleLabel(soundscapeMuted)}
+        </button>
+      </ControlTip>
     </header>
   );
 }

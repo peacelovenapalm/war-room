@@ -1,6 +1,7 @@
 import { useState } from 'react';
 
 import { interpretResumeResponse, interpretStopAllResponse } from '../state/stopAll';
+import { ControlTip } from './ControlTip';
 
 export interface StopAllControlProps {
   /** Lifted stop state — ONE source of truth in App (hydrated from the
@@ -75,24 +76,28 @@ export function StopAllControl({ stopped, onStoppedChange }: StopAllControlProps
   return (
     <span className="stop-all" data-testid="stop-all-stack" title={message ?? undefined}>
       {stopped ? (
-        <button
-          type="button"
-          className={confirmResume ? 'verb verb--confirm' : 'verb'}
-          onClick={handleResume}
-          data-testid="resume-control"
-        >
-          {confirmResume ? '⚠ CONFIRM RESUME' : '▶ RESUME'}
-        </button>
+        <ControlTip label="Resume automation — a separate explicit action, never automatic.">
+          <button
+            type="button"
+            className={confirmResume ? 'verb verb--confirm' : 'verb'}
+            onClick={handleResume}
+            data-testid="resume-control"
+          >
+            {confirmResume ? '⚠ CONFIRM RESUME' : '▶ RESUME'}
+          </button>
+        </ControlTip>
       ) : (
-        <button
-          type="button"
-          className="verb"
-          onClick={handleStopAll}
-          disabled={stopping}
-          data-testid="stop-all-control"
-        >
-          ■ STOP ALL
-        </button>
+        <ControlTip label="Halts every standing order + running chain, server-side. Manual CALL dispatch stays available.">
+          <button
+            type="button"
+            className="verb"
+            onClick={handleStopAll}
+            disabled={stopping}
+            data-testid="stop-all-control"
+          >
+            ■ STOP ALL
+          </button>
+        </ControlTip>
       )}
       {failed && (
         <span className="stop-all__failed" data-testid="stop-all-failed" role="alert">
