@@ -54,17 +54,20 @@ GRAPH_DIR_NEXUS="/data/repos/vault-notifier/vault/vault/_meta/graph"
 #    (inboxProvider.ts, GET /api/inbox). Additive mount — TODO_DIR_NEXUS
 #    stays its own mount so existing WAR_ROOM_TODO_DIR wiring is untouched.
 ROUTINES_DIR_NEXUS="/data/repos/vault-notifier/vault/vault/_inbox/routines"
-#  - districts (v4 Phase 5 Lane C, GET /api/districts): DELIBERATELY UNWIRED.
-#    Both candidate sources on nexus are stale or absent — the TWE checkout
-#    at /data/repos/two-wheel-events last pulled 2026-03-13 (mounting it
-#    would render plausible-but-wrong March state), and no war-room checkout
-#    exists on nexus at all. Until a FRESH auto-pulling source exists,
-#    districts honestly render "NO DATA". To wire later, uncomment BOTH the
-#    env line and the mount line below AND ensure the source auto-pulls:
-# DISTRICT_TWE_STATE_NEXUS="/data/repos/two-wheel-events/.planning/STATE.md"
-#    plus in the docker run block:
-#      -e WAR_ROOM_DISTRICT_TWE_STATE=/briefing/districts/twe/STATE.md
-#      -v $(dirname ${DISTRICT_TWE_STATE_NEXUS}):/briefing/districts/twe:ro
+#  - districts (v5 Phase C, GET /api/districts): WIRED 2026-07-12. Fresh
+#    read-only clones live under /data/repos/districts/<project>/ on nexus
+#    (created from the local Gitea bare repos; auto-pulled every 15 min by
+#    the `war-room-districts-pull` crontab entry). The whole root is
+#    bind-mounted ro at /briefing/districts and the server scans immediate
+#    subdirs for .planning/STATE.md (else STATE.md) — see
+#    server/src/districtsProvider.ts (WAR_ROOM_DISTRICTS_DIR contract).
+#    war-room's OWN state has no nexus git source (GitHub unreachable from
+#    nexus), so it rides the same laptop-canonical rsync pattern as the
+#    tracker: refreshed into the districts root on every deploy below.
+#    UNDO: crontab -l | grep -v war-room-districts-pull | crontab -
+#          rm -rf /data/repos/districts
+DISTRICTS_DIR_NEXUS="/data/repos/districts"
+WARROOM_STATE_LOCAL="${REPO_DIR}/.planning/v4/STATE-v4.md"
 TRACKER_STATE_LOCAL="/Users/greg/code/completion-2026-07/STATE.md"
 
 ok()   { printf '[OK]   %s\n' "$1"; }
@@ -106,6 +109,19 @@ if [ -f "${TRACKER_STATE_LOCAL}" ]; then
 else
   warn "no local tracker at ${TRACKER_STATE_LOCAL} — skipping refresh"
 fi
+
+# ── Refresh war-room's own district state (laptop is canonical, v5 Phase C) ──
+ssh "${NEXUS_HOST}" "mkdir -p ${DISTRICTS_DIR_NEXUS}/war-room"
+if [ -f "${WARROOM_STATE_LOCAL}" ]; then
+  rsync -a "${WARROOM_STATE_LOCAL}" "${NEXUS_HOST}:${DISTRICTS_DIR_NEXUS}/war-room/STATE.md" \
+    && ok "war-room district STATE.md refreshed on nexus" \
+    || warn "war-room district state refresh failed — district may render stale/unknown"
+else
+  warn "no local war-room state at ${WARROOM_STATE_LOCAL} — war-room district will render its last-shipped state"
+fi
+ssh "${NEXUS_HOST}" "test -d ${DISTRICTS_DIR_NEXUS}" \
+  && ok "districts root present: ${DISTRICTS_DIR_NEXUS} ($(ssh "${NEXUS_HOST}" "ls ${DISTRICTS_DIR_NEXUS} | wc -l" | tr -d ' ') projects)" \
+  || warn "districts root missing on nexus — districts will render NO DATA"
 
 # ── Token env file (created once, kept stable across redeploys) ─────────────
 ssh "${NEXUS_HOST}" "mkdir -p ${REMOTE_ENV_DIR}"
@@ -151,6 +167,8 @@ ssh "${NEXUS_HOST}" "docker run -d --name war-room --restart unless-stopped \
   -e WAR_ROOM_TRACKER_STATE=/briefing/tracker/STATE.md \
   -e WAR_ROOM_GRAPH_DIR=/briefing/graph \
   -e WAR_ROOM_ROUTINES_DIR=/briefing/routines \
+  -e WAR_ROOM_DISTRICTS_DIR=/briefing/districts \
+  -v ${DISTRICTS_DIR_NEXUS}:/briefing/districts:ro \
   -v ${TODO_DIR_NEXUS}:/briefing/todo:ro \
   -v ${TRACKER_DIR_NEXUS}:/briefing/tracker:ro \
   -v ${GRAPH_DIR_NEXUS}:/briefing/graph:ro \
