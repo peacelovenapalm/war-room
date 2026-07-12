@@ -22,6 +22,64 @@ This is an EXPLORATORY arc, not a contract: v-numbers are eras. Grounded
 in the real trajectory (v0 viewer → v1 game+dispatch → v3 Living Studio →
 v4 console → v5 finish/connect draft).
 
+## Register outcomes (50-question interactive pass, 2026-07-12)
+
+Full Q+A digest: `HORIZON-QUESTIONS.md` §ANSWERS. The answers that RESHAPE
+the acts below (read these as overrides where the act text differs):
+
+- **The morning IS the board** (Q3): the separate NEXUS morning page gets
+  absorbed, not integrated-beside. One overnight-ran summary + one
+  pre-triaged push (Q1); event-driven pushes ~3-5/day fine (Q2); explicit
+  "all calm" signals (Q7); lock-screen/watch signal = NEEDS-YOU COUNT (Q6).
+- **The first autonomy rungs are PRE-APPROVED** (Q18) — restart dead
+  runners/daemons, refresh stale clones, mechanical vault fixes, re-run
+  failed routines — receipts + undo mandatory. This pulls the first ladder
+  rung from "v10" into the NEXT sprint. Spawning: scheduled + reactive
+  standing orders allowed, every spawn receipted (Q20).
+- **Memory goes direct** (Q10): auto-distill every session (skip-tag
+  opt-out, Q9), write STRAIGHT into the vault with an audit trail — the
+  routine PR gate is dead weight (5 unmerged vault-fixer PRs proved it;
+  backups verified: GitHub + Gitea dual-push + nexus clone + nightly).
+  Scope = whole vault/whole life (Q13) MINUS a hard denylist: finances,
+  health, named people (Q14). Wrong knowledge dies by staleness decay ◷ +
+  contradiction flags (Q11). Recall = answer first, receipts on tap (Q8).
+  The board may learn Greg's own patterns and adapt gate timing (Q12).
+- **Steering direction settled** (Q17): FULL free-form remote prompting is
+  wanted — the C3 design gate decides HOW (containment), not whether.
+  Answer-plane under-use has two named causes (Q21): nothing born managed
+  - no assertive paging; both are roadmap items. Conflicts render as
+    crisis cards with both transcripts, human arbitrates (Q19); a
+    supervisor lane may unblock ROUTINE blocks (Q15).
+- **Post-move fleet topology** (Q22/26/42): NEXUS + Mini colocate at the
+  parents' house = the US-side always-on pair; Greg's Tbilisi footprint is
+  MacBook + phone ONLY. Auto-failover eligible work to the Mini when the
+  MacBook sleeps. Control/compute separation on NEXUS stays (Q24). Cloud
+  runs get a visibly different trust tier (Q25).
+- **World calibration** (Q27-32): what delights = agents visibly working;
+  empty desks + economy chips are already invisible. Role uniforms, not
+  named individuals. Districts = org tool FIRST. Aesthetics may GO FULL
+  WORLD (lore/pets/weather welcome) — honesty invariant still binds every
+  visual. Tier-2 kill list confirmed right in hindsight.
+- **Economy dormant** (Q33-34): decoration until real money or real API
+  costs exist; no itemized spend (subscription mindset); ceilings stay.
+  One self-stakes contract experiment (Q35), evaluated honestly.
+- **Product door specifics** (Q36-39): imagined operator = a paying solo
+  dev; pitch = honest-data × one-room; TEMP art embarrasses; hardcodes
+  BLOCK sharing for feedback → de-hardcoding has near-term value, not
+  just v15 value.
+- **Anti-friction-death** (Q49, the named killer): one broken morning ends
+  the habit — the board must announce its own sickness (degraded-state
+  pushes; seconds-fine/minutes-not latency bar, Q40). Offline actions PARK
+  as clearable drafts, never auto-fire (Q41).
+- **v6 work items locked by the register**: adversarial worst-case audit
+  (Q43), fix both infra findings — token out of plist env + MINI becomes a
+  real clone with ship-check (Q44), cross-model spot checks on narrative
+  reports (Q45).
+- **Process** (Q46-48): run autonomously what we can on Fable + codex
+  TODAY (this run map exists because Fable may not be here tomorrow); no
+  preset rhythm — work stays gate-bounded and resumable; v6+ planning
+  happens FULLY ON THE BOARD as the standing dogfood test.
+
 ## The one-sentence thesis (revised)
 
 Every version should leave Greg with **more remembered** (the estate

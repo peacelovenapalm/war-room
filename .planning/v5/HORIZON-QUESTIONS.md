@@ -84,3 +84,75 @@ into HORIZON-v20.md and the v6+ kickoffs.
 - **Q48.** Should v6+ planning happen ON the board (dispatched planning agents, gates answered from the phone) as a dogfood test of the whole thesis?
 - **Q49.** What would make you QUIT this project — the honest pre-mortem: what does abandoned-in-March look like, and what prevents it?
 - **Q50.** Ten years out, one sentence: what did War Room turn out to be?
+
+---
+
+## ANSWERS (Greg, interactive session 2026-07-12)
+
+**A · Mornings:** Q1 overnight-ran summary + ONE pre-triaged push (mix). Q2
+event-driven ~3-5/day OK. Q3 the BOARD ABSORBS the morning page (kill the
+separate surface). Q4 wall display maybe post-move. Q5 learnable sound
+grammar — YES, worth it. Q6 lock-screen signal = NEEDS-YOU COUNT. Q7
+explicit "all calm" beats silence.
+
+**B · Memory:** Q8 answer first, receipts on tap. Q9 auto-distill every
+session, with a skip tag. Q10 DIRECT vault writes with audit trail — the
+routine PR gate is dead weight (5 vault-fixer PRs sat unmerged 07-08→07-12;
+backups verified: dual-pushurl GitHub+Gitea, nexus clone 0-behind, nightly
+backup). Q11 staleness decay ◷ + contradiction flags. Q12 yes — learn my
+patterns and adapt gate timing. Q13 whole vault, whole life… Q14 …EXCEPT a
+hard denylist: finances/accounts, health/struggles, named people.
+
+**C · Steering:** Q15 the fix is BOTH assertive needs-you paging AND a
+supervisor lane for routine blocks. Q16 wrapper default decided at the C3
+design gate. Q17 FULL free-form remote prompting wanted. Q18 auto-rung
+pre-approved classes (ALL FOUR): restart dead runners/daemons, refresh
+stale clones/mirrors, mechanical vault fixes, re-run failed routines. Q19
+conflicts = crisis card with both transcripts, human arbitrates. Q20 board
+may spawn scheduled + reactive work, every spawn receipted. Q21 answer
+plane under-used because (1) nothing is born managed and (2) no assertive
+paging — both now on the roadmap.
+
+**D · Fleet:** Q22 post-move the Mini lives at the parents' house WITH
+NEXUS → natural US-side always-on runner (honest note: so far only MacBook
+
+- phone actually used). Q23 third machine unsure — don't over-build. Q24
+  keep control/compute separation on NEXUS. Q25 cloud runs = visibly
+  different trust tier. Q26 AUTO-FAILOVER eligible work to the Mini when the
+  MacBook sleeps.
+
+**E · World:** Q27 delight = agents visibly working; already look past
+empty desks and economy chips. Q28 role uniforms only (no named
+individuals). Q29 districts = org tool FIRST. Q30 time-of-day is
+nice-to-have. Q31 the Tier-2 kill list was right — nothing missed. Q32 GO
+FULL WORLD — lore, pets, weather welcome (data honesty invariant still
+binds every visual).
+
+**F · Economy:** Q33 decoration until real money or real API costs exist.
+Q34 no itemized spend — subscription mindset; keep ceilings only. Q35 try
+ONE self-stakes contract experiment, evaluate honestly.
+
+**G · Product:** Q36 imagined second operator = a paying solo dev. Q37
+proud: live board + honesty doctrine; embarrassed: TEMP art; hardcodes not
+embarrassing but they BLOCK sharing for real feedback (de-hardcoding has
+near-term value, not just v15). Q38 shape decided at the evidence
+checkpoint. Q39 pitch = honest-data × one-room combined.
+
+**H · Remote:** Q40 seconds fine, minutes not; degraded state must push.
+Q41 offline = PARK the action as a draft for reconnect (with a clear
+option) — never auto-fire. Q42 Tbilisi footprint = MacBook + phone only.
+
+**I · Trust:** Q43 a proper adversarial worst-case audit is a v6 WORK
+ITEM. Q44 fix BOTH audit findings in v6 (token out of plist env, MINI
+becomes a real clone with ship-check). Q45 cross-model spot checks on
+narrative reports.
+
+**J · Meta:** Q46 run autonomously what we can on Fable + codex TODAY —
+this run map exists precisely because Fable may not be here tomorrow;
+a sprint is expected today after wrap-up while Greg is at work. Q47 no
+preset rhythm (variable real-life schedule) → work must stay gate-bounded
+and resumable at any point. Q48 v6+ planning happens FULLY ON THE BOARD
+(dogfood). Q49 the real death is DEATH BY FRICTION — one broken morning
+and the habit dies; the board must announce its own sickness. Q50 ten
+years out: a mix of "the instrument I ran life through" and "the thing
+that funded freedom."
