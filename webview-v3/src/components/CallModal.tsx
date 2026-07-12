@@ -24,6 +24,7 @@ import {
   type SubpathJoinResult,
 } from '../net/dispatchFacts';
 import { budgetChipLabel, budgetResetHintLine, type BudgetSnapshotClient } from '../state/budget';
+import { ControlTip } from './ControlTip';
 import { Modal } from './Modal';
 
 const REFRESH_INTERVAL_MS = 10_000;
@@ -257,33 +258,37 @@ export function CallModal({ isOpen, onClose, prefill, send, onSend, budget }: Ca
           runner-decision / receipts plane as a one-shot DISPATCH — the hire
           flow's substrate, no separate modal. */}
       <div className="modal__actions" data-testid="call-mode-toggle">
-        <button
-          type="button"
-          className={mode === 'dispatch' ? 'verb verb--confirm' : 'verb'}
-          data-testid="call-mode-dispatch"
-          onClick={() => {
-            setMode('dispatch');
-          }}
-        >
-          DISPATCH
-        </button>
-        <button
-          type="button"
-          className={mode === 'session' ? 'verb verb--confirm' : 'verb'}
-          data-testid="call-mode-session"
-          onClick={() => {
-            setMode('session');
-            // T8: shell can never be a session (server denies outright) —
-            // reset rather than leaving an unsendable pick armed.
-            if (provider === DISPATCH_COMPUTE_PROVIDER) {
-              setProvider('');
-              setScriptId('');
-              setArgsInput('');
-            }
-          }}
-        >
-          PERSISTENT SESSION
-        </button>
+        <ControlTip label="One-shot run: dispatch a prompt, get a result, done.">
+          <button
+            type="button"
+            className={mode === 'dispatch' ? 'verb verb--confirm' : 'verb'}
+            data-testid="call-mode-dispatch"
+            onClick={() => {
+              setMode('dispatch');
+            }}
+          >
+            DISPATCH
+          </button>
+        </ControlTip>
+        <ControlTip label="Launches a runner-owned tmux session you can ANSWER into later from the drawer.">
+          <button
+            type="button"
+            className={mode === 'session' ? 'verb verb--confirm' : 'verb'}
+            data-testid="call-mode-session"
+            onClick={() => {
+              setMode('session');
+              // T8: shell can never be a session (server denies outright) —
+              // reset rather than leaving an unsendable pick armed.
+              if (provider === DISPATCH_COMPUTE_PROVIDER) {
+                setProvider('');
+                setScriptId('');
+                setArgsInput('');
+              }
+            }}
+          >
+            PERSISTENT SESSION
+          </button>
+        </ControlTip>
       </div>
 
       {fetchFailed && machines.length === 0 && (

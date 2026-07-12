@@ -8,6 +8,7 @@ import type { CrisisViewInput, TriageRow } from '../state/crisis';
 import { buildTriageRows, formatAge } from '../state/crisis';
 import type { CrisisState } from '../state/crisisStore';
 import { freshPoll } from '../state/visualState';
+import { ControlTip } from './ControlTip';
 
 export interface TriageBoardProps {
   agents: AgentMap;
@@ -160,52 +161,60 @@ function BoardRow({
         {row.gate === 'ack-undo' && row.debrisKey !== undefined && (
           <>
             {pendingUndoUntil === undefined ? (
-              <button
-                type="button"
-                className="verb"
-                data-testid="verb-ack"
-                onClick={() => {
-                  onAck(row.debrisKey!, row.debrisSince ?? 0);
-                }}
-              >
-                ✓ ACK
-              </button>
+              <ControlTip label="Dismisses this debris row — genuinely reversible for 5s via UNDO.">
+                <button
+                  type="button"
+                  className="verb"
+                  data-testid="verb-ack"
+                  onClick={() => {
+                    onAck(row.debrisKey!, row.debrisSince ?? 0);
+                  }}
+                >
+                  ✓ ACK
+                </button>
+              </ControlTip>
             ) : (
-              <button
-                type="button"
-                className="verb verb--undo"
-                data-testid="verb-undo"
-                onClick={() => {
-                  onUndoAck(row.debrisKey!);
-                }}
-              >
-                ↩ UNDO ({String(undoSecondsLeft(pendingUndoUntil, now))}s)
-              </button>
+              <ControlTip label="Restores this row within its 5s window.">
+                <button
+                  type="button"
+                  className="verb verb--undo"
+                  data-testid="verb-undo"
+                  onClick={() => {
+                    onUndoAck(row.debrisKey!);
+                  }}
+                >
+                  ↩ UNDO ({String(undoSecondsLeft(pendingUndoUntil, now))}s)
+                </button>
+              </ControlTip>
             )}
           </>
         )}
         {row.gate === 'none' && (
-          <button
-            type="button"
-            className="verb verb--gateless"
-            data-testid="verb-approve"
-            aria-describedby={noticeShown ? `${row.rowKey}-notice` : undefined}
-            onClick={onShowNotice}
-          >
-            ✓ APPROVE
-          </button>
+          <ControlTip label="No remote approve gate exists yet — taps the honest reason, not a fake success.">
+            <button
+              type="button"
+              className="verb verb--gateless"
+              data-testid="verb-approve"
+              aria-describedby={noticeShown ? `${row.rowKey}-notice` : undefined}
+              onClick={onShowNotice}
+            >
+              ✓ APPROVE
+            </button>
+          </ControlTip>
         )}
         {agentPresent && (
-          <button
-            type="button"
-            className="verb"
-            data-testid="verb-desk"
-            onClick={() => {
-              onDesk(row.agentId);
-            }}
-          >
-            ▸ DESK
-          </button>
+          <ControlTip label="Opens the agent drawer and walks the camera there.">
+            <button
+              type="button"
+              className="verb"
+              data-testid="verb-desk"
+              onClick={() => {
+                onDesk(row.agentId);
+              }}
+            >
+              ▸ DESK
+            </button>
+          </ControlTip>
         )}
       </div>
       {noticeShown && (
