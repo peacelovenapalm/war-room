@@ -9,8 +9,8 @@ import {
   RECENT_TOOLS_MAX,
   reduceToolActivity,
   sortedSubagents,
-  toolNameSnapshot,
   type ToolActivityMap,
+  toolNameSnapshot,
 } from '../src/state/toolActivity';
 
 function start(overrides: Partial<Extract<ServerMessage, { type: 'agentToolStart' }>> = {}) {

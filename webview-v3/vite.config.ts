@@ -2,9 +2,11 @@ import react from '@vitejs/plugin-react';
 import { defineConfig } from 'vite';
 import { VitePWA } from 'vite-plugin-pwa';
 
+import { COLOR_WORLD_BG } from './src/constants';
+
 /** v3 chrome background — matches index.html's theme-color meta and the
  *  CRT base tone in index.css. */
-const THEME_BG_COLOR = '#20242c';
+const THEME_BG_COLOR = COLOR_WORLD_BG;
 
 /**
  * webview-v3 — the V3 "Living Studio" isometric face (KICKOFF-v3.1 WS-A).
