@@ -1,11 +1,13 @@
 import { describe, expect, it } from 'vitest';
 
 import {
+  clearTerminalDispatchEntries,
   detectSendFailures,
   dismissDispatchEntry,
   dispatchChipLabel,
   type DispatchEntry,
   hasViewableResult,
+  isTerminalDispatchStatus,
   joinRootSubpath,
   machineSupportsFocus,
   type PendingSend,
@@ -60,18 +62,15 @@ describe('dispatchChipLabel', () => {
 });
 
 describe('shouldAutoClear / hasViewableResult', () => {
-  it('ringing/answered/denied never auto-clear; exited/expired/killed do once old enough', () => {
+  it('T6: NOTHING auto-clears by age any more — every status persists until an explicit DISMISS/CLEAR DONE', () => {
     expect(shouldAutoClear('ringing', 1_000_000)).toBe(false);
     expect(shouldAutoClear('answered', 1_000_000)).toBe(false);
     expect(shouldAutoClear('denied', 1_000_000)).toBe(false);
-    expect(shouldAutoClear('exited', 59_999)).toBe(false);
-    expect(shouldAutoClear('exited', 60_000)).toBe(true);
-  });
-
-  it('T5 fleet controls: queued-budget (HELD) never auto-clears — sticky like denied; capped clears like exited', () => {
+    expect(shouldAutoClear('exited', 1_000_000)).toBe(false);
     expect(shouldAutoClear('queued-budget', 1_000_000)).toBe(false);
-    expect(shouldAutoClear('capped', 59_999)).toBe(false);
-    expect(shouldAutoClear('capped', 60_000)).toBe(true);
+    expect(shouldAutoClear('capped', 1_000_000)).toBe(false);
+    expect(shouldAutoClear('expired', 1_000_000)).toBe(false);
+    expect(shouldAutoClear('killed', 1_000_000)).toBe(false);
   });
 
   it('only exited entries are viewable', () => {
@@ -102,18 +101,41 @@ describe('upsertDispatchEntry / pruneDispatchEntries / dismissDispatchEntry', ()
     expect(second[0]).toMatchObject({ status: 'answered', receivedAt: 200 });
   });
 
-  it('prunes terminal entries past autoclear, keeps DENIED sticky', () => {
+  it('T6: pruneDispatchEntries no longer drops anything by age — every status survives', () => {
     const entries = [
       entry({ id: 'a', status: 'exited', receivedAt: 0 }),
       entry({ id: 'b', status: 'denied', receivedAt: 0 }),
     ];
-    const pruned = pruneDispatchEntries(entries, 60_000);
-    expect(pruned.map((e) => e.id)).toEqual(['b']);
+    const pruned = pruneDispatchEntries(entries, 1_000_000);
+    expect(pruned.map((e) => e.id)).toEqual(['a', 'b']);
   });
 
   it('dismiss removes by id regardless of status', () => {
     const entries = [entry({ id: 'a' }), entry({ id: 'b' })];
     expect(dismissDispatchEntry(entries, 'a').map((e) => e.id)).toEqual(['b']);
+  });
+});
+
+describe('isTerminalDispatchStatus / clearTerminalDispatchEntries (T6 CLEAR DONE)', () => {
+  it('denied/expired/exited/killed/capped are terminal; ringing/answered/queued-budget are not', () => {
+    expect(isTerminalDispatchStatus('denied')).toBe(true);
+    expect(isTerminalDispatchStatus('expired')).toBe(true);
+    expect(isTerminalDispatchStatus('exited')).toBe(true);
+    expect(isTerminalDispatchStatus('killed')).toBe(true);
+    expect(isTerminalDispatchStatus('capped')).toBe(true);
+    expect(isTerminalDispatchStatus('ringing')).toBe(false);
+    expect(isTerminalDispatchStatus('answered')).toBe(false);
+    expect(isTerminalDispatchStatus('queued-budget')).toBe(false);
+  });
+
+  it('CLEAR DONE removes every terminal entry, leaves in-flight entries untouched', () => {
+    const entries = [
+      entry({ id: 'a', status: 'exited' }),
+      entry({ id: 'b', status: 'ringing' }),
+      entry({ id: 'c', status: 'denied' }),
+      entry({ id: 'd', status: 'answered', pid: 1 }),
+    ];
+    expect(clearTerminalDispatchEntries(entries).map((e) => e.id)).toEqual(['b', 'd']);
   });
 });
 

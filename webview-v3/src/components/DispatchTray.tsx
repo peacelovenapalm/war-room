@@ -4,6 +4,7 @@ import {
   dispatchChipLabel,
   type DispatchEntry,
   hasViewableResult,
+  isTerminalDispatchStatus,
   pruneDispatchEntries,
   pruneSendFailures,
   type SendFailure,
@@ -20,19 +21,25 @@ export interface DispatchTrayProps {
   /** T5 fleet controls, DAILY FLEET SPEND CEILING — the explicit human
    *  override for a HELD ('queued-budget') entry. */
   onRelease: (id: string) => void;
+  /** T6 CLEAR DONE — bulk-dismiss every terminal entry at once. */
+  onClearDone: () => void;
 }
 
-/** Dispatch lifecycle tray (KICKOFF-v3.1 stage-3 port): one chip per
- *  in-flight or recently-terminal dispatch. GLYPH + WORD only — DENIED and
- *  HELD ('queued-budget', T5 fleet controls) are sticky (dismiss/release
- *  only); every other terminal status auto-clears. Bottom-left strip,
- *  mirrors PinDock's always-visible placement. */
+/** Dispatch lifecycle tray (KICKOFF-v3.1 stage-3 port, T6 persistence pass):
+ *  one chip per in-flight or terminal dispatch. GLYPH + WORD only — T6
+ *  ("the session disappears after reading" — Greg): NOTHING auto-clears by
+ *  age any more. Every terminal chip (isTerminalDispatchStatus) carries its
+ *  own ✕ DISMISS and stays until explicitly cleared, individually or via
+ *  the tray-level CLEAR DONE; in-flight chips (ringing/answered/queued-
+ *  budget) are never dismissible. Bottom-left strip, mirrors PinDock's
+ *  always-visible placement. */
 export function DispatchTray({
   entries,
   sendFailures,
   onDismiss,
   onView,
   onRelease,
+  onClearDone,
 }: DispatchTrayProps) {
   const [now, setNow] = useState(() => Date.now());
   useEffect(() => {
@@ -44,14 +51,20 @@ export function DispatchTray({
     };
   }, []);
 
+  // pruneDispatchEntries is now a no-op filter (T6 — kept as the one call
+  // site for a future change), so `visible` is just `entries` in receipt
+  // order; `now` still drives the send-failure prune tick below.
   const visible = pruneDispatchEntries(entries, now);
   const visibleFailures = pruneSendFailures(sendFailures, now);
   if (visible.length === 0 && visibleFailures.length === 0) return null;
+
+  const hasTerminal = visible.some((entry) => isTerminalDispatchStatus(entry.status));
 
   return (
     <div className="dispatch-tray" data-testid="dispatch-tray">
       {visible.map((entry) => {
         const viewable = hasViewableResult(entry);
+        const terminal = isTerminalDispatchStatus(entry.status);
         return (
           <div
             key={entry.id}
@@ -71,11 +84,12 @@ export function DispatchTray({
               {entry.machine}
               {entry.provider ? ` · ${entry.provider}` : ''} — {dispatchChipLabel(entry)}
             </span>
-            {entry.status === 'denied' && (
+            {terminal && (
               <button
                 type="button"
                 className="dispatch-chip__dismiss"
                 title="Dismiss"
+                data-testid="dispatch-chip-dismiss"
                 onClick={(e) => {
                   e.stopPropagation();
                   onDismiss(entry.id);
@@ -110,6 +124,16 @@ export function DispatchTray({
           {sendFailureChipLabel(failure)}
         </div>
       ))}
+      {hasTerminal && (
+        <button
+          type="button"
+          className="dispatch-tray__clear-done"
+          data-testid="dispatch-clear-done"
+          onClick={onClearDone}
+        >
+          ✕ CLEAR DONE
+        </button>
+      )}
     </div>
   );
 }

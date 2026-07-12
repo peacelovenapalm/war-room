@@ -148,8 +148,8 @@ export function applySkillPrefix(
   return `/${nextSkill} ${withoutPrev}`;
 }
 
-/** DENIED chips are sticky (dismiss only); every other terminal status
- *  auto-clears after this long. */
+/** Historical timeout — kept only as documentation of the pre-T6 age-based
+ *  clear (see shouldAutoClear below). No longer read by pruneDispatchEntries. */
 export const DISPATCH_AUTOCLEAR_MS = 60_000;
 
 interface DispatchStatusSpec {
@@ -209,21 +209,38 @@ export function hasViewableResult(entry: Pick<DispatchEntry, 'status'>): boolean
   return entry.status === 'exited' || entry.status === 'capped';
 }
 
-/** Pure auto-clear rule: RINGING/ANSWERED/DENIED never auto-clear;
- *  EXPIRED/EXITED/KILLED/CAPPED clear once older than DISPATCH_AUTOCLEAR_MS.
- *  QUEUED-BUDGET (T5 fleet controls) is sticky like DENIED — it needs an
- *  explicit release (or the date-rollover release), never a silent
- *  disappearance while still genuinely held. */
+/** T6 (Greg's repeated complaint — "the session disappears after reading"):
+ *  NO dispatch chip auto-clears by age any more. A terminal entry
+ *  (isTerminalDispatchStatus) sits in the tray until the user explicitly
+ *  DISMISSes it (or CLEAR DONE bulk-dismisses every terminal entry) —
+ *  in-progress entries (ringing/answered/queued-budget) are never
+ *  dismissible in the first place. Kept as a named predicate (rather than
+ *  inlining `false` at every call site) so a future change has one place
+ *  to look; DISPATCH_AUTOCLEAR_MS survives only as documentation of the
+ *  old behavior this replaces. */
 export function shouldAutoClear(status: DispatchStatusValue, ageMs: number): boolean {
-  if (
-    status === 'ringing' ||
-    status === 'answered' ||
+  void status;
+  void ageMs;
+  return false;
+}
+
+/** Terminal statuses (T6) — the dispatch is no longer in-flight, so its
+ *  chip is safe to DISMISS/CLEAR DONE. Everything else (ringing/answered/
+ *  queued-budget) is still live and must never be dismissible. */
+export function isTerminalDispatchStatus(status: DispatchStatusValue): boolean {
+  return (
     status === 'denied' ||
-    status === 'queued-budget'
-  ) {
-    return false;
-  }
-  return ageMs >= DISPATCH_AUTOCLEAR_MS;
+    status === 'expired' ||
+    status === 'exited' ||
+    status === 'killed' ||
+    status === 'capped'
+  );
+}
+
+/** CLEAR DONE: bulk-dismiss every terminal entry at once, leaving anything
+ *  still in-flight untouched. */
+export function clearTerminalDispatchEntries(entries: DispatchEntry[]): DispatchEntry[] {
+  return entries.filter((e) => !isTerminalDispatchStatus(e.status));
 }
 
 /** One line of tray chip text, e.g. "◎ RINGING", "⊘ DENIED — reason",
