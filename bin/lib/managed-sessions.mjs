@@ -271,6 +271,22 @@ export async function deliverAnswer({ tmuxSession, text }, execFileImpl) {
   return { ok: true };
 }
 
+/**
+ * C3 free-form PROMPT verb — thin, deliberately-identical alias of
+ * deliverAnswer. Gate 4 CLOSED (shared type, `verb: 'answer'|'prompt'`
+ * discriminant, one queue): the actual delivery mechanic — literal
+ * `send-keys -l` keystrokes then a separate Enter into a manifest-listed,
+ * liveness-checked tmux session — does not care whether the text is a
+ * reply to a pending question or an unprompted instruction, so there is
+ * nothing for a "prompt" variant to do differently. This export exists so
+ * a PROMPT call site in dispatch-runner.mjs reads self-documenting (never
+ * because the underlying mechanic needed a second implementation) — see
+ * bin/dispatch-runner.mjs's processAnswerInstructions doc for why the
+ * runner itself needs ZERO changes to honor PROMPT: it already delivers
+ * whatever text+nonce+managedSessionRef arrives, regardless of verb.
+ */
+export const deliverPrompt = deliverAnswer;
+
 function shortErr(err) {
   const m = err instanceof Error ? err.message : String(err);
   return m.split('\n')[0].slice(0, 200);
