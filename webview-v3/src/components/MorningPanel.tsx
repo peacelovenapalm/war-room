@@ -268,6 +268,23 @@ export function MorningPanel({ isOpen, onClose, connectionStatus }: MorningPanel
             )}
           </div>
 
+          <footer className="morning__section" data-testid="morning-memory-footer">
+            <span className="morning__section-label">◇ MEMORY RUNG 1</span>
+            <div>
+              {surface.memory.writePathEnabled
+                ? `${surface.memory.writeMode === 'staged' ? '◇ STAGED' : '◆ DIRECT'} — ${String(surface.memory.cleanDayCount)}/7 clean days${surface.memory.promotionEligible ? ' · ✓ PROMOTION ELIGIBLE' : ''}`
+                : '⊘ DISABLED — WAR_ROOM_VAULT_DIR not configured'}
+            </div>
+            <div>
+              ▣ SURFACES / MORNING: {String(surface.memory.surfacesOpenedPerMorning)} · ✓ GRAPH
+              ANSWERED: {String(surface.memory.graphAnswered)} · ↺ RE-DERIVED:{' '}
+              {String(surface.memory.rederived)}
+            </div>
+            <div className="modal__muted">
+              attribution counters are process-local and honestly reset on restart
+            </div>
+          </footer>
+
           <button
             type="button"
             className="verb"

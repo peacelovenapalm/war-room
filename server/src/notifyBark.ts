@@ -25,6 +25,7 @@ export const BIG_MOMENT_CLASSES = [
   'stop-all',
   'chain-failed',
   'morning-degraded',
+  'memory-promoted',
 ] as const;
 export type BigMomentClass = (typeof BIG_MOMENT_CLASSES)[number];
 
@@ -44,6 +45,9 @@ const BIG_MOMENT_STATUS: Record<BigMomentClass, BarkStatus> = {
   // V6-3 "the board announces its own sickness" — honest-sick beats
   // silent-broken, so this rides the same 'failure' tier as chain-failed.
   'morning-degraded': 'failure',
+  // V7-2: one edge-only announcement when the persisted 7-clean-day
+  // promotion path flips STAGED -> DIRECT. Revocation itself stays quiet.
+  'memory-promoted': 'info',
 };
 
 /** Short, stable source label every push carries as `task` — distinguishes

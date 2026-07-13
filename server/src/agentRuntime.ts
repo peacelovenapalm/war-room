@@ -32,6 +32,7 @@ import {
 } from './fileWatcher.js';
 import type { HookEvent } from './hookEventHandler.js';
 import { HookEventHandler } from './hookEventHandler.js';
+import { distillEndedSession } from './memoryDistiller.js';
 import { SessionRouter } from './sessionRouter.js';
 import { shiftStats } from './shiftStats.js';
 import { cancelPermissionTimer, cancelWaitingTimer } from './timerManager.js';
@@ -60,6 +61,9 @@ export class AgentRuntime {
   readonly activeAgentId = { current: null as number | null };
   private externalScanTimer: ReturnType<typeof setInterval> | null = null;
   private staleCheckTimer: ReturnType<typeof setInterval> | null = null;
+  /** Session-id dedupe across hook SessionEnd and later manifest/stale
+   *  removal. Both lifecycle paths can observe the same end. */
+  private readonly distilledSessionIds = new Set<string>();
 
   // Configuration refs (mutable, shared with scanners)
   readonly watchAllSessions = { current: false };
@@ -181,6 +185,7 @@ export class AgentRuntime {
       onSessionEnd: (agentId) => {
         const agent = this.store.get(agentId);
         if (!agent) return;
+        this.distillAgent(agent);
         this.dismissalTracker.clearSeededMtime(agent.jsonlFile);
         this.dismissalTracker.dismiss(agent.jsonlFile);
         if (agent.isTeamLead) {
@@ -216,12 +221,26 @@ export class AgentRuntime {
     this.hookEventHandler.unregisterAgent(sessionId);
   }
 
+  private distillAgent(agent: AgentState): void {
+    if (this.distilledSessionIds.has(agent.sessionId)) return;
+    this.distilledSessionIds.add(agent.sessionId);
+    // V7-1: hook SessionEnd and manifest/stale removal both funnel here.
+    // The job returns disabled before transcript access unless an explicit
+    // WAR_ROOM_VAULT_DIR exists; no homedir/vault fallback is possible.
+    distillEndedSession({
+      sessionId: agent.sessionId,
+      transcriptPath: agent.jsonlFile,
+      model: 'deterministic-v1',
+    });
+  }
+
   // ── Agent removal (shared cleanup) ──
 
   /** Remove an agent: stop watchers, cancel timers, delete from store. */
   removeAgent(id: number): void {
     const agent = this.store.get(id);
     if (!agent) return;
+    this.distillAgent(agent);
 
     // Stop JSONL poll timer
     const jpTimer = this.jsonlPollTimers.get(id);
@@ -253,6 +272,7 @@ export class AgentRuntime {
     // Remove from store (fires agentRemoved event) and persist
     this.store.delete(id);
     this.store.persist();
+    this.distilledSessionIds.delete(agent.sessionId);
   }
 
   /** Remove a single teammate agent. */

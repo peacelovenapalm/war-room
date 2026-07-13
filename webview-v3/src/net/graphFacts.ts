@@ -38,6 +38,46 @@ export interface GraphSearchResult {
   query: string;
   matches: GraphNode[];
   resolved?: { node: GraphNode; edges: GraphNeighborEdge[] };
+  decisions: DecisionSearchLane;
+}
+
+export interface DecisionSearchReceipt {
+  receiptId: string;
+  sessionId: string;
+  date: string;
+  verbatim: string;
+  lineNumber: number;
+  notePath: string;
+}
+
+export interface DecisionSearchMatch {
+  topic: string;
+  answer: string;
+  receipts: DecisionSearchReceipt[];
+  stale: boolean;
+  contradiction: boolean;
+  competingAnswers: string[];
+}
+
+export interface DecisionSearchLane {
+  available: boolean;
+  matches: DecisionSearchMatch[];
+}
+
+export type MemoryAttribution = 'graph-answered' | 'rederived';
+
+/** One-tap attribution. False leaves the buttons live for an honest retry. */
+export async function recordMemoryAttribution(attribution: MemoryAttribution): Promise<boolean> {
+  try {
+    const res = await fetch('/api/memory/tally', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ attribution }),
+    });
+    return res.ok;
+  } catch {
+    return false;
+  }
 }
 
 /** Colorblind hard rule: shape is the primary signal, never color alone.

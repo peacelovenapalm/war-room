@@ -1,4 +1,4 @@
-import { describe, expect, it } from 'vitest';
+import { afterEach, describe, expect, it, vi } from 'vitest';
 
 import {
   formatEdgeLine,
@@ -8,7 +8,12 @@ import {
   groupEdgesByHop,
   kindGlyph,
   matchLabel,
+  recordMemoryAttribution,
 } from '../src/net/graphFacts';
+
+afterEach(() => {
+  vi.unstubAllGlobals();
+});
 
 describe('kindGlyph — colorblind shape-primary mapping', () => {
   it('maps each known kind to its distinct shape', () => {
@@ -69,5 +74,25 @@ describe('groupEdgesByHop', () => {
 
   it('returns an empty array for no edges', () => {
     expect(groupEdgesByHop([])).toEqual([]);
+  });
+});
+
+describe('recordMemoryAttribution', () => {
+  it('posts the closed attribution value to the tally endpoint', async () => {
+    const fetchMock = vi.fn().mockResolvedValue({ ok: true });
+    vi.stubGlobal('fetch', fetchMock);
+    expect(await recordMemoryAttribution('graph-answered')).toBe(true);
+    expect(fetchMock).toHaveBeenCalledWith('/api/memory/tally', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ attribution: 'graph-answered' }),
+    });
+  });
+
+  it('returns false on a rejected or unreachable tally', async () => {
+    vi.stubGlobal('fetch', vi.fn().mockResolvedValue({ ok: false }));
+    expect(await recordMemoryAttribution('rederived')).toBe(false);
+    vi.stubGlobal('fetch', vi.fn().mockRejectedValue(new Error('offline')));
+    expect(await recordMemoryAttribution('rederived')).toBe(false);
   });
 });

@@ -1451,6 +1451,53 @@ body,
   padding-left: 8px;
 }
 
+.graph-search__decisions {
+  display: grid;
+  gap: 8px;
+  margin: 10px 0;
+}
+
+.graph-search__lane-label {
+  font-weight: 700;
+  letter-spacing: 0.08em;
+}
+
+.graph-search__decision {
+  border: 2px solid var(--pixel-border);
+  padding: 8px;
+  box-shadow: var(--pixel-shadow);
+}
+
+.graph-search__decision-answer,
+.graph-search__receipt {
+  display: grid;
+  gap: 3px;
+}
+
+.graph-search__receipts {
+  margin-top: 7px;
+}
+
+.graph-search__receipts summary {
+  cursor: pointer;
+}
+
+.graph-search__receipt {
+  margin-top: 6px;
+  border-top: 1px solid var(--pixel-border);
+  padding-top: 6px;
+}
+
+.graph-search__attribution {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 6px;
+  margin-top: 12px;
+  border-top: 2px solid var(--pixel-border);
+  padding-top: 8px;
+}
+
 /* ── DISTRICTS view ─────────────────────────────────────────────────── */
 
 .districts__scene {

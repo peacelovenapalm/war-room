@@ -126,6 +126,7 @@ describe('Bark payload shape (KICKOFF v1.1 item 7)', () => {
       'stop-all': 'warning',
       'chain-failed': 'failure',
       'morning-degraded': 'failure',
+      'memory-promoted': 'info',
     };
     for (const kind of BIG_MOMENT_CLASSES) {
       notifyBigMoment(kind, `${kind} happened`, { url: 'https://example.test/push' });

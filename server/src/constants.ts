@@ -207,6 +207,19 @@ export const MORNING_OVERNIGHT_END_HOUR = 6;
  *  never skews the sampling rate) plus every morning after a degraded
  *  one — see morningSpotCheck.ts. */
 export const MORNING_SPOT_CHECK_SAMPLE_RATE = 3;
+
+// ── Memory rung 1 (V7) ─────────────────────────────────────
+/** Compact graphify-style note sections: distillation is a memory aid, not
+ *  a transcript mirror. */
+export const MEMORY_DISTILL_MAX_ITEMS = 8;
+export const MEMORY_SKIP_TAG = '#wr-skip-distill';
+export const MEMORY_PROMOTION_CLEAN_DAYS = 7;
+export const MEMORY_DECISION_STALE_DAYS = 90;
+export const MEMORY_LEDGER_FILE_NAME = '_ledger.jsonl';
+export const MEMORY_STATE_FILE_NAME = '_state.json';
+export const MEMORY_DECISIONS_FILE_NAME = '_decisions.jsonl';
+export const MEMORY_STAGED_RELATIVE_DIR = '_inbox/war-room-distill';
+export const MEMORY_DIRECT_RELATIVE_DIR = 'Memory/War Room Distill';
 /** Narrative spot-check findings (V6-5) ingested from an external `codex
  *  exec` runner via POST /api/ops/narrative-finding — capped ledger,
  *  oldest pruned, same discipline as AUTO_EXECUTOR_RECEIPT_CAP. */

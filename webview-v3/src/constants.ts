@@ -86,3 +86,6 @@ export function ambientWashColor(warmth: number): string {
  *  regardless of fit-to-view zoom. Slightly more than one plaque's
  *  rendered height (11px font + 2px padding + 1px border, x2). */
 export const DISTRICT_PLAQUE_STAGGER_PX = 18;
+/** V7 SEARCH memory lane: debounce and one-tap attribution acknowledgement. */
+export const GRAPH_SEARCH_DEBOUNCE_MS = 300;
+export const MEMORY_ATTRIBUTION_FEEDBACK_MS = 2_000;

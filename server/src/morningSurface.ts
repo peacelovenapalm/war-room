@@ -44,6 +44,12 @@ import {
   OPS_DISPATCH_HISTORY_LIMIT,
 } from './constants.js';
 import { dispatchStore } from './dispatchStore.js';
+import { memoryStore } from './memoryStore.js';
+import {
+  memoryMorningDate,
+  type MemoryTallySnapshot,
+  memoryTallyStore,
+} from './memoryTallyStore.js';
 import { morningStreakStore } from './morningStreakStore.js';
 
 export interface MorningTop3Item {
@@ -87,8 +93,16 @@ export interface OvernightSection {
 
 export interface MorningStreakSection {
   count: number;
+  lastRecordedDate: string | null;
   lastBreachReason: string | null;
   lastBreachAt: string | null;
+}
+
+export interface MorningMemorySection extends MemoryTallySnapshot {
+  writePathEnabled: boolean;
+  writeMode: 'staged' | 'direct';
+  cleanDayCount: number;
+  promotionEligible: boolean;
 }
 
 export interface MorningSurface {
@@ -103,6 +117,7 @@ export interface MorningSurface {
   degraded: boolean;
   degradedReasons: string[];
   streak: MorningStreakSection;
+  memory: MorningMemorySection;
 }
 
 function emptyMorningJsonSection(): MorningJsonSection {
@@ -279,8 +294,21 @@ let cache: { at: number; value: MorningSurface } | null = null;
 export function getMorningSurface(
   store: AgentStateStore,
   now: number = Date.now(),
+  recordOpened = false,
 ): MorningSurface {
-  if (cache && now - cache.at < MORNING_SURFACE_CACHE_TTL_MS) return cache.value;
+  const streakSnapshot = morningStreakStore.getSnapshot();
+  if (recordOpened) memoryTallyStore.recordMorningSurfaceOpened(memoryMorningDate(now));
+  const memoryStatus = memoryStore.getStatus();
+  const memory = (): MorningMemorySection => ({
+    ...memoryTallyStore.getSnapshot(streakSnapshot),
+    writePathEnabled: memoryStatus.enabled,
+    writeMode: memoryStatus.state.mode,
+    cleanDayCount: memoryStatus.state.cleanDayCount,
+    promotionEligible: memoryStatus.promotionEligible,
+  });
+  if (cache && now - cache.at < MORNING_SURFACE_CACHE_TTL_MS) {
+    return { ...cache.value, memory: memory() };
+  }
 
   const degradedReasons: string[] = [];
 
@@ -323,8 +351,6 @@ export function getMorningSurface(
     degradedReasons.push(`overnight receipts derivation threw: ${(err as Error).message}`);
   }
 
-  const streakSnapshot = morningStreakStore.getSnapshot();
-
   const value: MorningSurface = {
     generatedAt: new Date(now).toISOString(),
     morningJson,
@@ -335,12 +361,14 @@ export function getMorningSurface(
     degradedReasons,
     streak: {
       count: streakSnapshot.count,
+      lastRecordedDate: streakSnapshot.lastRecordedDate,
       lastBreachReason: streakSnapshot.lastBreachReason,
       lastBreachAt:
         streakSnapshot.lastBreachAt !== null
           ? new Date(streakSnapshot.lastBreachAt).toISOString()
           : null,
     },
+    memory: memory(),
   };
   cache = { at: now, value };
   return value;
