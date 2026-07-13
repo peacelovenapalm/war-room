@@ -1847,17 +1847,22 @@ point: KICKOFF-v2.0.md.
 
 ---
 
-## POSITION — 2026-07-13 (v5R→v7 run, PAUSED at Greg's direction)
+## POSITION — 2026-07-13 EOD (v5R→v7 run COMPLETE, sprint CLOSED)
 
-Authoritative ledger: `.planning/v6/SPRINT-STATE.md`. Handoff:
-`SESSION-HANDOFF-2026-07-13-v5v7.md` (kickoff prompt inside).
+Authoritative ledger: `.planning/v6/SPRINT-STATE.md` (all rows closed).
+Next-session entry point: `.planning/v8/KICKOFF-ACT2.md` (Act II —
+v8/v9/v10 codex builds; DESIGN + BUILD-PLAN docs beside it).
 
-- Deployed NEXUS = `179d29f` (deploy #1 of the run's 3) — districts fix
-  - `wr claude` wrapper + PROMPT verb, live-verified, codex-reviewed.
-- Greg's phone verdicts (verbatim in the ledger): districts ACCEPTED,
-  C2 sprites ACCEPTED. C4 old-face retirement gate-cleared, deferred.
-- Unmerged reviewed-work branches (all pushed): `lane/c2` 76d6327,
-  `lane/v6-morning` 4fbbc0d, `lane/v6-selfheal` 2b0edbf — codex
-  cross-model review of each diff is the next session's first task,
-  then C4 + merge + deploy #2.
-- V7 (memory rung 1) not started; design at `.planning/v6/V7-DESIGN.md`.
+- Live NEXUS = `09a1866` (deploy #3 + two follow-ups same day). All
+  three deploys of the run landed; every lane merged.
+- V7 memory rung 1 ARMED: /api/memory/status enabled:true, staged
+  mode; writable vault clone on `claude/war-room-distill` (branch
+  lives in GITEA, not GitHub); push cron */15 on nexus; 7-clean-day
+  promotion clock starts at first distilled note.
+- Codex hook parity live on both Macs (MacBook trust-approved; MINI
+  trust approval PENDING — Greg, in codex TUI /hooks).
+- Perf follow-up shipped: adapter end-once fix (flood 5/sec → 0),
+  docker log rotation 20m×3.
+- Open: MINI trust approval; first 6am morning-push round trip;
+  C4 old-face retirement (gate-cleared, needs own lane); lane/t6 WIP
+  preserved in stash@{0}.

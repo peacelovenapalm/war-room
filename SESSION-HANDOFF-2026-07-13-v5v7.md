@@ -1,3 +1,9 @@
+> ⚠ **SUPERSEDED 2026-07-13 EOD.** This handoff describes the PAUSED
+> mid-run state (deploy #1, unmerged lanes). The run completed and the
+> sprint CLOSED the same day — do NOT follow the kickoff prompt below.
+> Current position: `.planning/STATE.md` §POSITION. Next-session entry
+> point: `.planning/v8/KICKOFF-ACT2.md`.
+
 # SESSION HANDOFF — 2026-07-13 — v5R→v7 run, PAUSED after V5R + V6 builds
 
 Run contract: `.planning/v6/RUN-MAP-v5-v7-2026-07-12.md`. Ledger:

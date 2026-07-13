@@ -11,6 +11,10 @@ FLIP — nothing broader.
   Nexus clone 0-behind @ feebbbf. ⚠ nightly-backup artifact freshness
   NOT yet confirmed (visible snapshots dated 2026-03) — MUST re-verify
   before the first staged write (V7-2 hard precondition).
+  [RESOLVED 2026-07-13: re-verified SATISFIED — the 2026-03 artifacts
+  were the dead DISPATCH-era script; its v2 replacement runs nightly,
+  unbroken series through 2026-07-13. Writes ARMED same day; evidence
+  in SPRINT-STATE.md deploy-#3 row.]
 
 ## V7-1 Post-session distillation
 
