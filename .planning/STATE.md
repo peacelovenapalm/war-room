@@ -1866,3 +1866,19 @@ v8/v9/v10 codex builds; DESIGN + BUILD-PLAN docs beside it).
 - Open: MINI trust approval; first 6am morning-push round trip;
   C4 old-face retirement (gate-cleared, needs own lane); lane/t6 WIP
   preserved in stash@{0}.
+
+---
+
+## POSITION — 2026-07-13 late (Act II run 1: preconditions verified, V10 D0 shipped to lane)
+
+Authoritative ledger: `.planning/v8/SPRINT-STATE.md`. Handoff:
+`SESSION-HANDOFF-2026-07-13-act2.md`.
+
+- V8 ✗ HALT (unblock ~2026-07-20, staged-note corpus), V9 ✗ HALT
+  (streak 1/3 + no degraded push yet), V10 D1–D8 gated on Greg's
+  rung-1 evidence review — all verified live, not from docs.
+- V10 D0 (receipt-before-side-effect) BUILT + adversarially reviewed:
+  `lane/v10 @ 9697a61` (pushed, NOT merged). Review NO-SHIP → 3
+  findings fixed → verify pass CONFIRMED-FIXED, lane SHIP-WITH-NOTES.
+  Awaiting Greg's merge gate.
+- No deploys this session (none authorized). NEXUS unchanged.
