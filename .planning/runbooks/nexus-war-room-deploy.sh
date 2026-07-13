@@ -75,6 +75,17 @@ TRACKER_STATE_LOCAL="/Users/greg/code/completion-2026-07/STATE.md"
 #    notifier's existing 06:00 America/Denver cron gate, so this mount is
 #    read-only and needs no refresh step of its own here.
 MORNING_DIR_NEXUS="/data/repos/vault-notifier/public"
+#  - vault distill (V7, ARMED 2026-07-13 per Greg): a dedicated WRITABLE
+#    clone of brain2-vault on branch claude/war-room-distill — NEVER the
+#    vault-notifier clone (that one hard-resets from origin every 15 min
+#    and would eat writes). The server writes ONLY under
+#    <root>/_inbox/war-room-distill (single writeNote() chokepoint,
+#    denylist quarantine); /data/repos/war-room-vault-push.sh (cron
+#    */15, # war-room-vault-push) commits+pushes that path to the local
+#    gitea bare repo (GitHub deploy key here is read-only by design).
+#    UNDO (disarm): remove the -e/-v lines below + redeploy;
+#          crontab -l | grep -v war-room-vault-push | crontab -
+VAULT_DIR_NEXUS="/data/repos/war-room-vault/vault"
 #  - morning spot-check spool (V6-5): a SEPARATE rw dir (never the ro
 #    morning mount above) the server writes sampled spool files into and
 #    an external `codex exec` runner reads from ON NEXUS — see
@@ -139,6 +150,9 @@ fi
 ssh "${NEXUS_HOST}" "test -d ${DISTRICTS_DIR_NEXUS}" \
   && ok "districts root present: ${DISTRICTS_DIR_NEXUS} ($(ssh "${NEXUS_HOST}" "ls ${DISTRICTS_DIR_NEXUS} | wc -l" | tr -d ' ') projects)" \
   || warn "districts root missing on nexus — districts will render NO DATA"
+ssh "${NEXUS_HOST}" "test -d ${VAULT_DIR_NEXUS} && git -C ${VAULT_DIR_NEXUS%/vault} rev-parse --abbrev-ref HEAD" | grep -q "claude/war-room-distill" \
+  && ok "vault distill clone present on branch claude/war-room-distill: ${VAULT_DIR_NEXUS}" \
+  || fail "vault distill clone missing or on wrong branch (${VAULT_DIR_NEXUS%/vault} must be on claude/war-room-distill — memory writes are ARMED and must never land on main)"
 
 # ── Token env file (created once, kept stable across redeploys) ─────────────
 ssh "${NEXUS_HOST}" "mkdir -p ${REMOTE_ENV_DIR}"
@@ -188,6 +202,7 @@ ssh "${NEXUS_HOST}" "docker run -d --name war-room --restart unless-stopped \
   -e WAR_ROOM_DISTRICTS_DIR=/briefing/districts \
   -e WAR_ROOM_MORNING_JSON=/briefing/morning/morning.json \
   -e WAR_ROOM_MORNING_SPOOL_DIR=/morning-spool \
+  -e WAR_ROOM_VAULT_DIR=/vault \
   -e WAR_ROOM_MORNING_PUSH_HOUR=6 \
   -e WAR_ROOM_MORNING_TZ=America/Denver \
   -e WAR_ROOM_BOARD_URL=https://${TAILNET_FQDN}:${SERVE_PORT} \
@@ -198,6 +213,7 @@ ssh "${NEXUS_HOST}" "docker run -d --name war-room --restart unless-stopped \
   -v ${ROUTINES_DIR_NEXUS}:/briefing/routines:ro \
   -v ${MORNING_DIR_NEXUS}:/briefing/morning:ro \
   -v ${MORNING_SPOOL_DIR_NEXUS}:/morning-spool \
+  -v ${VAULT_DIR_NEXUS}:/vault \
   -v ${REMOTE_STATE_DIR}:/root/.pixel-agents \
   -p 127.0.0.1:${APP_PORT}:3141 war-room:latest" >/dev/null \
   && ok "container war-room running (127.0.0.1:${APP_PORT}, briefing ro, morning ro, spool rw, state vol rw)" || fail "docker run failed"
