@@ -346,6 +346,22 @@ export function getMorningSurface(
   return value;
 }
 
+/** Single source for the ALL-CALM claim on the SERVER side: nothing needs
+ *  Greg (zero needs-you, zero held-budget jobs, zero open PRs) AND the
+ *  surface composed honestly (not degraded). The push builder MUST use
+ *  this — a lock-screen "all calm" that ignores held jobs or PRs claims
+ *  more than the panel itself would render.
+ *  webview-v3/src/net/morningFacts.ts#isAllCalm mirrors this condition
+ *  (separate package, no shared import path) — keep the two in lockstep. */
+export function isMorningAllCalm(surface: MorningSurface): boolean {
+  return (
+    !surface.degraded &&
+    surface.needsYouCount === 0 &&
+    surface.board.heldBudget.count === 0 &&
+    surface.morningJson.prs.count === 0
+  );
+}
+
 /** Test-only: force the next getMorningSurface() call to recompute. */
 export function clearMorningSurfaceCache(): void {
   cache = null;

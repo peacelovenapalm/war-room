@@ -6,6 +6,9 @@
  * assertions aren't cross-contaminated by test order.
  */
 
+import * as fs from 'fs';
+import * as os from 'os';
+import * as path from 'path';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 import { AgentStateStore } from '../src/agentStateStore.js';
@@ -13,6 +16,7 @@ import {
   buildMorningPushMessage,
   localHourAndDate,
   morningDeepLink,
+  MorningPushStateStore,
   resetMorningPushStateForTests,
   resolveMorningPushHour,
   resolveMorningTimeZone,
@@ -135,6 +139,31 @@ describe('buildMorningPushMessage', () => {
     expect(msg).toContain('all calm');
   });
 
+  it('never claims "all calm" with open PRs pending (panel isAllCalm parity)', () => {
+    const surface = makeSurface({ needsYouCount: 0 });
+    surface.morningJson.prs = {
+      count: 2,
+      list: [
+        { number: 1, title: 't1', branch: 'b1' },
+        { number: 2, title: 't2', branch: 'b2' },
+      ],
+    };
+    const msg = buildMorningPushMessage(surface, undefined);
+    expect(msg).not.toContain('all calm');
+    expect(msg).toContain('2 PRs');
+  });
+
+  it('never claims "all calm" with held-budget jobs pending (panel isAllCalm parity)', () => {
+    const surface = makeSurface({ needsYouCount: 0 });
+    surface.board.heldBudget = {
+      count: 1,
+      jobs: [{ machine: 'MACBOOK', promptPreview: 'held' }],
+    };
+    const msg = buildMorningPushMessage(surface, undefined);
+    expect(msg).not.toContain('all calm');
+    expect(msg).toContain('1 held job');
+  });
+
   it('names up to 3 agents and truncates the rest honestly', () => {
     const surface = makeSurface({
       needsYouCount: 4,
@@ -191,6 +220,97 @@ describe('runMorningPushTick', () => {
     });
     expect(second).toBeNull();
     expect(notifyDigest).toHaveBeenCalledTimes(1);
+  });
+
+  it('does not double-send when the server restarts during the push hour (persisted dedupe)', () => {
+    const tmpPath = path.join(
+      os.tmpdir(),
+      `morning-push-test-${String(process.pid)}-${String(Date.now())}.json`,
+    );
+    try {
+      const store = new AgentStateStore();
+      const notifyDigest = vi.fn();
+      const env = { WAR_ROOM_MORNING_TZ: 'UTC', WAR_ROOM_MORNING_PUSH_HOUR: '6' };
+
+      const beforeRestart = new MorningPushStateStore(tmpPath);
+      const first = runMorningPushTick(store, Date.parse('2026-07-13T06:00:30Z'), {
+        env,
+        notifyDigest,
+        pushStateStore: beforeRestart,
+      });
+      expect(first).not.toBeNull();
+      expect(notifyDigest).toHaveBeenCalledTimes(1);
+
+      // Restart = a brand-new store instance reading the same sidecar file.
+      const afterRestart = new MorningPushStateStore(tmpPath);
+      const second = runMorningPushTick(store, Date.parse('2026-07-13T06:20:00Z'), {
+        env,
+        notifyDigest,
+        pushStateStore: afterRestart,
+      });
+      expect(second).toBeNull();
+      expect(notifyDigest).toHaveBeenCalledTimes(1);
+    } finally {
+      fs.rmSync(tmpPath, { force: true });
+    }
+  });
+
+  it('records a streak breach when the entire push window was missed, exactly once', () => {
+    const store = new AgentStateStore();
+    const notifyDigest = vi.fn();
+    const env = { WAR_ROOM_MORNING_TZ: 'UTC', WAR_ROOM_MORNING_PUSH_HOUR: '6' };
+    const pushStateStore = new MorningPushStateStore(
+      path.join(os.tmpdir(), `morning-push-missed-${String(Date.now())}.json`),
+    );
+
+    // Parallel-run already started: yesterday was recorded clean.
+    morningStreakStore.recordOutcome(
+      true,
+      '2026-07-12',
+      undefined,
+      Date.parse('2026-07-12T06:00:00Z'),
+    );
+    expect(morningStreakStore.getSnapshot().count).toBeGreaterThan(0);
+
+    // First tick AFTER the window (server was down 06:00-06:59): breach.
+    const result = runMorningPushTick(store, Date.parse('2026-07-13T07:12:00Z'), {
+      env,
+      notifyDigest,
+      pushStateStore,
+    });
+    expect(result).toBeNull();
+    expect(notifyDigest).not.toHaveBeenCalled();
+    const snap = morningStreakStore.getSnapshot();
+    expect(snap.count).toBe(0);
+    expect(snap.lastRecordedDate).toBe('2026-07-13');
+    expect(snap.lastBreachReason).toContain('push-window-missed');
+
+    // Later ticks the same day stay a no-op (recordOutcome idempotent).
+    runMorningPushTick(store, Date.parse('2026-07-13T08:00:00Z'), {
+      env,
+      notifyDigest,
+      pushStateStore,
+    });
+    expect(morningStreakStore.getSnapshot().count).toBe(0);
+    expect(notifyDigest).not.toHaveBeenCalled();
+  });
+
+  it('does not breach a fresh install with no streak history (missed-window guard)', () => {
+    const store = new AgentStateStore();
+    const notifyDigest = vi.fn();
+    const pushStateStore = new MorningPushStateStore(
+      path.join(os.tmpdir(), `morning-push-fresh-${String(Date.now())}.json`),
+    );
+
+    expect(morningStreakStore.getSnapshot().lastRecordedDate).toBeNull();
+    runMorningPushTick(store, Date.parse('2026-07-13T09:00:00Z'), {
+      env: { WAR_ROOM_MORNING_TZ: 'UTC', WAR_ROOM_MORNING_PUSH_HOUR: '6' },
+      notifyDigest,
+      pushStateStore,
+    });
+    const snap = morningStreakStore.getSnapshot();
+    expect(snap.lastRecordedDate).toBeNull();
+    expect(snap.lastBreachReason).toBeNull();
   });
 
   it('escalates via morning-degraded when the surface cannot compose honestly', () => {
