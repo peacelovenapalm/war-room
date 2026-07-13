@@ -70,10 +70,17 @@ GROUPS = {
                   "wall_straight", "wall_corner", "wall_window"),
 }
 # staff split into outfit pairs — one full-quality staff atlas lands
-# ~1.4MB, over the ~1MB-per-PNG budget
+# ~1.4MB, over the ~1MB-per-PNG budget. C2 diversity pass (v5 KICKOFF
+# §C2) adds 12 more identities in the same pairs-per-sheet scheme.
 PREFIX_GROUPS = (("cat", "pets"),
                  ("worker_teal", "staff_a"), ("worker_rust", "staff_a"),
-                 ("worker_slate", "staff_b"), ("worker_moss", "staff_b"))
+                 ("worker_slate", "staff_b"), ("worker_moss", "staff_b"),
+                 ("worker_amber", "staff_c"), ("worker_coral", "staff_c"),
+                 ("worker_indigo", "staff_d"), ("worker_sage", "staff_d"),
+                 ("worker_plum", "staff_e"), ("worker_ochre", "staff_e"),
+                 ("worker_charcoal", "staff_f"), ("worker_rose", "staff_f"),
+                 ("worker_navy", "staff_g"), ("worker_clay", "staff_g"),
+                 ("worker_mint", "staff_h"), ("worker_violet", "staff_h"))
 DEFAULT_GROUP = "furniture"
 
 
