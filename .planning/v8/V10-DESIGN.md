@@ -46,9 +46,9 @@ features.
 ## V10-2 Self-ops: the estate audits itself
 
 - A scheduled audit routine (server-side, receipted) walks the estate's
-  own health: runners fresh? clones fresh? backups fresh (the nightly
-  - rsync checks the 2026-07-13 vault audit did by hand become code)?
-    disk headroom? cert/serve state? container restarts?
+  own health: runners fresh? clones fresh? backups fresh (the
+  nightly/rsync checks the 2026-07-13 vault audit did by hand become
+  code)? disk headroom? cert/serve state? container restarts?
 - Findings file as HONEST-RED crises on the board — the estate is not
   allowed to be quietly sick (Q49 generalized from mornings to
   everything). All-green audits append one receipt line, no push.
