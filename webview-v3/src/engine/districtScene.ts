@@ -28,14 +28,31 @@ import {
 } from '../constants';
 import type { DistrictProject } from '../net/districtFacts';
 import { isDistrictUnknown, progressToFloors } from '../net/districtFacts';
-import { mapWorldBounds, tileToWorld, type WorldBounds } from './iso';
+import { mapWorldBounds, TILE_H, TILE_W, tileToWorld, type WorldBounds } from './iso';
 import { type BoxPalette, drawDiamondTile, drawIsoBox } from './placeholder';
 
-/** Grid margin (tiles from the plot grid's edge to the map edge). */
-const GRID_MARGIN = 1;
-/** Tile spacing between adjacent plot centers (row and column) — enough
- *  room for the plaque + info-card hit area around each building. */
-const PLOT_SPACING = 2;
+/**
+ * Plot spacing (v5R districts overlap fix, RUN-MAP-v5-v7 §2). The old
+ * uniform PLOT_SPACING=2 tile grid gave every step — column AND row —
+ * only 32 world-px of vertical separation ((tileX+tileY) both grow), while
+ * a 4-floor building is 56px tall plus an ~11px roof diamond: front rows
+ * occluded the row behind and plaques collided (Greg's phone report
+ * 2026-07-12). The fix separates the axes IN SCREEN SPACE:
+ *
+ * - Column step = tiles (+1, -1) → exactly (+64, 0) world px: columns run
+ *   straight across the screen, zero vertical creep.
+ * - Row step = tiles (+4, +4) → exactly (0, +128) world px: rows run
+ *   straight down the screen with clearance for the tallest building
+ *   (56 + 11 roof + 16 ground-diamond half + margin < 128).
+ *
+ * Both steps stay integer tile coordinates so plotWorldCenter/tileToWorld
+ * are untouched; tileY may go negative, which is fine because
+ * districtSceneBounds derives from actual plot world positions (below),
+ * not from a 0-origin tile rectangle.
+ */
+const COL_STEP_TILE_X = 1;
+const COL_STEP_TILE_Y = -1;
+const ROW_STEP_TILE = 4;
 /** Column cap: beyond this many projects per row, wrap into a new row
  *  instead of widening — keeps the scene tall-and-narrow, matching a
  *  phone's portrait viewport rather than an ever-widening single strip. */
@@ -45,6 +62,12 @@ export interface DistrictPlot {
   key: string;
   tileX: number;
   tileY: number;
+  /** Odd columns hang their DOM plaque one step lower than even columns
+   *  (v5R overlap fix): adjacent-column plaques are only 64 world px
+   *  apart, so two long (width-capped) labels on the same baseline could
+   *  still touch at low zoom — alternating baselines makes label
+   *  collision geometrically impossible regardless of zoom. */
+  staggerPlaque: boolean;
 }
 
 /** Computes one grid plot per project, in the SAME order the server
@@ -62,8 +85,9 @@ export function computeDistrictPlots(
     const row = Math.floor(i / cols);
     return {
       key: project.key,
-      tileX: GRID_MARGIN + col * PLOT_SPACING,
-      tileY: GRID_MARGIN + row * PLOT_SPACING,
+      tileX: col * COL_STEP_TILE_X + row * ROW_STEP_TILE,
+      tileY: col * COL_STEP_TILE_Y + row * ROW_STEP_TILE,
+      staggerPlaque: col % 2 === 1,
     };
   });
 }
@@ -73,16 +97,30 @@ export function computeDistrictPlots(
 const FLOOR_HEIGHT_PX = 14;
 const MAX_BUILDING_ELEVATION = 4; // progressToFloors' MAX_FLOORS, kept in sync by hand
 
-/** Scene bounds sized to the ACTUAL plot grid — grows with N projects
- *  (both directions, capped in width by MAX_PLOTS_PER_ROW) rather than a
- *  fixed 5x3. An empty plot list still yields a positive-area box (single
+/** Scene bounds derived from the ACTUAL plot world positions (v5R fix:
+ *  the old tile-rectangle derivation both over-padded — the enclosing
+ *  0-origin diamond is much larger than the plot area — and broke once
+ *  column steps made tileY negative). Pads each side for the ground
+ *  diamond, the tallest possible building + roof above, and plaque room
+ *  below. An empty plot list still yields a positive-area box (single
  *  cell) so the camera never divides by zero. */
 export function districtSceneBounds(plots: readonly DistrictPlot[]): WorldBounds {
-  const maxTileX = plots.reduce((m, p) => Math.max(m, p.tileX), 0);
-  const maxTileY = plots.reduce((m, p) => Math.max(m, p.tileY), 0);
-  const cols = maxTileX + GRID_MARGIN + 1;
-  const rows = maxTileY + GRID_MARGIN + 1;
-  return mapWorldBounds(cols, rows, MAX_BUILDING_ELEVATION);
+  if (plots.length === 0) {
+    return mapWorldBounds(1, 1, MAX_BUILDING_ELEVATION);
+  }
+  const centers = plots.map((p) => plotWorldCenter(p));
+  const minCX = Math.min(...centers.map((c) => c.worldX));
+  const maxCX = Math.max(...centers.map((c) => c.worldX));
+  const minCY = Math.min(...centers.map((c) => c.worldY));
+  const maxCY = Math.max(...centers.map((c) => c.worldY));
+  // Tallest building (4 floors) + its roof half-diamond above the ground
+  // center; ground diamond + plaque room below.
+  const headroom = MAX_BUILDING_ELEVATION * FLOOR_HEIGHT_PX + TILE_H;
+  const minX = minCX - TILE_W / 2;
+  const maxX = maxCX + TILE_W / 2;
+  const minY = minCY - headroom;
+  const maxY = maxCY + TILE_H;
+  return { minX, minY, maxX, maxY, width: maxX - minX, height: maxY - minY };
 }
 
 function paletteFor(project: DistrictProject): BoxPalette {
@@ -111,7 +149,15 @@ export function drawDistrictScene(
   projects: readonly DistrictProject[],
   plots: readonly DistrictPlot[],
 ): void {
-  for (const project of projects) {
+  // Painter's order: back-to-front by worldY so a nearer (lower-on-screen)
+  // building is never overpainted by a farther one — the old code drew in
+  // server order, which interleaves rows (v5R overlap fix).
+  const ordered = [...projects].sort((a, b) => {
+    const pa = plots.find((p) => p.key === a.key);
+    const pb = plots.find((p) => p.key === b.key);
+    return (pa ? plotWorldCenter(pa).worldY : 0) - (pb ? plotWorldCenter(pb).worldY : 0);
+  });
+  for (const project of ordered) {
     const plot = plots.find((p) => p.key === project.key);
     if (!plot) continue;
     const { worldX, worldY } = plotWorldCenter(plot);
@@ -123,13 +169,13 @@ export function drawDistrictScene(
 
 /** Nearest plot to a world-space point within `radius` world px of its
  *  center (a generous fixed radius over the small footprint — precise
- *  polygon hit-testing is unnecessary at this scale/zoom). At
- *  PLOT_SPACING=2/TILE_W=64/TILE_H=32, adjacent plot centers sit ~71.6
- *  world px apart — narrower than 2x radius, so neighboring hit circles
- *  DO overlap at the boundary between two plots. Resolving to the
- *  NEAREST center (not first-in-array) keeps a boundary tap deterministic
- *  and visually correct instead of order-dependent. Returns the plot's
- *  key, or null when the point is outside every plot's radius. */
+ *  polygon hit-testing is unnecessary at this scale/zoom). Adjacent
+ *  same-row plot centers sit exactly 64 world px apart (COL step) —
+ *  narrower than 2x radius, so neighboring hit circles DO overlap at the
+ *  boundary between two plots. Resolving to the NEAREST center (not
+ *  first-in-array) keeps a boundary tap deterministic and visually
+ *  correct instead of order-dependent. Returns the plot's key, or null
+ *  when the point is outside every plot's radius. */
 export function hitTestDistrict(
   worldX: number,
   worldY: number,

@@ -79,3 +79,10 @@ export function ambientWashColor(warmth: number): string {
   const b = Math.round(AMBIENT_COOL_RGB.b + (AMBIENT_WARM_RGB.b - AMBIENT_COOL_RGB.b) * t);
   return `rgba(${String(r)}, ${String(g)}, ${String(b)}, ${String(AMBIENT_WASH_ALPHA)})`;
 }
+
+/** DISTRICTS plaque vertical stagger (v5R overlap fix): odd-column
+ *  plaques hang this many CSS px lower than even-column ones so two
+ *  width-capped labels on adjacent columns can never share a baseline,
+ *  regardless of fit-to-view zoom. Slightly more than one plaque's
+ *  rendered height (11px font + 2px padding + 1px border, x2). */
+export const DISTRICT_PLAQUE_STAGGER_PX = 18;

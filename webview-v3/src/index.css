@@ -1456,7 +1456,10 @@ body,
 .districts__scene {
   position: relative;
   width: 100%;
-  height: 220px;
+  /* Grows with the viewport (v5R overlap fix): a fixed 220px box forced
+     heavy zoom-out once 7 projects wrapped into 3 rows — portrait phones
+     have vertical room; use it. */
+  height: clamp(220px, 45vh, 440px);
   background: #171b22;
   border: 1px solid #2c3240;
   overflow: hidden;
@@ -1472,7 +1475,10 @@ body,
 
 .districts__plaque {
   position: absolute;
-  transform: translate(-50%, -100%);
+  /* Anchored at the ground diamond's bottom vertex and hanging BELOW it
+     (v5R overlap fix) — the old translate(-50%, -100%) stood the plaque
+     directly over its own building. */
+  transform: translate(-50%, 0);
   display: flex;
   align-items: center;
   gap: 4px;
@@ -1489,6 +1495,15 @@ body,
 .districts__plaque-glyph {
   flex-shrink: 0;
   font-weight: 700;
+}
+
+.districts__plaque-label {
+  /* Long project names can't collide with the neighboring column's plaque
+     (columns sit 64 world px apart) — truncate; the tap-through info card
+     always shows the full label (v5R overlap fix). */
+  max-width: 76px;
+  overflow: hidden;
+  text-overflow: ellipsis;
 }
 
 .districts__info {

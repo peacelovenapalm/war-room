@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 
+import { DISTRICT_PLAQUE_STAGGER_PX } from '../constants';
 import { fitToView, worldToCanvas } from '../engine/camera';
 import {
   computeDistrictPlots,
@@ -8,6 +9,7 @@ import {
   hitTestDistrict,
   plotWorldCenter,
 } from '../engine/districtScene';
+import { TILE_H } from '../engine/iso';
 import { getCanvasResolution } from '../engine/resolution';
 import {
   type DistrictProject,
@@ -113,14 +115,27 @@ export function DistrictsView({ isOpen, onClose }: DistrictsViewProps) {
     ctx.save();
     ctx.scale(resolution, resolution);
     ctx.clearRect(0, 0, cssSize.width, cssSize.height);
+    // Apply the SAME camera the plaques + hit-test use (v5R overlap fix:
+    // this transform was missing entirely, so the canvas drew raw world
+    // coordinates at zoom 1 anchored to the top-left while the DOM
+    // plaques were camera-projected — buildings and labels never lined
+    // up). canvasPoint = worldPoint * zoom + offset (engine/camera.ts).
+    ctx.translate(camera.offsetX, camera.offsetY);
+    ctx.scale(camera.zoom, camera.zoom);
     drawDistrictScene(ctx, projects, plots);
     ctx.restore();
 
     setPlaques(
       plots.map((plot) => {
         const { worldX, worldY } = plotWorldCenter(plot);
-        const point = worldToCanvas(camera, worldX, worldY);
-        return { key: plot.key, x: point.x, y: point.y };
+        // Anchor the plaque at the ground diamond's BOTTOM vertex (v5R
+        // overlap fix) — the CSS hangs it below that point, so the label
+        // sits under its building instead of covering it. Odd columns
+        // drop one extra plaque-height so adjacent labels can never
+        // touch, regardless of zoom (see DistrictPlot.staggerPlaque).
+        const point = worldToCanvas(camera, worldX, worldY + TILE_H / 2);
+        const y = point.y + (plot.staggerPlaque ? DISTRICT_PLAQUE_STAGGER_PX : 0);
+        return { key: plot.key, x: point.x, y };
       }),
     );
     // eslint-disable-next-line react-hooks/exhaustive-deps -- `projects`/`plots` are derived each render from `snapshot`; depending on `snapshot` itself is equivalent and avoids an extra dep-array entry churn
