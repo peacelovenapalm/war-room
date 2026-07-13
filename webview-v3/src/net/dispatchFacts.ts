@@ -139,18 +139,28 @@ export interface DispatchModelOption {
 }
 
 /** Per-provider MODEL dropdown options — client-side hint only, the server
- *  validates for real. Mirrors webview-ui's curated set (2026-07-08). */
+ *  validates for real. Every value is LIVE-VERIFIED on Greg's plans, never
+ *  guessed (the repo rule since the 2026-07-08 "4.6" incident).
+ *  2026-07-13: codex swapped to the GPT-5.6 generation (Sol flagship /
+ *  Terra ≈5.5-class / Luna fastest — all three probed via real
+ *  `codex exec -m` runs); all four claude aliases relabeled with what
+ *  they resolve to today (probed via `claude -p --output-format json`
+ *  modelUsage: fable→claude-fable-5, opus→claude-opus-4-8,
+ *  sonnet→claude-sonnet-5, haiku→claude-haiku-4-5). Aliases track the
+ *  latest generation server-side, so values stay aliases on the wire. */
 export const DISPATCH_MODEL_OPTIONS: Partial<Record<DispatchProvider, DispatchModelOption[]>> = {
   claude: [
     { value: '', label: 'default (no flag)' },
-    { value: 'fable', label: 'fable' },
-    { value: 'opus', label: 'opus' },
-    { value: 'sonnet', label: 'sonnet' },
-    { value: 'haiku', label: 'haiku' },
+    { value: 'fable', label: 'fable (Fable 5 — verified)' },
+    { value: 'opus', label: 'opus (Opus 4.8 — verified)' },
+    { value: 'sonnet', label: 'sonnet (Sonnet 5 — verified)' },
+    { value: 'haiku', label: 'haiku (Haiku 4.5 — verified)' },
   ],
   codex: [
     { value: '', label: 'default (no flag)' },
-    { value: 'gpt-5.5', label: 'gpt-5.5 (verified — ChatGPT plan)' },
+    { value: 'gpt-5.6-sol', label: 'gpt-5.6-sol (flagship — verified)' },
+    { value: 'gpt-5.6-terra', label: 'gpt-5.6-terra (≈5.5-class, cheaper — verified)' },
+    { value: 'gpt-5.6-luna', label: 'gpt-5.6-luna (fastest — verified)' },
   ],
 };
 
