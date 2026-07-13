@@ -139,6 +139,14 @@ async function postEvents(cfg, provider, events) {
 
 /** file → { offset, buf, state:{sessionId,cwd} } */
 const codexFiles = new Map();
+/**
+ * file → mtimeMs when its synthetic SessionEnd was sent. End-once guard:
+ * an idle-but-fresh rollout would otherwise be re-adopted and re-ended on
+ * EVERY tick (observed: ~5 SessionEnd POSTs/sec against production). A
+ * file only re-enters tracking when its mtime moves past the recorded
+ * end-time (fresh append re-adopts cleanly, as designed).
+ */
+const codexEnded = new Map();
 
 function listRecentRollouts(root, now) {
   const out = [];
@@ -155,7 +163,8 @@ function listRecentRollouts(root, now) {
       else if (e.isFile() && e.name.startsWith('rollout-') && e.name.endsWith('.jsonl')) {
         try {
           const st = fs.statSync(p);
-          if (now - st.mtimeMs <= CODEX_FRESH_MS) out.push({ file: p, size: st.size });
+          if (now - st.mtimeMs <= CODEX_FRESH_MS)
+            out.push({ file: p, size: st.size, mtimeMs: st.mtimeMs });
         } catch {
           /* raced with deletion */
         }
@@ -183,9 +192,14 @@ function seedCodexIdentity(file, state) {
 
 async function tickCodex(cfg) {
   const events = [];
-  for (const { file, size } of listRecentRollouts(cfg.codexDir, Date.now())) {
+  for (const { file, size, mtimeMs } of listRecentRollouts(cfg.codexDir, Date.now())) {
     let entry = codexFiles.get(file);
     if (!entry) {
+      const endedAt = codexEnded.get(file);
+      if (endedAt !== undefined) {
+        if (mtimeMs <= endedAt) continue; // already ended, no growth since
+        codexEnded.delete(file); // fresh append after end — re-adopt
+      }
       entry = { offset: cfg.replay ? 0 : size, buf: '', state: {} };
       seedCodexIdentity(file, entry.state);
       codexFiles.set(file, entry);
@@ -249,7 +263,16 @@ async function tickCodex(cfg) {
         ]);
       }
       codexFiles.delete(file);
+      // End-once: remember the mtime we ended at so discovery skips the
+      // file until it grows again. A vanished file (mtime 0) can't be
+      // rediscovered, so no marker is needed.
+      if (mtime > 0) codexEnded.set(file, mtime);
     }
+  }
+  // Bound the ended ledger: entries past the freshness window have fallen
+  // out of discovery entirely.
+  for (const [file, endedAt] of codexEnded) {
+    if (now - endedAt > CODEX_FRESH_MS) codexEnded.delete(file);
   }
   return events.length;
 }

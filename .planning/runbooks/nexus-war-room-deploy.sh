@@ -179,6 +179,7 @@ fi
 # ── Run container (host-loopback publish ONLY + ro briefing mounts + state vol) ─
 ssh "${NEXUS_HOST}" "docker rm -f war-room >/dev/null 2>&1 || true"
 ssh "${NEXUS_HOST}" "docker run -d --name war-room --restart unless-stopped \
+  --log-opt max-size=20m --log-opt max-file=3 \
   --env-file ${REMOTE_ENV_DIR}/war-room.env \
   -e WAR_ROOM_TODO_DIR=/briefing/todo \
   -e WAR_ROOM_TRACKER_STATE=/briefing/tracker/STATE.md \
