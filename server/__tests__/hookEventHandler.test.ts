@@ -8,6 +8,7 @@ import { SERVER_ROOM_CASH_BONUS_PCT } from '../src/economyConstants.js';
 import { economyStore } from '../src/economyStore.js';
 import { HookEventHandler } from '../src/hookEventHandler.js';
 import { claudeProvider } from '../src/providers/hook/claude/claude.js';
+import { codexProvider } from '../src/providers/hook/codex/codex.js';
 import { SessionRouter } from '../src/sessionRouter.js';
 import type { AgentState } from '../src/types.js';
 
@@ -89,6 +90,11 @@ describe('HookEventHandler', () => {
       permissionTimers,
       claudeProvider,
       new SessionRouter(),
+      undefined,
+      new Map([
+        [claudeProvider.id, claudeProvider],
+        [codexProvider.id, codexProvider],
+      ]),
     );
   });
 
@@ -320,6 +326,193 @@ describe('HookEventHandler', () => {
     });
 
     expect(agent.hookDelivered).toBe(true);
+  });
+
+  it('routes codex providerId through the Codex normalizer and preserves tool ids', () => {
+    const agent = createTestAgent({ id: 1, sessionId: 'codex-sess' });
+    agents.set(1, agent);
+    handler.registerAgent('codex-sess', 1);
+
+    handler.handleEvent('codex', {
+      hook_event_name: 'PreToolUse',
+      session_id: 'codex-sess',
+      tool_name: 'exec',
+      tool_use_id: 'call-native-1',
+      tool_input: { command: 'private command' },
+    });
+
+    expect(mockWebview.messages).toContainEqual({
+      type: 'agentToolStart',
+      id: 1,
+      toolId: 'call-native-1',
+      status: 'Running command',
+      toolName: 'exec',
+    });
+    expect(agent.providerId).toBe('codex');
+    expect(agent.hookDelivered).toBe(true);
+  });
+
+  it('falls back to Claude normalization for an unknown providerId', () => {
+    const agent = createTestAgent({ id: 1, sessionId: 'gemini-sess' });
+    agents.set(1, agent);
+    handler.registerAgent('gemini-sess', 1);
+
+    handler.handleEvent('gemini', {
+      hook_event_name: 'Notification',
+      session_id: 'gemini-sess',
+      notification_type: 'permission_prompt',
+    });
+
+    expect(mockWebview.messages).toContainEqual({ type: 'agentToolPermission', id: 1 });
+    expect(agent.providerId).toBe('gemini');
+  });
+
+  it('suppresses adapter events after native Codex hooks set hookDelivered', () => {
+    const agent = createTestAgent({ id: 1, sessionId: 'codex-sess', hookDelivered: false });
+    agents.set(1, agent);
+    handler.registerAgent('codex-sess', 1);
+    const onSessionEnd = vi.fn();
+    handler.setLifecycleCallbacks({ onSessionEnd });
+
+    handler.handleEvent('codex', {
+      hook_event_name: 'PreToolUse',
+      session_id: 'codex-sess',
+      tool_name: 'exec',
+      tool_use_id: 'fallback-1',
+      tool_input: {},
+      __source: 'coworker-adapter',
+    });
+    expect(agent.hookDelivered).toBe(false);
+
+    handler.handleEvent('codex', {
+      hook_event_name: 'PreToolUse',
+      session_id: 'codex-sess',
+      tool_name: 'apply_patch',
+      tool_use_id: 'native-1',
+      tool_input: {},
+    });
+    expect(agent.hookDelivered).toBe(true);
+
+    handler.handleEvent('codex', {
+      hook_event_name: 'PreToolUse',
+      session_id: 'codex-sess',
+      tool_name: 'web_search',
+      tool_use_id: 'fallback-2',
+      tool_input: {},
+      __source: 'coworker-adapter',
+    });
+
+    const starts = mockWebview.messages.filter((message) => message.type === 'agentToolStart');
+    expect(starts.map((message) => message.toolId)).toEqual(['fallback-1', 'native-1']);
+
+    handler.handleEvent('codex', {
+      hook_event_name: 'SessionEnd',
+      session_id: 'codex-sess',
+      reason: 'exit',
+      __source: 'coworker-adapter',
+    });
+    expect(onSessionEnd).toHaveBeenCalledWith(1, 'exit');
+  });
+
+  it('adopts a local adapter session without requiring X-Machine or SessionStart', () => {
+    const onExternalSessionDetected = vi.fn(
+      (sessionId: string, _transcriptPath: string | undefined, cwd: string) => {
+        const agent = createTestAgent({ id: 2, sessionId, projectDir: cwd });
+        agents.set(2, agent);
+        handler.registerAgent(sessionId, 2);
+      },
+    );
+    handler.setLifecycleCallbacks({ onExternalSessionDetected });
+
+    handler.handleEvent('codex', {
+      hook_event_name: 'PreToolUse',
+      session_id: 'local-adapter-session',
+      cwd: '/local/project',
+      tool_name: 'exec',
+      tool_use_id: 'fallback-local-1',
+      tool_input: {},
+      __source: 'coworker-adapter',
+    });
+
+    expect(onExternalSessionDetected).toHaveBeenCalledWith(
+      'local-adapter-session',
+      undefined,
+      '/local/project',
+      undefined,
+      'codex',
+      undefined,
+    );
+    expect(agents.get(2)?.hookDelivered).toBe(false);
+    expect(mockWebview.messages).toContainEqual({
+      type: 'agentToolStart',
+      id: 2,
+      toolId: 'fallback-local-1',
+      status: 'Running command',
+      toolName: 'exec',
+    });
+  });
+
+  it('promotes native Codex SessionStart immediately while Claude keeps confirmation filtering', () => {
+    const onExternalSessionDetected = vi.fn();
+    handler.setLifecycleCallbacks({ onExternalSessionDetected });
+
+    handler.handleEvent('codex', {
+      hook_event_name: 'SessionStart',
+      session_id: 'codex-start',
+      source: 'startup',
+      transcript_path: '/rollouts/codex-start.jsonl',
+      cwd: '/codex/project',
+    });
+    expect(onExternalSessionDetected).toHaveBeenCalledWith(
+      'codex-start',
+      '/rollouts/codex-start.jsonl',
+      '/codex/project',
+      undefined,
+      'codex',
+      undefined,
+    );
+
+    onExternalSessionDetected.mockClear();
+    handler.handleEvent('claude', {
+      hook_event_name: 'SessionStart',
+      session_id: 'claude-start',
+      source: 'startup',
+      transcript_path: '/projects/claude-start.jsonl',
+      cwd: '/claude/project',
+    });
+    expect(onExternalSessionDetected).not.toHaveBeenCalled();
+  });
+
+  it('dispatches Codex subagent start and stop by agent_id', () => {
+    const agent = createTestAgent({ id: 1, sessionId: 'codex-sess' });
+    agents.set(1, agent);
+    handler.registerAgent('codex-sess', 1);
+
+    handler.handleEvent('codex', {
+      hook_event_name: 'SubagentStart',
+      session_id: 'codex-sess',
+      agent_id: 'agent-9',
+      agent_type: 'explorer',
+    });
+    handler.handleEvent('codex', {
+      hook_event_name: 'SubagentStop',
+      session_id: 'codex-sess',
+      agent_id: 'agent-9',
+      agent_type: 'explorer',
+    });
+
+    expect(mockWebview.messages).toContainEqual({
+      type: 'subagentToolStart',
+      id: 1,
+      parentToolId: 'agent-9',
+      toolId: 'agent-9',
+      status: 'Subagent: explorer',
+    });
+    expect(mockWebview.messages).toContainEqual({
+      type: 'subagentClear',
+      id: 1,
+      parentToolId: 'agent-9',
+    });
   });
 
   // ── Buffering ───────────────────────────────────────────────

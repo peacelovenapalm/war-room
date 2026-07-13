@@ -4,13 +4,13 @@ import { employeeId } from '../../core/src/employeeId.js';
 import type { AgentEvent, HookProvider } from '../../core/src/provider.js';
 import type { AgentStateStore } from './agentStateStore.js';
 import { buffsForDesk, globalBuffs } from './buildingBuffs.js';
-import { SESSION_END_GRACE_MS } from './constants.js';
+import { COWORKER_ADAPTER_HOOK_SOURCE, SESSION_END_GRACE_MS } from './constants.js';
 import { dossierDerivation } from './dossierDerivation.js';
 import { economyStore } from './economyStore.js';
 import { employeeStore, XP_TURN } from './employeeStore.js';
 import { getOfficeLayout } from './officeLayoutStore.js';
 import { progression } from './progressionStore.js';
-import type { SessionRouter } from './sessionRouter.js';
+import type { PendingExternalSession, SessionRouter } from './sessionRouter.js';
 import { shiftStats } from './shiftStats.js';
 import { getInlineTeammates, hasInlineTeammates } from './teamUtils.js';
 import { cancelPermissionTimer, cancelWaitingTimer } from './timerManager.js';
@@ -78,29 +78,38 @@ export class HookEventHandler {
     private agents: AgentStateStore,
     private waitingTimers: Map<number, ReturnType<typeof setTimeout>>,
     private permissionTimers: Map<number, ReturnType<typeof setTimeout>>,
-    private provider: HookProvider,
+    private defaultProvider: HookProvider,
     private sessionRouter: SessionRouter,
     private watchAllSessionsRef?: { current: boolean },
+    private providerRegistry: ReadonlyMap<string, HookProvider> = new Map([
+      [defaultProvider.id, defaultProvider],
+    ]),
   ) {
-    if (provider.protocolVersion !== HookEventHandler.SUPPORTED_PROTOCOL_VERSION) {
-      console.warn(
-        `[Pixel Agents] HookProvider "${provider.id}" reports protocolVersion=${provider.protocolVersion}, ` +
-          `but handler understands ${HookEventHandler.SUPPORTED_PROTOCOL_VERSION}. ` +
-          `Events from this provider will be dropped.`,
-      );
+    for (const provider of new Set([defaultProvider, ...providerRegistry.values()])) {
+      if (provider.protocolVersion !== HookEventHandler.SUPPORTED_PROTOCOL_VERSION) {
+        console.warn(
+          `[Pixel Agents] HookProvider "${provider.id}" reports protocolVersion=${provider.protocolVersion}, ` +
+            `but handler understands ${HookEventHandler.SUPPORTED_PROTOCOL_VERSION}. ` +
+            `Events from this provider will be dropped.`,
+        );
+      }
     }
+  }
+
+  private providerFor(providerId: string): HookProvider {
+    return this.providerRegistry.get(providerId) ?? this.defaultProvider;
   }
 
   /** Merged set of tool names that spawn subagents (teammates + within-turn subagents
    *  when a team provider is attached, or the base HookProvider set otherwise). */
-  private getSubagentToolSet(): ReadonlySet<string> {
-    if (this.provider.team) {
+  private getSubagentToolSet(provider: HookProvider): ReadonlySet<string> {
+    if (provider.team) {
       return new Set<string>([
-        ...this.provider.team.teammateSpawnTools,
-        ...this.provider.team.withinTurnSubagentTools,
+        ...provider.team.teammateSpawnTools,
+        ...provider.team.withinTurnSubagentTools,
       ]);
     }
-    return this.provider.subagentToolNames;
+    return provider.subagentToolNames;
   }
 
   /** Check if a session is tracked (in workspace project dir, or Watch All Sessions ON). */
@@ -116,6 +125,22 @@ export class HookEventHandler {
   /** Set callbacks for session lifecycle events (SessionStart/SessionEnd). */
   setLifecycleCallbacks(callbacks: SessionLifecycleCallbacks): void {
     this.lifecycleCallbacks = callbacks;
+  }
+
+  private promotePendingSession(pending: PendingExternalSession): void {
+    this.lifecycleCallbacks.onExternalSessionDetected?.(
+      pending.sessionId,
+      pending.transcriptPath,
+      pending.cwd,
+      pending.machine,
+      pending.providerId,
+      pending.pid,
+    );
+    if (pending.hookDelivered === false) {
+      const adoptedId = this.sessionRouter.resolve(pending.sessionId);
+      const adoptedAgent = adoptedId === undefined ? undefined : this.agents.get(adoptedId);
+      if (adoptedAgent) adoptedAgent.hookDelivered = false;
+    }
   }
 
   /**
@@ -155,8 +180,9 @@ export class HookEventHandler {
    * @param providerId - Provider that sent the event ('claude', 'codex', etc.)
    * @param event - The hook event payload from the CLI tool
    */
-  handleEvent(_providerId: string, event: HookEvent): void {
-    if (this.provider.protocolVersion !== HookEventHandler.SUPPORTED_PROTOCOL_VERSION) {
+  handleEvent(providerId: string, event: HookEvent): void {
+    const provider = this.providerFor(providerId);
+    if (provider.protocolVersion !== HookEventHandler.SUPPORTED_PROTOCOL_VERSION) {
       return; // version mismatch already logged in constructor
     }
     // ── Provider normalization boundary ───────────────────────────────────────
@@ -165,10 +191,11 @@ export class HookEventHandler {
     // uses the normalized AgentEvent.kind. Raw `event.*` reads are still allowed in a few
     // places for provider-specific metadata that AgentEvent doesn't capture (transcript_path,
     // cwd for external-session adoption; agent_type for teammate routing).
-    const normalized = this.provider.normalizeHookEvent(event);
+    const normalized = provider.normalizeHookEvent(event);
     if (!normalized) return; // unknown / uninteresting event -- silently drop
     const normEvent = normalized.event;
     const eventName = event.hook_event_name; // retained for logs only
+    const fromCoworkerAdapter = event.__source === COWORKER_ADAPTER_HOOK_SOURCE;
     // Machine identity label injected at the HTTP boundary (httpServer.ts) for
     // authenticated remote hook events. Present => this event came from another
     // machine; its transcript_path was already stripped (hooks-only adoption).
@@ -215,7 +242,8 @@ export class HookEventHandler {
       if (existingAgentId !== undefined) {
         const agent = this.agents.get(existingAgentId);
         if (agent) {
-          agent.hookDelivered = true;
+          if (!fromCoworkerAdapter) agent.hookDelivered = true;
+          if (providerId !== this.defaultProvider.id) agent.providerId = providerId;
           this.updateAgentPid(agent, existingAgentId, pid);
         }
         if (debug)
@@ -228,7 +256,8 @@ export class HookEventHandler {
       for (const [id, agent] of this.agents) {
         if (agent.sessionId === event.session_id) {
           this.registerAgent(agent.sessionId, id);
-          agent.hookDelivered = true;
+          if (!fromCoworkerAdapter) agent.hookDelivered = true;
+          if (providerId !== this.defaultProvider.id) agent.providerId = providerId;
           this.updateAgentPid(agent, id, pid);
           if (debug)
             console.log(
@@ -280,9 +309,21 @@ export class HookEventHandler {
           transcriptPath,
           cwd: cwd ?? '',
           machine,
-          providerId: _providerId,
+          providerId,
           pid,
+          hookDelivered: !fromCoworkerAdapter,
         });
+        // Claude keeps its transient-session filter: SessionStart alone is not
+        // enough to create an agent. Codex has no equivalent noisy extension
+        // sessions, and native SessionStart is its only immediate board-entry
+        // signal, so promote it without waiting for a second event.
+        if (
+          provider.id !== this.defaultProvider.id &&
+          this.lifecycleCallbacks.onExternalSessionDetected
+        ) {
+          const pending = this.sessionRouter.confirmPending(event.session_id);
+          if (pending) this.promotePendingSession(pending);
+        }
       } else {
         if (debug && tracked)
           console.log(
@@ -310,7 +351,7 @@ export class HookEventHandler {
     // Local unknown sessions keep the original behavior (drop/buffer) because the
     // JSONL scanner is the authority for local discovery.
     if (
-      machine &&
+      (machine || fromCoworkerAdapter || provider.id !== this.defaultProvider.id) &&
       normEvent.kind !== 'sessionEnd' && // don't resurrect a session just to end it
       this.sessionRouter.resolve(event.session_id) === undefined &&
       !this.sessionRouter.hasPending(event.session_id) &&
@@ -321,8 +362,9 @@ export class HookEventHandler {
         transcriptPath: undefined,
         cwd: typeof event.cwd === 'string' ? event.cwd : '',
         machine,
-        providerId: _providerId,
+        providerId,
         pid,
+        hookDelivered: !fromCoworkerAdapter,
       });
     }
 
@@ -333,16 +375,9 @@ export class HookEventHandler {
         console.log(
           `[Pixel Agents] Hook: ${eventName} confirmed external session ${event.session_id.slice(0, 8)}..., creating agent`,
         );
-      this.lifecycleCallbacks.onExternalSessionDetected?.(
-        pending.sessionId,
-        pending.transcriptPath,
-        pending.cwd,
-        pending.machine,
-        pending.providerId,
-        pending.pid,
-      );
+      this.promotePendingSession(pending);
       // Re-process this event now that the agent exists
-      this.handleEvent(_providerId, event);
+      this.handleEvent(providerId, event);
       return;
     }
 
@@ -372,7 +407,7 @@ export class HookEventHandler {
           console.log(
             `[Pixel Agents] Hook: ${eventName} - unknown session ${event.session_id.slice(0, 8)}..., buffering`,
           );
-        this.sessionRouter.bufferEvent(_providerId, event);
+        this.sessionRouter.bufferEvent(providerId, event);
       }
       return;
     }
@@ -380,7 +415,13 @@ export class HookEventHandler {
     const agent = this.agents.get(agentId);
     if (!agent) return;
 
-    agent.hookDelivered = true;
+    // Dedupe rule: rollout fallback activity drives sessions only until a native
+    // hook has arrived. The adapter never sets hookDelivered itself; once a
+    // native event sets it, later adapter activity is dropped. Synthetic
+    // SessionEnd remains accepted because Codex has no native end event.
+    if (fromCoworkerAdapter && agent.hookDelivered && normEvent.kind !== 'sessionEnd') return;
+    if (!fromCoworkerAdapter) agent.hookDelivered = true;
+    if (providerId !== this.defaultProvider.id) agent.providerId = providerId;
     this.updateAgentPid(agent, agentId, pid);
     if (debug)
       console.log(
@@ -392,18 +433,18 @@ export class HookEventHandler {
     // carry `agent_type` in the raw payload, which we pass to the team-routing handler.
     switch (normEvent.kind) {
       case 'sessionEnd':
-        return this.handleSessionEnd(normEvent, agent, agentId);
+        return this.handleSessionEnd(normEvent, agent, agentId, provider);
       case 'toolStart':
-        return this.handlePreToolUse(normEvent, agent, agentId);
+        return this.handlePreToolUse(normEvent, agent, agentId, provider);
       case 'toolEnd':
         // Both PostToolUse and PostToolUseFailure normalize to toolEnd. Distinguishing
         // them inside handlers would require extra info; the existing behavior was
         // identical for both (agentToolDone + clear currentHookToolId), so one branch suffices.
-        return this.handlePostToolUse(agent, agentId);
+        return this.handlePostToolUse(normEvent, agent, agentId);
       case 'subagentStart':
-        return this.provider.team ? this.handleSubagentStart(event, agent, agentId) : undefined;
+        return this.handleSubagentStart(event, normEvent, agent, agentId, provider);
       case 'subagentEnd':
-        return this.provider.team ? this.handleSubagentStop(agent, agentId) : undefined;
+        return this.handleSubagentStop(normEvent, agent, agentId, provider);
       case 'permissionRequest':
         // Handles BOTH the PermissionRequest hook AND the Notification(permission_prompt)
         // hook -- normalizeHookEvent collapses them into one event kind.
@@ -412,16 +453,16 @@ export class HookEventHandler {
         // Handles Stop AND Notification(idle_prompt) -- both normalize to turnEnd.
         // awaitingInput discriminates them: idle_prompt sets it (-> "Waiting for
         // input"), Stop leaves it absent (-> "Done").
-        return this.handleStop(agent, agentId, normEvent.awaitingInput === true);
+        return this.handleStop(agent, agentId, provider, normEvent.awaitingInput === true);
       case 'subagentTurnEnd':
         // Handles TeammateIdle AND TaskCompleted -- both normalize here. The normalized
         // `reason` field discriminates; the team-provider's extractTeammateNameFromEvent(raw)
         // still routes to the specific teammate. (TaskCreated normalizes to null in the provider.)
-        if (!this.provider.team) return;
+        if (!provider.team) return;
         if (normEvent.reason === 'completed') {
-          return this.handleTaskCompleted(event, agentId);
+          return this.handleTaskCompleted(event, agentId, provider);
         }
-        return this.handleTeammateIdle(event, agent, agentId);
+        return this.handleTeammateIdle(event, agent, agentId, provider);
       case 'progress':
         // Not yet consumed by the office visualization. Silently drop.
         return;
@@ -436,6 +477,7 @@ export class HookEventHandler {
     normEvent: Extract<AgentEvent, { kind: 'sessionEnd' }>,
     agent: AgentState,
     agentId: number,
+    provider: HookProvider,
   ): void {
     const reason = normEvent.reason;
     if (debug)
@@ -449,7 +491,7 @@ export class HookEventHandler {
 
     if (expectsFollowUp) {
       agent.pendingClear = true;
-      this.markAgentWaiting(agent, agentId);
+      this.markAgentWaiting(agent, agentId, provider);
       if (debug)
         console.log(
           `[Pixel Agents] Hook: Agent ${agentId} - SessionEnd(reason=${reason}), awaiting possible SessionStart`,
@@ -464,7 +506,7 @@ export class HookEventHandler {
     } else {
       // Immediate cleanup for exit/logout. onSessionEnd → removeTeammates in the
       // ViewProvider cleans up all teammates of this lead at once.
-      this.markAgentWaiting(agent, agentId);
+      this.markAgentWaiting(agent, agentId, provider);
       this.lifecycleCallbacks.onSessionEnd?.(agentId, reason ?? 'unknown');
     }
   }
@@ -478,11 +520,12 @@ export class HookEventHandler {
     normEvent: Extract<AgentEvent, { kind: 'toolStart' }>,
     agent: AgentState,
     agentId: number,
+    provider: HookProvider,
   ): void {
     const toolName = normEvent.toolName;
     const toolInput = (normEvent.input as Record<string, unknown> | undefined) ?? {};
-    const status = this.provider.formatToolStatus(toolName, toolInput);
-    const hookToolId = `hook-${Date.now()}`;
+    const status = normEvent.status ?? provider.formatToolStatus(toolName, toolInput);
+    const hookToolId = normEvent.toolId;
 
     // Track for PostToolUse/SubagentStart correlation (always, even if suppressed below).
     // currentHookIsTeammateSpawn is the authoritative teammate-vs-subagent discriminator.
@@ -490,7 +533,7 @@ export class HookEventHandler {
     agent.currentHookToolId = hookToolId;
     agent.currentHookToolName = toolName;
     agent.currentHookIsTeammateSpawn =
-      this.provider.team?.isTeammateSpawnCall(toolName, toolInput) ?? false;
+      provider.team?.isTeammateSpawnCall(toolName, toolInput) ?? false;
 
     // When a lead has inline teammates, hook tool events are ambiguous (could be
     // from the lead or any teammate -- they share session_id). Suppress hook-originated
@@ -537,18 +580,25 @@ export class HookEventHandler {
    * Stop hook handles the idle transition. This is here for completeness and
    * to serve as a confirmation event for pending external sessions.
    */
-  private handlePostToolUse(agent: AgentState, agentId: number): void {
-    if (agent.currentHookToolId) {
+  private handlePostToolUse(
+    normEvent: Extract<AgentEvent, { kind: 'toolEnd' }>,
+    agent: AgentState,
+    agentId: number,
+  ): void {
+    const toolId = normEvent.toolId === 'current' ? agent.currentHookToolId : normEvent.toolId;
+    if (toolId) {
       // Suppress tool display when lead has inline teammates (see handlePreToolUse)
       if (!hasInlineTeammates(agentId, this.agents)) {
         this.agents.broadcast({
           type: 'agentToolDone',
           id: agentId,
-          toolId: agent.currentHookToolId,
+          toolId,
         });
       }
-      agent.currentHookToolId = undefined;
-      agent.currentHookToolName = undefined;
+      if (normEvent.toolId === 'current' || agent.currentHookToolId === toolId) {
+        agent.currentHookToolId = undefined;
+        agent.currentHookToolName = undefined;
+      }
     }
   }
 
@@ -566,8 +616,37 @@ export class HookEventHandler {
    * For old-style Task/Agent subagents (inline, no run_in_background), creates
    * the child character immediately via hooks without waiting for JSONL polling.
    */
-  private handleSubagentStart(event: HookEvent, agent: AgentState, agentId: number): void {
-    const agentType = this.provider.team?.extractTeammateNameFromEvent(event) ?? 'unknown';
+  private handleSubagentStart(
+    event: HookEvent,
+    normEvent: Extract<AgentEvent, { kind: 'subagentStart' }>,
+    agent: AgentState,
+    agentId: number,
+    provider: HookProvider,
+  ): void {
+    if (!provider.team) {
+      let subTools = agent.activeSubagentToolIds.get(normEvent.parentToolId);
+      if (!subTools) {
+        subTools = new Set();
+        agent.activeSubagentToolIds.set(normEvent.parentToolId, subTools);
+      }
+      subTools.add(normEvent.toolId);
+      let subNames = agent.activeSubagentToolNames.get(normEvent.parentToolId);
+      if (!subNames) {
+        subNames = new Map();
+        agent.activeSubagentToolNames.set(normEvent.parentToolId, subNames);
+      }
+      subNames.set(normEvent.toolId, normEvent.toolName);
+      this.agents.broadcast({
+        type: 'subagentToolStart',
+        id: agentId,
+        parentToolId: normEvent.parentToolId,
+        toolId: normEvent.toolId,
+        status: normEvent.status ?? `Subtask: ${normEvent.toolName}`,
+      });
+      return;
+    }
+
+    const agentType = provider.team.extractTeammateNameFromEvent(event) ?? 'unknown';
 
     // Decide path: teammate spawn vs basic within-turn subagent.
     // Two conditions must BOTH hold for the teammate path:
@@ -577,7 +656,7 @@ export class HookEventHandler {
     //      Without this guard, external sessions firing run_in_background=true
     //      for parallel basic subagents would be mis-routed to teammate discovery.
     // Mirrors the same gate used by the periodic scanAllTeammateFiles fallback.
-    if (this.provider.team && agent.currentHookIsTeammateSpawn === true && agent.teamName) {
+    if (agent.currentHookIsTeammateSpawn === true && agent.teamName) {
       if (debug)
         console.log(
           `[Pixel Agents] Hook: Agent ${agentId} - SubagentStart: teammate "${agentType}" detected, triggering discovery`,
@@ -589,7 +668,7 @@ export class HookEventHandler {
     // Basic within-turn subagent path: find parent tool ID from activeToolNames.
     // Use only the real JSONL-populated id -- no synthetic fallback here, or we'd
     // double-track parents once JSONL catches up.
-    const parentTools = this.getSubagentToolSet();
+    const parentTools = this.getSubagentToolSet(provider);
     let parentToolId: string | undefined;
     for (const [toolId, toolName] of agent.activeToolNames) {
       if (parentTools.has(toolName)) {
@@ -635,7 +714,22 @@ export class HookEventHandler {
    *
    * For old-style Task subagents: removes the child character from the office.
    */
-  private handleSubagentStop(agent: AgentState, agentId: number): void {
+  private handleSubagentStop(
+    normEvent: Extract<AgentEvent, { kind: 'subagentEnd' }>,
+    agent: AgentState,
+    agentId: number,
+    provider: HookProvider,
+  ): void {
+    if (!provider.team) {
+      agent.activeSubagentToolIds.delete(normEvent.parentToolId);
+      agent.activeSubagentToolNames.delete(normEvent.parentToolId);
+      this.agents.broadcast({
+        type: 'subagentClear',
+        id: agentId,
+        parentToolId: normEvent.parentToolId,
+      });
+      return;
+    }
     // Check if this agent has inline teammates (independent agents with leadAgentId).
     // Just mark them waiting -- SubagentStop fires per-task-iteration; teammates may
     // sit idle for minutes between lead requests before being re-invoked.
@@ -650,7 +744,7 @@ export class HookEventHandler {
           `[Pixel Agents] Hook: Agent ${agentId} - SubagentStop: marking inline teammates as waiting`,
         );
       for (const [id, a] of inlineTeammates) {
-        this.markAgentWaiting(a, id);
+        this.markAgentWaiting(a, id, provider);
       }
       return;
     }
@@ -659,7 +753,7 @@ export class HookEventHandler {
     // sub-agents. The `activeSubagentToolIds.has(toolId)` gate below prevents us
     // from picking a subagent-spawning parent that already had its sub-agents
     // cleared in the same turn.
-    const subagentParentTools = this.getSubagentToolSet();
+    const subagentParentTools = this.getSubagentToolSet(provider);
     let parentToolId: string | undefined;
     for (const [toolId, toolName] of agent.activeToolNames) {
       if (subagentParentTools.has(toolName) && agent.activeSubagentToolIds.has(toolId)) {
@@ -709,7 +803,12 @@ export class HookEventHandler {
   }
 
   /** Handle Stop: Claude finished responding, mark agent as waiting. */
-  private handleStop(agent: AgentState, agentId: number, awaitingInput = false): void {
+  private handleStop(
+    agent: AgentState,
+    agentId: number,
+    provider: HookProvider,
+    awaitingInput = false,
+  ): void {
     // Shift report (v1 mechanic #2) + progression (v1 mechanic #3): a
     // finished turn (Stop) counts as a completion; going idle waiting on the
     // user does not. Coworker heartbeats (Codex/Gemini synthesize Stop but
@@ -783,7 +882,7 @@ export class HookEventHandler {
         agent.sessionId,
       );
     }
-    this.markAgentWaiting(agent, agentId, awaitingInput);
+    this.markAgentWaiting(agent, agentId, provider, awaitingInput);
   }
 
   /**
@@ -792,14 +891,19 @@ export class HookEventHandler {
    * marks all inline teammates of this lead as waiting.
    * Fallback: if the agent has no inline teammates, mark the agent itself.
    */
-  private handleTeammateIdle(event: HookEvent, agent: AgentState, agentId: number): void {
-    const agentType = this.provider.team?.extractTeammateNameFromEvent(event);
+  private handleTeammateIdle(
+    event: HookEvent,
+    agent: AgentState,
+    agentId: number,
+    provider: HookProvider,
+  ): void {
+    const agentType = provider.team?.extractTeammateNameFromEvent(event);
     const inlineTeammates = getInlineTeammates(agentId, this.agents);
 
     if (inlineTeammates.length === 0) {
       // No inline teammates — treat as a regular idle signal for this agent.
       // TeammateIdle is idle-semantics, so it surfaces "Waiting for input".
-      this.markAgentWaiting(agent, agentId, true);
+      this.markAgentWaiting(agent, agentId, provider, true);
       return;
     }
 
@@ -810,7 +914,7 @@ export class HookEventHandler {
         const [id, a] = match;
         if (debug)
           console.log(`[Pixel Agents] Hook: TeammateIdle "${agentType}" -> teammate Agent ${id}`);
-        this.markAgentWaiting(a, id, true);
+        this.markAgentWaiting(a, id, provider, true);
         return;
       }
     }
@@ -821,7 +925,7 @@ export class HookEventHandler {
         `[Pixel Agents] Hook: TeammateIdle (no agent_type match) -> marking ${inlineTeammates.length} teammate(s) waiting`,
       );
     for (const [id, a] of inlineTeammates) {
-      this.markAgentWaiting(a, id, true);
+      this.markAgentWaiting(a, id, provider, true);
     }
   }
 
@@ -829,9 +933,9 @@ export class HookEventHandler {
    * Handle TaskCompleted: a teammate marked its task done.
    * Routes to the specific teammate when identifiable, marking it waiting instantly.
    */
-  private handleTaskCompleted(event: HookEvent, agentId: number): void {
+  private handleTaskCompleted(event: HookEvent, agentId: number, provider: HookProvider): void {
     const subject = (event.subject as string) ?? '';
-    const agentType = this.provider.team?.extractTeammateNameFromEvent(event);
+    const agentType = provider.team?.extractTeammateNameFromEvent(event);
     if (debug)
       console.log(
         `[Pixel Agents] Hook: Agent ${agentId} - TaskCompleted: ${subject}${agentType ? ` (agent_type=${agentType})` : ''}`,
@@ -845,12 +949,12 @@ export class HookEventHandler {
       const match = inlineTeammates.find(([, a]) => a.agentName === agentType);
       if (match) {
         const [id, a] = match;
-        this.markAgentWaiting(a, id);
+        this.markAgentWaiting(a, id, provider);
         return;
       }
     }
     for (const [id, a] of inlineTeammates) {
-      this.markAgentWaiting(a, id);
+      this.markAgentWaiting(a, id, provider);
     }
   }
 
@@ -859,7 +963,12 @@ export class HookEventHandler {
    * agents), cancels timers, and notifies the webview. Same logic as the turn_duration
    * handler in transcriptParser.ts.
    */
-  private markAgentWaiting(agent: AgentState, agentId: number, awaitingInput = false): void {
+  private markAgentWaiting(
+    agent: AgentState,
+    agentId: number,
+    provider: HookProvider,
+    awaitingInput = false,
+  ): void {
     cancelWaitingTimer(agentId, this.waitingTimers);
     cancelPermissionTimer(agentId, this.permissionTimers);
 
@@ -867,7 +976,7 @@ export class HookEventHandler {
     // ALWAYS send agentToolsClear at turn end -- even when activeToolIds is empty by now
     // (because tool_results already processed and removed them). Without this, stale
     // sub-agent characters and permission bubbles from the turn would never clear.
-    const parentTools = this.getSubagentToolSet();
+    const parentTools = this.getSubagentToolSet(provider);
     for (const toolId of [...agent.activeToolIds]) {
       if (agent.backgroundAgentToolIds.has(toolId)) continue;
       agent.activeToolIds.delete(toolId);

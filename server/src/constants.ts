@@ -48,6 +48,12 @@ export {
 
 export const HOOK_EVENT_BUFFER_MS = 5_000;
 
+// ── Hook source metadata ────────────────────────────────────
+/** Authenticated header used by fallback adapters to identify synthetic events. */
+export const HOOK_SOURCE_HEADER = 'x-war-room-hook-source';
+/** Header/tag value for the rollout-tail fallback lane. */
+export const COWORKER_ADAPTER_HOOK_SOURCE = 'coworker-adapter';
+
 // ── Remote agent output ingest (T1 remote live-tail, S1/S3) ─
 /** POST /api/agents/output body caps (mirrors the poll route's ingest-cap
  *  style): a batch larger than this, a line longer than this, or a batch

@@ -14,6 +14,8 @@ export interface PendingExternalSession {
   providerId?: string;
   /** OS process id captured from the hook forwarder's X-Pid header, if present. */
   pid?: number;
+  /** True for native hooks; false for rollout-adapter fallback events. */
+  hookDelivered?: boolean;
 }
 
 /** An event waiting to be dispatched once its agent registers. */

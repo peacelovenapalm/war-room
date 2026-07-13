@@ -73,6 +73,7 @@ export class AgentRuntime {
   constructor(
     private readonly store: AgentStateStore,
     provider: HookProvider,
+    providerRegistry: ReadonlyMap<string, HookProvider> = new Map([[provider.id, provider]]),
   ) {
     // Wire module-level dependencies
     setDismissalTracker(this.dismissalTracker);
@@ -91,6 +92,7 @@ export class AgentRuntime {
       provider,
       new SessionRouter(),
       this.watchAllSessions,
+      providerRegistry,
     );
 
     // Wire hook lifecycle callbacks to shared agent operations
@@ -114,7 +116,12 @@ export class AgentRuntime {
         }
         adoptExternalSessionFromHook(
           sessionId,
-          transcriptPath,
+          // Only providers with a transcript parser may enter the in-process
+          // file-watching lane. Codex rollout coverage is owned by the external
+          // coworker adapter, so native hooks create a hooks-only agent here.
+          (providerRegistry.get(providerId ?? provider.id) ?? provider).parseTranscriptLine
+            ? transcriptPath
+            : undefined,
           cwd,
           this.knownJsonlFiles,
           this.store.nextAgentId,

@@ -18,7 +18,9 @@ import type { AssetCache, SetHooksEnabledSideEffect } from './clientMessageHandl
 import { handleClientMessage } from './clientMessageHandler.js';
 import {
   AUTO_EXECUTOR_TICK_INTERVAL_MS,
+  COWORKER_ADAPTER_HOOK_SOURCE,
   HOOK_API_PREFIX,
+  HOOK_SOURCE_HEADER,
   MAX_AGENT_OUTPUT_BODY_BYTES,
   MAX_AGENT_OUTPUT_LINE_BYTES,
   MAX_AGENT_OUTPUT_LINES_PER_POST,
@@ -673,6 +675,13 @@ function registerHookRoute(app: FastifyInstance, options: HttpServerOptions): vo
     async (request, reply) => {
       const { providerId } = request.params;
       const event = request.body;
+
+      // Source metadata is injected only from an authenticated header. Never
+      // trust a caller-supplied __source body field for fallback dedupe.
+      delete event.__source;
+      if (request.headers[HOOK_SOURCE_HEADER] === COWORKER_ADAPTER_HOOK_SOURCE) {
+        event.__source = COWORKER_ADAPTER_HOOK_SOURCE;
+      }
 
       // Machine identity: remote machines tag their hook events with an
       // X-Machine header (installed by the hooks runbook). A label that

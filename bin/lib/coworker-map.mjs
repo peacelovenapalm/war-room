@@ -1,9 +1,8 @@
 /**
  * Coworker event mapping (v1 mechanic #6a) — pure functions, no I/O.
  *
- * Translates Codex / Gemini CLI session activity into the Claude-hook-shaped
- * payloads the War Room server already normalizes (PreToolUse / PostToolUse /
- * Stop / Notification). The adapter POSTs them to the authed ingest at
+ * Translates Codex / Gemini CLI session activity into provider-native hook
+ * payloads. The adapter POSTs them to the authed ingest at
  * /api/hooks/<provider>; the server records the provider id and renders the
  * session as a coworker (distinct badge silhouette + [PROVIDER] text label).
  *
@@ -34,7 +33,7 @@ function codexToolEvent(payload, base) {
   let toolName = name;
   let toolInput = {};
   if (name === 'shell' || name === 'local_shell' || name === 'container.exec') {
-    toolName = 'Bash';
+    toolName = 'exec';
     try {
       const args = JSON.parse(payload.arguments ?? '{}');
       const cmd = Array.isArray(args.command) ? args.command.join(' ') : args.command;
@@ -43,9 +42,62 @@ function codexToolEvent(payload, base) {
       /* unparseable arguments → generic Bash */
     }
   } else if (name === 'apply_patch') {
-    toolName = 'Edit';
+    toolName = 'apply_patch';
   }
-  return { ...base, hook_event_name: 'PreToolUse', tool_name: toolName, tool_input: toolInput };
+  const toolUseId =
+    typeof payload.call_id === 'string'
+      ? payload.call_id
+      : typeof payload.id === 'string'
+        ? payload.id
+        : undefined;
+  if (!toolUseId) return undefined;
+  return {
+    ...base,
+    hook_event_name: 'PreToolUse',
+    tool_name: toolName,
+    tool_use_id: toolUseId,
+    tool_input: toolInput,
+  };
+}
+
+function codexToolEnd(payload, base) {
+  const toolUseId =
+    typeof payload.call_id === 'string'
+      ? payload.call_id
+      : typeof payload.id === 'string'
+        ? payload.id
+        : undefined;
+  if (!toolUseId) return undefined;
+  const toolResponse = {};
+  if (typeof payload.success === 'boolean') toolResponse.success = payload.success;
+  if (typeof payload.status === 'string') toolResponse.status = payload.status;
+  if (typeof payload.duration_ms === 'number') toolResponse.duration_ms = payload.duration_ms;
+  if (typeof payload.duration === 'number') toolResponse.duration = payload.duration;
+  return {
+    ...base,
+    hook_event_name: 'PostToolUse',
+    tool_use_id: toolUseId,
+    tool_response: toolResponse,
+  };
+}
+
+function pairedCompletion(base, toolUseId, toolName, toolResponse = {}) {
+  if (!toolUseId) return [];
+  return [
+    {
+      ...base,
+      hook_event_name: 'PreToolUse',
+      tool_name: toolName,
+      tool_use_id: toolUseId,
+      tool_input: {},
+    },
+    {
+      ...base,
+      hook_event_name: 'PostToolUse',
+      tool_use_id: toolUseId,
+      tool_response: toolResponse,
+    },
+  ];
 }
 
 /**
@@ -77,17 +129,25 @@ export function mapCodexLine(rec, state) {
   if (rec.type === 'event_msg') {
     switch (payload.type) {
       case 'task_started':
+        if (typeof payload.turn_id !== 'string') return [];
         return [
           {
             ...base,
             hook_event_name: 'PreToolUse',
             tool_name: 'Codex',
+            tool_use_id: `turn:${payload.turn_id}`,
             tool_input: {},
           },
         ];
       case 'task_complete':
+        if (typeof payload.turn_id !== 'string') return [{ ...base, hook_event_name: 'Stop' }];
         return [
-          { ...base, hook_event_name: 'PostToolUse' },
+          {
+            ...base,
+            hook_event_name: 'PostToolUse',
+            tool_use_id: `turn:${payload.turn_id}`,
+            tool_response: { status: 'completed' },
+          },
           { ...base, hook_event_name: 'Stop' },
         ];
       case 'turn_aborted':
@@ -96,8 +156,46 @@ export function mapCodexLine(rec, state) {
       case 'apply_patch_approval_request':
         // Codex is waiting on a human approval → NEEDS INPUT (fire at the desk).
         return [
-          { ...base, hook_event_name: 'Notification', notification_type: 'permission_prompt' },
+          {
+            ...base,
+            hook_event_name: 'PermissionRequest',
+            tool_name: payload.type === 'exec_approval_request' ? 'exec' : 'apply_patch',
+          },
         ];
+      case 'patch_apply_end': {
+        const end = codexToolEnd(payload, base);
+        return end ? [end] : [];
+      }
+      case 'mcp_tool_call_end': {
+        const invocation =
+          payload.invocation && typeof payload.invocation === 'object' ? payload.invocation : {};
+        const server =
+          typeof invocation.server === 'string'
+            ? invocation.server
+            : typeof payload.server === 'string'
+              ? payload.server
+              : 'server';
+        const tool =
+          typeof invocation.tool === 'string'
+            ? invocation.tool
+            : typeof invocation.tool_name === 'string'
+              ? invocation.tool_name
+              : typeof payload.tool_name === 'string'
+                ? payload.tool_name
+                : 'tool';
+        return pairedCompletion(
+          base,
+          typeof payload.call_id === 'string' ? payload.call_id : undefined,
+          `mcp__${server}__${tool}`,
+          typeof payload.duration === 'number' ? { duration: payload.duration } : {},
+        );
+      }
+      case 'web_search_end':
+        return pairedCompletion(
+          base,
+          typeof payload.call_id === 'string' ? payload.call_id : undefined,
+          'web_search',
+        );
       default:
         return [];
     }
@@ -106,9 +204,15 @@ export function mapCodexLine(rec, state) {
   if (rec.type === 'response_item') {
     switch (payload.type) {
       case 'function_call':
-        return [codexToolEvent(payload, base)];
+      case 'custom_tool_call': {
+        const start = codexToolEvent(payload, base);
+        return start ? [start] : [];
+      }
       case 'function_call_output':
-        return [{ ...base, hook_event_name: 'PostToolUse' }];
+      case 'custom_tool_call_output': {
+        const end = codexToolEnd(payload, base);
+        return end ? [end] : [];
+      }
       default:
         return [];
     }

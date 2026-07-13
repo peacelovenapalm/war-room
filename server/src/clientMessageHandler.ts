@@ -6,7 +6,7 @@ import { dispatchStore } from './dispatchStore.js';
 import { readLayoutFromFile, writeLayoutToFile } from './layoutPersistence.js';
 import type { OutputSource } from './outputRingStore.js';
 import { outputRingStore, outputStreamKey } from './outputRingStore.js';
-import { claudeProvider } from './providers/index.js';
+import { hookProviderCapabilities } from './providers/index.js';
 import * as remoteTailDemand from './remoteTailDemand.js';
 
 type WsSend = (message: Record<string, unknown>) => void;
@@ -257,8 +257,8 @@ function handleWebviewReady(send: WsSend, ctx: ClientMessageContext): void {
   // 1. Provider capabilities (must arrive before any agent messages)
   send({
     type: 'providerCapabilities',
-    readingTools: [...claudeProvider.readingTools],
-    subagentToolNames: [...claudeProvider.subagentToolNames],
+    readingTools: hookProviderCapabilities.readingTools,
+    subagentToolNames: hookProviderCapabilities.subagentToolNames,
   });
 
   // 2. Assets (from server cache, loaded at startup via pngjs)
