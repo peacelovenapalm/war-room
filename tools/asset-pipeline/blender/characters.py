@@ -6,6 +6,16 @@ DIRECT TRANSFORM: every joint is an empty; poses are plain dicts of
 joint angles. No armatures — deterministic under headless bpy, nothing
 to bake, nothing to desync.
 
+C2 diversity pass (v5 KICKOFF §C2): the original 4 `OUTFITS` entries
+render byte-identically (their `build` is "regular", scale 1.0/1.0) —
+this pass is additive, not a rig rewrite. `NEW_VARIANTS` adds 12 more
+identities spanning body build (via `BUILDS` proportional scale — see
+`_scaled()`), skin tone, and hair silhouette (`bald` is one option
+among `short`/`buzz`/`bun`/`long`/`curly`/`cap`, not the default).
+Every (hair style, build) pair across the 12 new variants is unique so
+no two are shape-identical in grayscale — only the originals-vs-new
+split can share a build (originals are all "regular").
+
 Skeleton (front faces -Y = "S", same convention as props.py):
 
   root ── pelvis, hip_l/r ─ knee_l/r          (legs)
@@ -39,20 +49,90 @@ from props import mat, add_bevel, _root, _result
 OUTFITS = {
     "worker_teal": {
         "shirt": "#2F6D62", "trousers": "#3A3637", "skin": "#E8B48C",
-        "hair": "#3B2E24", "style": "blob",
+        "hair": "#3B2E24", "style": "blob", "build": "regular",
     },
     "worker_rust": {
         "shirt": "#C77B4A", "trousers": "#52381F", "skin": "#C68B62",
-        "hair": "#1F1A16", "style": "bun",
+        "hair": "#1F1A16", "style": "bun", "build": "regular",
     },
     "worker_slate": {
         "shirt": "#4A5E74", "trousers": "#2E2A28", "skin": "#8C5A3C",
-        "hair": "#141210", "style": "cap",
+        "hair": "#141210", "style": "cap", "build": "regular",
     },
     "worker_moss": {
         "shirt": "#5B7A45", "trousers": "#4A4034", "skin": "#6B4630",
-        "hair": "#2A2018", "style": "buzz",
+        "hair": "#2A2018", "style": "buzz", "build": "regular",
     },
+}
+
+# C2 diversity pass — 12 new identities. Deterministic explicit params
+# (no RNG at render time): every (style, build) pair below is unique so
+# grayscale silhouettes don't collide by construction (see module docstring).
+NEW_VARIANTS = {
+    "worker_amber": {
+        "shirt": "#D8A24A", "trousers": "#3A3637", "skin": "#3E2A1C",
+        "hair": "#14100D", "style": "bald", "build": "broad",
+    },
+    "worker_coral": {
+        "shirt": "#E88D8D", "trousers": "#52381F", "skin": "#F2C9A0",
+        "hair": "#6B4226", "style": "long", "build": "slim",
+    },
+    "worker_indigo": {
+        "shirt": "#3B4A6B", "trousers": "#2E2A28", "skin": "#B97A4E",
+        "hair": "#1C1712", "style": "curly", "build": "tall",
+    },
+    "worker_sage": {
+        "shirt": "#7FBFB0", "trousers": "#4A4034", "skin": "#5C3A24",
+        "hair": "#0F0C0A", "style": "short", "build": "short",
+    },
+    "worker_plum": {
+        "shirt": "#7A5070", "trousers": "#3A3637", "skin": "#D9A26C",
+        "hair": "#2A2018", "style": "buzz", "build": "broad",
+    },
+    "worker_ochre": {
+        "shirt": "#B08A4F", "trousers": "#52381F", "skin": "#8A5A38",
+        "hair": "#17110D", "style": "bun", "build": "slim",
+    },
+    "worker_charcoal": {
+        "shirt": "#4E6B5D", "trousers": "#2A2422", "skin": "#3E2A1C",
+        "hair": "#050403", "style": "bald", "build": "tall",
+    },
+    "worker_rose": {
+        "shirt": "#E0B98A", "trousers": "#4A4034", "skin": "#F2C9A0",
+        "hair": "#4A2E1C", "style": "curly", "build": "short",
+    },
+    "worker_navy": {
+        "shirt": "#2F4A6B", "trousers": "#1F1A16", "skin": "#B97A4E",
+        "hair": "#1A1512", "style": "short", "build": "slim",
+    },
+    "worker_clay": {
+        "shirt": "#A06034", "trousers": "#3A3637", "skin": "#8A5A38",
+        "hair": "#0C0908", "style": "buzz", "build": "tall",
+    },
+    "worker_mint": {
+        "shirt": "#5B9B84", "trousers": "#2E2A28", "skin": "#D9A26C",
+        "hair": "#2A1E14", "style": "bald", "build": "short",
+    },
+    "worker_violet": {
+        "shirt": "#6B5E8A", "trousers": "#52381F", "skin": "#F2C9A0",
+        "hair": "#6B4226", "style": "long", "build": "broad",
+    },
+}
+
+VARIANTS = {**OUTFITS, **NEW_VARIANTS}
+
+# Proportional scale factors: h = overall height (leg/torso/arm lengths),
+# w = overall width (torso/shoulder/limb girths). h is applied to the
+# whole leg chain (hip->knee->foot) TOGETHER so the sum stays zero —
+# see _scaled() — meaning feet stay flush at z=0 (the floor-contact
+# anchor point) regardless of build. "regular" is scale 1.0/1.0 so the
+# original 4 outfits render pixel-identical to pre-C2 output.
+BUILDS = {
+    "regular": {"h": 1.00, "w": 1.00},
+    "slim":    {"h": 1.04, "w": 0.83},
+    "broad":   {"h": 0.96, "w": 1.20},
+    "short":   {"h": 0.85, "w": 1.04},
+    "tall":    {"h": 1.15, "w": 0.93},
 }
 
 CAP_COLOR = "#B85C38"      # terracotta cap for the "cap" hair style
@@ -189,7 +269,21 @@ def blocked_pose():
 # ---------------------------------------------------------------- person
 
 def build_worker(name, outfit_key, p):
-    o = OUTFITS[outfit_key]
+    o = VARIANTS[outfit_key]
+    build = BUILDS[o.get("build", "regular")]
+    h, w = build["h"], build["w"]
+    # head/hand scale less aggressively than the body so heads don't
+    # balloon on "broad" or shrink to a pinhead on "slim" (chibi look
+    # is load-bearing at 128px tiles — see module docstring).
+    hw = 1.0 + (w - 1.0) * 0.15
+    hh = 1.0 + (h - 1.0) * 0.3
+
+    # leg-chain lengths scale TOGETHER by h so HIP_Z - U_LEG - L_LEG -
+    # FOOT_H stays exactly 0 (feet flush at the floor-contact anchor).
+    hip_z, u_leg, l_leg, foot_h = HIP_Z * h, U_LEG * h, L_LEG * h, FOOT_H * h
+    spine_z, sho_up, u_arm, l_arm = SPINE_Z * h, SHO_UP * h, U_ARM * h, L_ARM * h
+    hip_x, sho_x = HIP_X * w, SHO_X * w
+
     shirt = mat(f"shirt_{outfit_key}", hex_str=o["shirt"])
     trousers = mat(f"trousers_{outfit_key}", hex_str=o["trousers"])
     skin = mat(f"skin_{outfit_key}", hex_str=o["skin"], roughness=0.7)
@@ -200,69 +294,99 @@ def build_worker(name, outfit_key, p):
     root.location.z = p["root_z"] + p["bob"]
 
     # pelvis
-    part_box(root, "pelvis", 0.32, 0.21, 0.18, loc=(0, 0, 0.62),
+    part_box(root, "pelvis", 0.32 * w, 0.21 * w, 0.18 * h, loc=(0, 0, hip_z + 0.02 * h),
              material=trousers, bevel=0.05)
 
     # legs: hip -> upper leg -> knee -> lower leg + foot
     for side, sx in (("l", 1.0), ("r", -1.0)):
-        hip = jnt(root, f"hip_{side}", (sx * HIP_X, 0, HIP_Z))
+        hip = jnt(root, f"hip_{side}", (sx * hip_x, 0, hip_z))
         hip.rotation_euler.x = -math.radians(p[f"{side}_hip"])
-        part_cyl(hip, f"uleg_{side}", 0.062, U_LEG, loc=(0, 0, -U_LEG / 2),
+        part_cyl(hip, f"uleg_{side}", 0.062 * w, u_leg, loc=(0, 0, -u_leg / 2),
                  material=trousers, bevel=0.015)
-        knee = jnt(hip, f"knee_{side}", (0, 0, -U_LEG))
+        knee = jnt(hip, f"knee_{side}", (0, 0, -u_leg))
         knee.rotation_euler.x = math.radians(p[f"{side}_knee"])
-        part_cyl(knee, f"lleg_{side}", 0.055, L_LEG, loc=(0, 0, -L_LEG / 2),
+        part_cyl(knee, f"lleg_{side}", 0.055 * w, l_leg, loc=(0, 0, -l_leg / 2),
                  material=trousers, bevel=0.012)
-        part_box(knee, f"foot_{side}", 0.11, 0.19, FOOT_H,
-                 loc=(0, -0.045, -L_LEG - FOOT_H / 2), material=shoes,
+        part_box(knee, f"foot_{side}", 0.11 * w, 0.19 * w, foot_h,
+                 loc=(0, -0.045, -l_leg - foot_h / 2), material=shoes,
                  bevel=0.02)
 
     # spine group: torso + arms + head all pitch together
-    spine = jnt(root, "spine", (0, 0, SPINE_Z))
+    spine = jnt(root, "spine", (0, 0, spine_z))
     spine.rotation_euler.x = math.radians(p["spine"])
-    part_box(spine, "torso", 0.34, 0.23, 0.42, loc=(0, 0, 0.22),
+    part_box(spine, "torso", 0.34 * w, 0.23 * w, 0.42 * h, loc=(0, 0, 0.22 * h),
              material=shirt, bevel=0.07)
 
     # arms: shoulder -> upper arm (sleeve) -> elbow -> forearm + hand
     for side, sx in (("l", 1.0), ("r", -1.0)):
-        sho = jnt(spine, f"sho_{side}", (sx * SHO_X, 0, SHO_UP))
+        sho = jnt(spine, f"sho_{side}", (sx * sho_x, 0, sho_up))
         out = 6.0 + p[f"{side}_sho_out"]          # rest abduction 6deg
         sho.rotation_euler = (
             -math.radians(p[f"{side}_sho"]),
             -sx * math.radians(out),
             0.0,
         )
-        part_cyl(sho, f"uarm_{side}", 0.052, U_ARM, loc=(0, 0, -U_ARM / 2),
+        part_cyl(sho, f"uarm_{side}", 0.052 * w, u_arm, loc=(0, 0, -u_arm / 2),
                  material=shirt, bevel=0.012)
-        elb = jnt(sho, f"elb_{side}", (0, 0, -U_ARM))
+        elb = jnt(sho, f"elb_{side}", (0, 0, -u_arm))
         elb.rotation_euler.x = -math.radians(p[f"{side}_elb"])
-        part_cyl(elb, f"larm_{side}", 0.045, L_ARM, loc=(0, 0, -L_ARM / 2),
+        part_cyl(elb, f"larm_{side}", 0.045 * w, l_arm, loc=(0, 0, -l_arm / 2),
                  material=skin, bevel=0.01)
-        part_ico(elb, f"hand_{side}", 0.055, loc=(0, 0, -L_ARM - 0.02),
+        part_ico(elb, f"hand_{side}", 0.055 * hw, loc=(0, 0, -l_arm - 0.02),
                  material=skin, subdiv=1)
 
     # neck + head (nod pivot at neck top)
-    part_cyl(spine, "neck", 0.05, 0.08, loc=(0, 0, 0.45), material=skin,
-             bevel=0)
-    head_j = jnt(spine, "head_j", (0, 0, 0.50))
+    part_cyl(spine, "neck", 0.05 * w, 0.08 * h, loc=(0, 0, 0.45 * h),
+             material=skin, bevel=0)
+    head_j = jnt(spine, "head_j", (0, 0, 0.50 * h))
     head_j.rotation_euler.x = math.radians(p["head"])
-    part_ico(head_j, "head", 0.16, loc=(0, 0, 0.12), material=skin)
+    part_ico(head_j, "head", 0.16 * hh, loc=(0, 0, 0.12 * h), material=skin)
 
-    # hair styles (cheap identity — silhouette varies per outfit)
+    # hair styles (cheap identity — silhouette varies per outfit/variant)
     style = o["style"]
-    if style in ("blob", "bun", "buzz"):
+    if style in ("blob", "short", "bun", "buzz"):
         squash = 0.62 if style == "buzz" else 0.78
-        part_ico(head_j, "hair", 0.165, loc=(0, 0.03, 0.155),
+        part_ico(head_j, "hair", 0.165 * hh, loc=(0, 0.03, 0.155 * h),
                  material=hair, scale=(1.02, 1.0, squash))
     if style == "bun":
-        part_ico(head_j, "bun", 0.055, loc=(0, 0.15, 0.20), material=hair,
-                 subdiv=1)
+        # bigger + higher (top-knot, not tucked behind the skull) so it
+        # pokes past the head silhouette from every rotation including
+        # S — a small rear-only bun was nearly invisible from the front
+        # (qa_grayscale_distinctness.py caught rust/teal and navy/ochre
+        # both >90% head-silhouette overlap on the first pass).
+        part_ico(head_j, "bun", 0.085 * hh, loc=(0, 0.15, 0.27 * h),
+                 material=hair, subdiv=1)
+    if style == "long":
+        part_ico(head_j, "hair", 0.165 * hh, loc=(0, 0.03, 0.155 * h),
+                 material=hair, scale=(1.02, 1.0, 0.78))
+        # thicker, higher-anchored ponytail so it bulges past the head
+        # silhouette in every rotation (not just N/back) — a thin tail
+        # tucked straight down was invisible from S per preview render.
+        part_cyl(head_j, "ponytail", 0.075 * hh, 0.30 * hh, r2=0.025 * hh,
+                 loc=(0, 0.155, 0.135 * h), material=hair, verts=10,
+                 bevel=0, rot=(-42.0, 0.0, 0.0))
+    if style == "curly":
+        # cluster of small icospheres around the crown for an afro-like
+        # silhouette — reads distinctly from the smooth "blob"/"short"
+        # hair in grayscale (bumpy scalloped edge, not a single round
+        # bulge). Larger + wider-spread than the first pass, which read
+        # as a plain blob at this render scale.
+        for (ox, oy, oz, r) in (
+            (0.0, 0.02, 0.20, 0.115), (0.12, 0.03, 0.155, 0.105),
+            (-0.12, 0.03, 0.155, 0.105), (0.0, 0.15, 0.17, 0.11),
+            (0.09, -0.06, 0.16, 0.09), (-0.09, -0.06, 0.16, 0.09),
+            (0.0, -0.02, 0.235, 0.09),
+        ):
+            part_ico(head_j, f"curl_{ox}_{oy}", r * hh,
+                     loc=(ox * hh, oy, oz * h), material=hair, subdiv=1)
     if style == "cap":
         cap = mat("cap", hex_str=CAP_COLOR)
-        part_cyl(head_j, "cap_crown", 0.155, 0.10, loc=(0, 0.015, 0.225),
-                 material=cap, verts=18, bevel=0.02)
-        part_box(head_j, "cap_brim", 0.18, 0.13, 0.02,
-                 loc=(0, -0.155, 0.19), material=cap, bevel=0.008)
+        part_cyl(head_j, "cap_crown", 0.155 * hh, 0.10 * h,
+                 loc=(0, 0.015, 0.225 * h), material=cap, verts=18,
+                 bevel=0.02)
+        part_box(head_j, "cap_brim", 0.18 * hh, 0.13 * hh, 0.02 * h,
+                 loc=(0, -0.155, 0.19 * h), material=cap, bevel=0.008)
+    # style == "bald": no hair mesh added.
 
     return _result(root)
 
@@ -339,7 +463,7 @@ def build_cat_curl(name):
 # name -> {frames, fps, build(frame_i) -> result dict}. fps 0 = static.
 
 SPRITES = {}
-for _o in OUTFITS:
+for _o in VARIANTS:
     SPRITES[f"{_o}.walk"] = {
         "frames": 4, "fps": 8,
         "build": lambda i, o=_o: build_worker(o, o, walk_pose(i))}

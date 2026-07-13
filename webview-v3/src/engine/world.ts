@@ -269,7 +269,28 @@ export function floorSpriteName(tileX: number, tileY: number): string {
 export const CAT_CURL_SPRITE = 'cat.curl';
 export const CAT_WALK_SPRITE = 'cat.walk';
 
-export const WORKER_OUTFITS = ['teal', 'rust', 'slate', 'moss'] as const;
+// C2 diversity pass (v5 KICKOFF §C2): 12 new identities appended to the
+// original 4 — appended, not interleaved, so outfitForAgent/outfitForDispatchId
+// stay backward-stable for existing agent ids below the old length (the
+// modulo only shifts for ids that land past index 3).
+export const WORKER_OUTFITS = [
+  'teal',
+  'rust',
+  'slate',
+  'moss',
+  'amber',
+  'coral',
+  'indigo',
+  'sage',
+  'plum',
+  'ochre',
+  'charcoal',
+  'rose',
+  'navy',
+  'clay',
+  'mint',
+  'violet',
+] as const;
 export type WorkerOutfit = (typeof WORKER_OUTFITS)[number];
 
 /** Deterministic outfit per agent id (stable across renders — not
