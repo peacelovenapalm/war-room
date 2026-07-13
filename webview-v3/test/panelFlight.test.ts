@@ -16,6 +16,7 @@ const ALL_KINDS: DockPanelKind[] = [
   'graph-search',
   'districts',
   'inbox',
+  'morning',
 ];
 
 describe('panelFlightAnchor', () => {

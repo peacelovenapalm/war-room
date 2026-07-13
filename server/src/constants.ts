@@ -145,6 +145,53 @@ export const AUTO_REQUEUE_CONSECUTIVE_FAILURE_STOP = 2;
  *  worldEventStore's EVENT_LOG_CAP convention. */
 export const AUTO_EXECUTOR_RECEIPT_CAP = 200;
 
+// ── Morning surface (V6-1 "one glance, one push", AMBIENT rung 1) ─
+/** morning.json regenerates every local morning (nexus-notifier cron); a
+ *  payload older than this is honestly STALE, not silently served as
+ *  fresh — deliberately generous (regenerates ~daily) vs. the board-state
+ *  bar below. */
+export const MORNING_JSON_STALE_MS = 20 * 60 * 60_000; // 20h
+/** Board-state sections are derived live from in-process stores on every
+ *  request — this is the "seconds fine, minutes not" bar the view renders
+ *  ◷ STALE past, mirroring V6-DESIGN's latency instrumentation ask even
+ *  though dataAgeSeconds for a live derivation is normally ~0. */
+export const MORNING_BOARD_STALE_MS = 120_000;
+/** GET /api/morning's own short TTL cache — same analyze-on-demand
+ *  pattern as opsAdvisor.ts/briefingProvider.ts, never a new poll loop. */
+export const MORNING_SURFACE_CACHE_TTL_MS = 30_000;
+/** Default local hour (0-23) the once-per-day push tick fires at, absent
+ *  WAR_ROOM_MORNING_PUSH_HOUR — matches the notifier's existing 06:00
+ *  America/Denver cron gate (V6-DESIGN "wires verified"). */
+export const MORNING_PUSH_DEFAULT_HOUR = 6;
+/** Default IANA zone the push tick evaluates "local hour" in, absent
+ *  WAR_ROOM_MORNING_TZ — the container has no reason to run in Greg's own
+ *  zone, so this is never assumed from Date.now() alone (see
+ *  morningPush.ts header). */
+export const MORNING_PUSH_DEFAULT_TZ = 'America/Denver';
+/** How often the push scheduler checks whether it's the target local
+ *  hour yet — a minute-granularity tick is plenty for a once-a-day gate
+ *  and mirrors AUTO_EXECUTOR_TICK_INTERVAL_MS's "no shared tick
+ *  primitive" posture. */
+export const MORNING_PUSH_CHECK_INTERVAL_MS = 60_000;
+/** Overnight receipts window (V6-1 "overnight summary"): the fixed
+ *  18:00 -> 06:00 local band the design specifies, evaluated in the same
+ *  zone as the push tick. */
+export const MORNING_OVERNIGHT_START_HOUR = 18;
+export const MORNING_OVERNIGHT_END_HOUR = 6;
+/** V6-5 cross-model spot checks: sampled 1-in-N mornings (deterministic on
+ *  the local calendar date, not process-lifetime random, so a restart
+ *  never skews the sampling rate) plus every morning after a degraded
+ *  one — see morningSpotCheck.ts. */
+export const MORNING_SPOT_CHECK_SAMPLE_RATE = 3;
+/** Narrative spot-check findings (V6-5) ingested from an external `codex
+ *  exec` runner via POST /api/ops/narrative-finding — capped ledger,
+ *  oldest pruned, same discipline as AUTO_EXECUTOR_RECEIPT_CAP. */
+export const NARRATIVE_FINDING_CAP = 50;
+/** A narrative finding older than this is no longer folded into
+ *  GET /api/ops/review — a discrepancy about last week's morning isn't a
+ *  live finding today. */
+export const NARRATIVE_FINDING_MAX_AGE_MS = 7 * 24 * 60 * 60_000; // 7d
+
 // ── Layout/Config Persistence ──────────────────────────────
 export const LAYOUT_FILE_DIR = '.pixel-agents';
 export const LAYOUT_FILE_NAME = 'layout.json';

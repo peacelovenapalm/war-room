@@ -69,6 +69,19 @@ ROUTINES_DIR_NEXUS="/data/repos/vault-notifier/vault/vault/_inbox/routines"
 DISTRICTS_DIR_NEXUS="/data/repos/districts"
 WARROOM_STATE_LOCAL="${REPO_DIR}/.planning/v4/STATE-v4.md"
 TRACKER_STATE_LOCAL="/Users/greg/code/completion-2026-07/STATE.md"
+#  - morning (V6-1, GET /api/morning): nexus-notifier's own
+#    `gen_morning_page.py` output dir (same clone the other briefing
+#    sources already read from) — morning.json regenerates on the
+#    notifier's existing 06:00 America/Denver cron gate, so this mount is
+#    read-only and needs no refresh step of its own here.
+MORNING_DIR_NEXUS="/data/repos/vault-notifier/public"
+#  - morning spot-check spool (V6-5): a SEPARATE rw dir (never the ro
+#    morning mount above) the server writes sampled spool files into and
+#    an external `codex exec` runner reads from ON NEXUS — see
+#    server/src/morningSpotCheck.ts's header for the documented
+#    manual/runner path. Not the state volume: this is disposable spool
+#    data, not app state worth migrating/backing up.
+MORNING_SPOOL_DIR_NEXUS="/data/repos/war-room-morning-spool"
 
 ok()   { printf '[OK]   %s\n' "$1"; }
 warn() { printf '[WARN] %s\n' "$1"; }
@@ -100,6 +113,10 @@ ssh "${NEXUS_HOST}" "test -f ${GRAPH_DIR_NEXUS}/nodes.jsonl" \
   && ok "graph store present: ${GRAPH_DIR_NEXUS}" || warn "graph store missing on nexus — graph search will report available:false"
 ssh "${NEXUS_HOST}" "test -d ${ROUTINES_DIR_NEXUS}" \
   && ok "routines dir present: ${ROUTINES_DIR_NEXUS}" || warn "routines dir missing on nexus — digest fold + inbox tray will report no source"
+ssh "${NEXUS_HOST}" "test -f ${MORNING_DIR_NEXUS}/morning.json" \
+  && ok "morning.json present: ${MORNING_DIR_NEXUS}" || warn "morning.json missing on nexus — MORNING panel's morning.json section will report unavailable (honest ⊘, board state still composes)"
+ssh "${NEXUS_HOST}" "mkdir -p ${MORNING_SPOOL_DIR_NEXUS}" \
+  && ok "morning spot-check spool dir ready: ${MORNING_SPOOL_DIR_NEXUS}" || warn "could not create morning spool dir — V6-5 spot-check spool will be disabled"
 
 # ── Refresh the tracker copy (laptop is canonical; also feeds projects-board) ─
 if [ -f "${TRACKER_STATE_LOCAL}" ]; then
@@ -168,14 +185,21 @@ ssh "${NEXUS_HOST}" "docker run -d --name war-room --restart unless-stopped \
   -e WAR_ROOM_GRAPH_DIR=/briefing/graph \
   -e WAR_ROOM_ROUTINES_DIR=/briefing/routines \
   -e WAR_ROOM_DISTRICTS_DIR=/briefing/districts \
+  -e WAR_ROOM_MORNING_JSON=/briefing/morning/morning.json \
+  -e WAR_ROOM_MORNING_SPOOL_DIR=/morning-spool \
+  -e WAR_ROOM_MORNING_PUSH_HOUR=6 \
+  -e WAR_ROOM_MORNING_TZ=America/Denver \
+  -e WAR_ROOM_BOARD_URL=https://${TAILNET_FQDN}:${SERVE_PORT} \
   -v ${DISTRICTS_DIR_NEXUS}:/briefing/districts:ro \
   -v ${TODO_DIR_NEXUS}:/briefing/todo:ro \
   -v ${TRACKER_DIR_NEXUS}:/briefing/tracker:ro \
   -v ${GRAPH_DIR_NEXUS}:/briefing/graph:ro \
   -v ${ROUTINES_DIR_NEXUS}:/briefing/routines:ro \
+  -v ${MORNING_DIR_NEXUS}:/briefing/morning:ro \
+  -v ${MORNING_SPOOL_DIR_NEXUS}:/morning-spool \
   -v ${REMOTE_STATE_DIR}:/root/.pixel-agents \
   -p 127.0.0.1:${APP_PORT}:3141 war-room:latest" >/dev/null \
-  && ok "container war-room running (127.0.0.1:${APP_PORT}, briefing ro, state vol rw)" || fail "docker run failed"
+  && ok "container war-room running (127.0.0.1:${APP_PORT}, briefing ro, morning ro, spool rw, state vol rw)" || fail "docker run failed"
 
 # ── Bark wrapper network (2026-07-09): WAR_ROOM_BARK_URL=http://notify:8581/notify
 # resolves only on the notify container's compose network — rejoin after every

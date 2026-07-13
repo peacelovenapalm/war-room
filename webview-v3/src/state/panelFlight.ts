@@ -29,4 +29,5 @@ export const PANELS_WITHOUT_ANCHOR: readonly DockPanelKind[] = [
   'graph-search',
   'districts',
   'inbox',
+  'morning',
 ];

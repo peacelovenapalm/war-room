@@ -54,6 +54,12 @@ const ENTRIES: DockEntry[] = [
     purpose: "Today's todo top-3 + tracker gates.",
   },
   {
+    kind: 'morning',
+    glyph: '☀',
+    label: 'MORNING',
+    purpose: 'One glance: needs-you count, held jobs, overnight receipts, morning top 3.',
+  },
+  {
     kind: 'ops',
     glyph: '◈',
     label: 'OPS REVIEW',
