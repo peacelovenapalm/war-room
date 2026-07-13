@@ -566,6 +566,44 @@ Use `console.log`/`error`/`warn` with prefixed context:
 - **runInBackground sub-character gate**: in webview `agentToolStart`, `runInBackground=true` Agent tools are gated out of sub-character creation when the parent has a `teamName` (teammate path handles it). With no `teamName`, the gate must be bypassed so the basic Subtask sub-character still renders. `addSubagent` dedups via `subagentIdMap`, so the bypass is safe even if a teammate is detected later.
 - **Allure HTML report**: viewing via `file://` fails (browsers block `fetch()` from local files). Use `npx allure open allure-report/allure` or `npm run test:report:open`.
 
+## Codex Delegation (sandboxed builds)
+
+When delegating a build to `codex exec` in a worktree, three sandbox gaps
+bit the V7 build (2026-07-13) under plain `--sandbox workspace-write`.
+Each fix below was verified empirically (live probes, not guessed):
+
+```bash
+codex exec \
+  --sandbox workspace-write \
+  -c sandbox_workspace_write.network_access=true \
+  -c 'sandbox_workspace_write.writable_roots=["/Users/greg/code/war-room/.git"]' \
+  -C /Users/greg/code/war-room-wt/<lane> \
+  --output-last-message /tmp/<lane>-final.md \
+  - < brief.md
+```
+
+1. **`listen EPERM` on ~113 server tests** — Fastify/WS tests bind
+   127.0.0.1 sockets, which workspace-write denies by default.
+   `network_access=true` fixes it (probe: `net.createServer().listen`
+   succeeded in-sandbox). Same flag unblocks `npm run asyncapi:generate`
+   (tsx uses a unix IPC socket; probed exit 0 in-sandbox).
+2. **Worktree `git commit` fails** (`.git/worktrees/<name>/index.lock:
+Operation not permitted`) — a linked worktree's git metadata and
+   object store live under the MAIN repo's `.git`, outside the sandbox
+   cwd. Add the main `.git` to `writable_roots` (probed: worktree commit
+   succeeds). Trade-off: that grants codex write access to all refs, so
+   keep pushes owned by the reviewing agent, never codex.
+3. **Tests writing under `~/.claude`** — was a test-isolation bug on our
+   side, not a sandbox setting: `claudeTeamProvider.test.ts` wrote into
+   the REAL `~/.claude/teams/`. Fixed 2026-07-13 with the standard
+   `vi.mock('os')` temp-HOME idiom (budgetStore.test.ts pattern). If a
+   sandboxed run hits homedir denials again, fix the test's isolation —
+   never add the real homedir to `writable_roots`.
+
+`~/.codex/config.toml` note: the global default model line currently
+reads `model = "gpt-5.6-sol"`; pass `-m`/`-c model_reasoning_effort`
+per-invocation rather than editing Greg's global config.
+
 ## Manual Hook Testing
 
 `server/manual-hook-events.http` (REST-Client format) drives the local hook server while the extension is running. Copy `port` and `token` from `~/.pixel-agents/server.json`, set `cwd` to a workspace folder opened in the Extension Development Host. Covers `SessionStart` → `PreToolUse` → `PermissionRequest`/`Notification`/`Stop` → `SessionEnd`.

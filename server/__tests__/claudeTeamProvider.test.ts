@@ -1,10 +1,28 @@
 import * as os from 'os';
 import * as path from 'path';
-import { afterEach, describe, expect, it } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
+
+// Isolate ~/.claude/teams/ writes to a temp HOME (same vi.mock idiom as
+// budgetStore.test.ts et al.) — these tests previously wrote into the REAL
+// ~/.claude, which both risked live config and made the suite un-runnable
+// in sandboxed environments (codex workspace-write denies homedir writes).
+let mockedHome: string;
+vi.mock('os', async () => {
+  const actual = await vi.importActual<typeof import('os')>('os');
+  return { ...actual, homedir: () => mockedHome };
+});
 
 import { claudeTeamProvider } from '../src/providers/hook/claude/claudeTeamProvider.js';
 
 describe('claudeTeamProvider', () => {
+  const fsHome = require('fs') as typeof import('fs');
+  beforeEach(() => {
+    mockedHome = fsHome.mkdtempSync(path.join(os.tmpdir(), 'claude-team-home-'));
+  });
+  afterEach(() => {
+    fsHome.rmSync(mockedHome, { recursive: true, force: true });
+  });
+
   describe('identity', () => {
     it('has providerId "claude"', () => {
       expect(claudeTeamProvider.providerId).toBe('claude');
