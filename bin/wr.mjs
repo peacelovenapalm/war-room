@@ -104,7 +104,7 @@ function failClosed(detail) {
  * function never itself prints or exits (testable in isolation).
  */
 export function requestManagedSession(
-  { url, request },
+  { url, request, token },
   { WebSocketImpl = globalThis.WebSocket, timeoutMs = DECISION_TIMEOUT_MS } = {},
 ) {
   return new Promise((resolve, reject) => {
@@ -123,7 +123,15 @@ export function requestManagedSession(
 
     let socket;
     try {
-      socket = new WebSocketImpl(url);
+      // Bearer on the WS handshake (codex v5R review, MINOR): the server's
+      // /ws requires `Authorization: Bearer <token>` in embedded mode and
+      // ignores it in standalone — sending it whenever we HAVE one makes
+      // the wrapper correct against both. Node's WebSocket (undici) accepts
+      // a non-standard `headers` init; browser impls can't set headers at
+      // all, which is exactly why standalone /ws doesn't demand one.
+      socket = token
+        ? new WebSocketImpl(url, { headers: { Authorization: `Bearer ${token}` } })
+        : new WebSocketImpl(url);
     } catch (err) {
       reject({
         reason: 'connect-failed',
@@ -233,7 +241,11 @@ async function main() {
 
   let decision;
   try {
-    decision = await requestManagedSession({ url: wsUrlFor(cfg.url), request });
+    decision = await requestManagedSession({
+      url: wsUrlFor(cfg.url),
+      request,
+      token: cfg.token,
+    });
   } catch (err) {
     if (err?.reason === 'denied') {
       // NOT a fail-closed case (§4): the runner is reachable and made an
@@ -306,10 +318,14 @@ export async function attachAndDeriveExitCode(
     /* degrade gracefully — see doc above */
   }
 
-  await new Promise((resolve) => {
+  const attachExit = await new Promise((resolve) => {
     const child = spawnImpl('tmux', ['attach', '-t', `=${sessionName}`], { stdio: 'inherit' });
-    child.on('exit', () => resolve());
-    child.on('error', () => resolve());
+    child.on('exit', (code) => {
+      resolve(typeof code === 'number' ? code : 1);
+    });
+    child.on('error', () => {
+      resolve(1);
+    });
   });
 
   try {
@@ -317,9 +333,19 @@ export async function attachAndDeriveExitCode(
     const code = Number.parseInt(raw, 10);
     if (Number.isInteger(code)) return code;
   } catch {
-    /* no marker (still running / detach-only / hook unsupported) — 0 */
+    /* no marker (still running / detach-only / hook unsupported) */
   }
-  return 0;
+  // No marker: either a clean detach (tmux exits 0 — keep 0, a detach is
+  // not a failure) or the attach ITSELF failed (e.g. "open terminal
+  // failed: not a terminal" — surface tmux's non-zero code instead of
+  // masking it as success; live-fire 2026-07-13 found the masking).
+  if (attachExit !== 0) {
+    console.error(
+      `[wr] tmux attach exited ${attachExit} — the session is running detached; ` +
+        `reattach with: tmux attach -t =${sessionName}`,
+    );
+  }
+  return attachExit;
 }
 
 if (import.meta.url === `file://${process.argv[1]}`) {
