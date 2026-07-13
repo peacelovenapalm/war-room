@@ -55,6 +55,10 @@ Pre-verified for later phases (2026-07-12/13 this session):
 - V6-1 wires: gen_morning_page.py payload = {date, generated_at, top3[], flags, prs{count,list}}; cron */15 on nexus (06:00 America/Denver gate inside script); page deploys itself next to morning.json.
 - C4 (parked): /v1/ grace mount at server/src/httpServer.ts:99-170; legacy-bound specs: budget-pause, disappearing-view, hud-layout ×2 + C4-retirement-bound comments in triage/kill/help-discoverability/hooks specs.
 
+Codex-hooks parity lane (2026-07-13, Greg-directed, outside the v5-v7 run map):
+
+- Dual investigation (codex gpt-5.6-sol self-report + Fable server-side) → synthesized plan → codex build. lane/codex-hooks @ 2fea30a (pushed, NOT merged): codex HookProvider (10 native events, PermissionRequest = needs-input parity), provider-aware dispatch in HookEventHandler (was: providerId ignored, claude-only), fail-open codex-hook forwarder (no stdout, best-effort ancestor X-Pid), gated installer runbook (trust-approval documented, notify key untouched), rollout-lane enrichment (custom_tool_call/patch/MCP/web_search). Dedupe: adapter events tagged fromCoworkerAdapter, never set hookDelivered; native hooks suppress adapter activity except synthetic SessionEnd (codex has no native end event). Gates re-verified unsandboxed by Fable: server 1100/1100, webview-v3 502/502, bin 225/225, types/lint/drift-0 (codex's 3 in-sandbox poller failures = ps EPERM artifacts). Honest gaps: no native SessionEnd (30-min idle heuristic stays), pid best-effort, no distinct failure hook, incomplete upstream tool coverage. GO-LIVE (human, gated): bash .planning/runbooks/codex-hooks-install.sh per Mac + one-time hook trust approval in codex TUI. Rides deploy #3 after review.
+
 Skips / denials / trims (verbatim, append-only):
 
 - (none yet)
