@@ -8,10 +8,13 @@ import {
   ANSWER_TEXT_MAX_CHARS,
   type AnswerReceipt,
   answerStatusLabel,
+  type ComposerVerb,
   fetchAnswerReceipts,
+  fetchLaunchedVia,
   parseAnswerOptions,
   pollAnswerOutcome,
   requestAnswer,
+  requestPrompt,
 } from '../net/answerFacts';
 import {
   buildCopyIdLine,
@@ -125,6 +128,15 @@ export function AgentDrawer({
   const [answerReason, setAnswerReason] = useState<string | undefined>(undefined);
   const [answerRequestId, setAnswerRequestId] = useState<string | null>(null);
   const [receipts, setReceipts] = useState<AnswerReceipt[]>([]);
+  // C3 free-form PROMPT verb — mode toggle on the SAME composer/phase
+  // machinery (gate 4 CLOSED: shared plumbing, not a second composer).
+  // Gated on the identical `managed === true` check as ANSWER — see the
+  // `!managed`/`managed &&` branches below, which render neither mode's
+  // entry point for an unmanaged agent.
+  const [composerVerb, setComposerVerb] = useState<ComposerVerb>('answer');
+  // C3 born-managed wrapper — read-only "LAUNCHED VIA" fact, fetched
+  // alongside the machines poll cadence once this agent is managed.
+  const [launchedVia, setLaunchedVia] = useState<'wrapper' | 'call-modal' | undefined>(undefined);
 
   useEffect(() => {
     let cancelled = false;
@@ -239,6 +251,34 @@ export function AgentDrawer({
     };
   }, [managed, machine]);
 
+  // C3 born-managed wrapper — read-only "LAUNCHED VIA" fact. Same managed
+  // gate as receipts; refetched on the same cadence as the machines poll
+  // (a session's launchedVia never changes after creation, so this is
+  // mostly about picking it up once managed flips true, not tracking a
+  // live transition).
+  const recordPid = record?.pid;
+  useEffect(() => {
+    // No setState here on the early-out: `launchedVia` is only ever
+    // RENDERED behind `managed && launchedVia !== undefined` below, so a
+    // stale value surviving a transition to unmanaged is harmless — it
+    // just never shows. Avoids a synchronous setState-in-effect on every
+    // non-managed agent's mount/update (same rationale as the receipts
+    // effect just above).
+    if (!managed || !machine || recordPid === undefined) return;
+    let cancelled = false;
+    const load = () => {
+      void fetchLaunchedVia(machine, recordPid).then((value) => {
+        if (!cancelled) setLaunchedVia(value);
+      });
+    };
+    load();
+    const interval = setInterval(load, MACHINES_REFRESH_MS);
+    return () => {
+      cancelled = true;
+      clearInterval(interval);
+    };
+  }, [managed, machine, recordPid]);
+
   if (!record) {
     return (
       <aside className="drawer" data-testid="agent-drawer">
@@ -323,13 +363,29 @@ export function AgentDrawer({
   // prefill the text (never invent options — parseAnswerOptions.ts is [] on
   // any ambiguity). Every path — typed or tapped — passes through the same
   // confirm step (verbatim-prompt discipline) before anything is sent.
-  const answerOptions = parseAnswerOptions(poll?.waitingFor);
+  // C3: one-tap options are ANSWER-only (they come from parsing the pending
+  // question's own text) — PROMPT mode never renders them, since a PROMPT
+  // is not a reply to anything in particular.
+  const answerOptions = composerVerb === 'answer' ? parseAnswerOptions(poll?.waitingFor) : [];
   const answerRemaining = ANSWER_TEXT_MAX_CHARS - answerText.length;
   const canSendAnswer = managed && answerText.trim() !== '' && answerRemaining >= 0;
 
   const handleSelectAnswerOption = (option: string) => {
     setAnswerText(option);
     setAnswerPhase('confirm');
+  };
+
+  const handleSelectComposerVerb = (verb: ComposerVerb) => {
+    if (verb === composerVerb) return;
+    setComposerVerb(verb);
+    // Switching modes mid-compose discards in-flight text/phase — the
+    // verbatim-confirm step is about to show DIFFERENT semantics (a reply
+    // vs. an unprompted instruction), so carrying stale text across modes
+    // would risk confirming the wrong kind of send.
+    setAnswerPhase('compose');
+    setAnswerText('');
+    setAnswerReason(undefined);
+    setAnswerRequestId(null);
   };
 
   const handleAnswerNext = () => {
@@ -340,7 +396,8 @@ export function AgentDrawer({
     }
     if (answerPhase !== 'confirm' || record.machine === undefined || pid === undefined) return;
     setAnswerPhase('sending');
-    void requestAnswer(record.machine, pid, answerText).then((body) => {
+    const sendComposer = composerVerb === 'prompt' ? requestPrompt : requestAnswer;
+    void sendComposer(record.machine, pid, answerText).then((body) => {
       if (body.ok && body.id !== undefined) {
         setAnswerRequestId(body.id);
       } else {
@@ -505,9 +562,53 @@ export function AgentDrawer({
         </div>
       )}
 
+      {/* C3 born-managed wrapper — read-only fact, only meaningful once
+          managed (an unmanaged session was never launched via War Room at
+          all). Absent (pre-C3 session, or the lookup hasn't resolved yet)
+          renders nothing rather than a fabricated "call-modal" default. */}
+      {managed && launchedVia !== undefined && (
+        <div className="drawer__facts">
+          <Row
+            label="LAUNCHED VIA"
+            value={launchedVia === 'wrapper' ? 'wr claude' : 'CALL modal'}
+          />
+        </div>
+      )}
+
       {managed && (
         <div className="drawer__answer" data-testid="answer-composer">
-          <div className="drawer__answer-head">ANSWER</div>
+          {/* C3 free-form PROMPT verb — mode toggle, SAME managed gate as
+              the composer below it. Unmanaged sessions never render this
+              block at all (see the `!managed` DESK-only row above), so
+              there is no way to reach PROMPT mode without `managed===true`
+              — identical gate to ANSWER, by construction. */}
+          <div className="drawer__verbs" data-testid="composer-mode-toggle">
+            <button
+              type="button"
+              className={composerVerb === 'answer' ? 'verb verb--confirm' : 'verb'}
+              data-testid="composer-mode-answer"
+              onClick={() => {
+                handleSelectComposerVerb('answer');
+              }}
+            >
+              ANSWER
+            </button>
+            <ControlTip label="Send free text into this session regardless of whether it's currently asking a question — same as typing at its keyboard.">
+              <button
+                type="button"
+                className={composerVerb === 'prompt' ? 'verb verb--confirm' : 'verb'}
+                data-testid="composer-mode-prompt"
+                onClick={() => {
+                  handleSelectComposerVerb('prompt');
+                }}
+              >
+                PROMPT
+              </button>
+            </ControlTip>
+          </div>
+          <div className="drawer__answer-head">
+            {composerVerb === 'prompt' ? 'PROMPT' : 'ANSWER'}
+          </div>
 
           {answerPhase === 'compose' && (
             <>
@@ -533,7 +634,11 @@ export function AgentDrawer({
                 data-testid="answer-text"
                 value={answerText}
                 maxLength={ANSWER_TEXT_MAX_CHARS}
-                placeholder="Type an answer to send into this session…"
+                placeholder={
+                  composerVerb === 'prompt'
+                    ? 'Type free text to send into this session, whether or not it asked anything…'
+                    : 'Type an answer to send into this session…'
+                }
                 onChange={(e) => {
                   setAnswerText(e.target.value);
                 }}
@@ -548,7 +653,7 @@ export function AgentDrawer({
                     disabled={!canSendAnswer}
                     onClick={handleAnswerNext}
                   >
-                    ANSWER…
+                    {composerVerb === 'prompt' ? 'PROMPT…' : 'ANSWER…'}
                   </button>
                 </ControlTip>
               </div>
@@ -634,6 +739,7 @@ export function AgentDrawer({
                 .map((receipt) => (
                   <div className="answer-receipt-row" data-testid="answer-receipt" key={receipt.id}>
                     <span className="answer-receipt-row__status">
+                      {receipt.verb === 'prompt' ? 'PROMPT · ' : ''}
                       {answerStatusLabel(receipt.status, receipt.reason)}
                     </span>
                     <span className="answer-receipt-row__text">{receipt.text}</span>

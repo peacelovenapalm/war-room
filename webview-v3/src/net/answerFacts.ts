@@ -23,6 +23,11 @@ export interface AnswerRequestResult {
   reason?: string;
 }
 
+/** C3 free-form PROMPT verb (gate 4 CLOSED: shared type, `verb` discriminant,
+ *  ONE queue). 'answer' replies to a pending question; 'prompt' sends free
+ *  text to a managed session regardless of waiting state. */
+export type ComposerVerb = 'answer' | 'prompt';
+
 // C8-6 pid-reuse follow-up (verified, not yet actionable): the server's
 // requestAnswer() now accepts an optional expectedStartTime and denies a
 // mismatch (server/src/dispatchStore.ts), but this client has no session
@@ -40,8 +45,29 @@ export async function requestAnswer(
   pid: number,
   text: string,
 ): Promise<AnswerRequestResult> {
+  return sendComposerMessage('answer', machine, pid, text);
+}
+
+/** C3 free-form PROMPT verb — SAME route family, SAME trust tier as
+ *  requestAnswer (POST /api/agents/prompt, unauthenticated tailnet-only,
+ *  no new capability flag), just a different path so the server can key
+ *  the verb without trusting a client-supplied field on the wire. */
+export async function requestPrompt(
+  machine: string,
+  pid: number,
+  text: string,
+): Promise<AnswerRequestResult> {
+  return sendComposerMessage('prompt', machine, pid, text);
+}
+
+async function sendComposerMessage(
+  verb: ComposerVerb,
+  machine: string,
+  pid: number,
+  text: string,
+): Promise<AnswerRequestResult> {
   try {
-    const res = await fetch('/api/agents/answer', {
+    const res = await fetch(`/api/agents/${verb}`, {
       method: 'POST',
       headers: { 'content-type': 'application/json' },
       body: JSON.stringify({ machine, pid, text }),
@@ -80,6 +106,10 @@ export interface AnswerReceipt {
   text: string;
   status: AnswerOutcomeStatus;
   reason?: string;
+  /** C3 — 'answer' | 'prompt'. Absent on receipts minted before this field
+   *  existed (additive; treated as 'answer' for display, its historical
+   *  meaning). */
+  verb?: ComposerVerb;
   createdAt: number;
   updatedAt: number;
 }
@@ -140,4 +170,25 @@ export function parseAnswerOptions(waitingFor: string | undefined): string[] {
     if (match && match[1].trim() !== '') options.push(match[1].trim());
   }
   return options.length >= 2 ? options : [];
+}
+
+/** C3 born-managed wrapper — read-only drawer lookup: which entry point
+ *  (`wrapper` | `call-modal`) launched this managed session. `undefined`
+ *  for anything unmanaged/unknown/pre-C3 (additive — never a fabricated
+ *  default). Same unauthenticated tailnet-only trust tier as the rest of
+ *  this module's GETs. */
+export async function fetchLaunchedVia(
+  machine: string,
+  pid: number,
+): Promise<'wrapper' | 'call-modal' | undefined> {
+  try {
+    const res = await fetch(
+      `/api/dispatch/launched-via?machine=${encodeURIComponent(machine)}&pid=${String(pid)}`,
+    );
+    if (!res.ok) return undefined;
+    const body = (await res.json()) as { launchedVia?: 'wrapper' | 'call-modal' };
+    return body.launchedVia;
+  } catch {
+    return undefined;
+  }
 }

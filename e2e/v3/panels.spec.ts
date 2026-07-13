@@ -318,6 +318,15 @@ async function serveV3Dist(
       res.end(JSON.stringify({ ok: true, id: answerRequestId }));
       return;
     }
+    // C3 free-form PROMPT verb — SAME route family, same canned-response
+    // tolerance as ANSWER above; outcome polling reuses the SAME
+    // GET /api/agents/answer/:id route (the id namespace is shared —
+    // dispatchStore's answerRequests Map serves both verbs identically).
+    if (requestPath === '/api/agents/prompt' && req.method === 'POST') {
+      res.writeHead(200, { 'Content-Type': 'application/json' });
+      res.end(JSON.stringify({ ok: true, id: answerRequestId }));
+      return;
+    }
     if (requestPath === `/api/agents/answer/${answerRequestId}` && req.method === 'GET') {
       res.writeHead(200, { 'Content-Type': 'application/json' });
       if (options.answerOutcome === 'denied') {
@@ -876,6 +885,81 @@ test.describe('stage-3 panel ports (desktop chrome model)', () => {
 
       await page.getByTestId('answer-confirm-send').click();
       // No fake states: DELIVERING… while the outcome poll is in flight.
+      await expect(page.getByTestId('answer-status')).toContainText('DELIVERING', {
+        timeout: 2_000,
+      });
+      await expect(page.getByTestId('answer-status')).toContainText('✓ DELIVERED', {
+        timeout: 5_000,
+      });
+    } finally {
+      await context.close();
+      await host.close();
+    }
+  });
+
+  test('C3 free-form PROMPT verb: unmanaged agent has no mode toggle at all; managed agent can switch to PROMPT, gets no one-tap options, verbatim confirm, and sends to /api/agents/prompt', async ({
+    browser,
+  }) => {
+    // Unmanaged first — the mode toggle lives INSIDE the same `managed &&`
+    // block as the rest of the composer, so proving `answer-composer` has
+    // count 0 (already covered by the DESK-only test above) already proves
+    // `composer-mode-toggle`/`composer-mode-prompt` are unreachable too.
+    // This test asserts that explicitly rather than relying on inference.
+    const deskOnlyHost = await serveV3Dist({ agentManaged: false });
+    const deskOnlyContext = await browser.newContext({ viewport: VIEWPORT });
+    try {
+      const page = await deskOnlyContext.newPage();
+      await page.goto(`${deskOnlyHost.url}/?agentId=1`);
+      await expect(page.getByTestId('hud-connection')).toHaveText('● LIVE', { timeout: 20_000 });
+      await expect(page.getByTestId('agent-drawer')).toBeVisible({ timeout: 20_000 });
+      await expect(page.getByTestId('answer-desk-only')).toBeVisible();
+      await expect(page.getByTestId('composer-mode-toggle')).toHaveCount(0);
+      await expect(page.getByTestId('composer-mode-prompt')).toHaveCount(0);
+    } finally {
+      await deskOnlyContext.close();
+      await deskOnlyHost.close();
+    }
+
+    const host = await serveV3Dist({
+      agentManaged: true,
+      answerOutcome: 'delivered',
+      extraMessages: [
+        {
+          type: 'agentPollState',
+          id: 1,
+          state: 'blocked',
+          waitingFor: 'Approve the migration?\n1. Yes, apply it\n2. No, skip it',
+          ageMs: 0,
+        },
+      ],
+    });
+    const context = await browser.newContext({ viewport: VIEWPORT });
+    try {
+      const page = await context.newPage();
+      await page.goto(`${host.url}/?agentId=1`);
+      await expect(page.getByTestId('hud-connection')).toHaveText('● LIVE', { timeout: 20_000 });
+      await expect(page.getByTestId('agent-drawer')).toBeVisible({ timeout: 20_000 });
+
+      const composer = page.getByTestId('answer-composer');
+      await expect(composer).toBeVisible();
+      // Defaults to ANSWER mode — the pending question's one-tap options render.
+      await expect(page.getByTestId('answer-option')).toHaveCount(2);
+
+      await page.getByTestId('composer-mode-prompt').click();
+      // PROMPT mode never invents one-tap options (it's not a reply to
+      // anything in particular) — the same waitingFor text that produced
+      // 2 options in ANSWER mode produces 0 in PROMPT mode.
+      await expect(page.getByTestId('answer-option')).toHaveCount(0);
+
+      await page.getByTestId('answer-text').fill('actually, stop and check the logs first');
+      await page.getByTestId('answer-next').click();
+      // Verbatim-prompt discipline — MORE important here than for ANSWER
+      // (no question text to anchor against): the confirm step shows the
+      // EXACT text, unsummarized.
+      await expect(page.getByTestId('answer-confirm-text')).toHaveText(
+        'actually, stop and check the logs first',
+      );
+      await page.getByTestId('answer-confirm-send').click();
       await expect(page.getByTestId('answer-status')).toContainText('DELIVERING', {
         timeout: 2_000,
       });

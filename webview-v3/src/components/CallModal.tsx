@@ -246,6 +246,11 @@ export function CallModal({ isOpen, onClose, prefill, send, onSend, budget }: Ca
         ? { timeoutSec: timeoutParsed }
         : {}),
       ...(provider === 'claude' && permissionMode === 'plan' ? { permissionMode } : {}),
+      // C3 born-managed wrapper — explicit origin tag (session-only; the
+      // server drops it for dispatch/focus). Lets the drawer's read-only
+      // "LAUNCHED VIA" fact distinguish this modal's launches from `wr
+      // claude`'s, with zero runner/manifest involvement.
+      ...(mode === 'session' ? { launchedVia: 'call-modal' as const } : {}),
     });
     onSend(machine, mode, requestId);
     onClose();
