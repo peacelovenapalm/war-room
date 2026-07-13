@@ -44,7 +44,10 @@ import { searchGraph } from './graphProvider.js';
 import { getInboxListing, readInboxFile } from './inboxProvider.js';
 import { matchDayDerivation } from './matchDayDerivation.js';
 import { matchDayStore, toMatchDayEvent } from './matchDayStore.js';
+import { type MemoryStore, memoryStore } from './memoryStore.js';
+import { type MemoryTallyStore, memoryTallyStore } from './memoryTallyStore.js';
 import { runMorningPushTick } from './morningPush.js';
+import { type MorningStreakStore, morningStreakStore } from './morningStreakStore.js';
 import { getMorningSurface } from './morningSurface.js';
 import { narrativeFindingStore } from './narrativeFindingStore.js';
 import {
@@ -186,6 +189,7 @@ export async function createHttpServer(options: HttpServerOptions): Promise<Http
 
   registerHealthRoute(app);
   registerBriefingRoute(app, options);
+  registerMemoryRoutes(app);
   registerInboxRoutes(app);
   registerWiringRoute(app);
   registerHookRoute(app, options);
@@ -569,7 +573,7 @@ function registerBriefingRoute(app: FastifyInstance, options: HttpServerOptions)
   // live board state + overnight receipts into ONE payload. Same trust
   // tier + analyze-on-demand cache posture as everything else on this
   // route group (morningSurface.ts).
-  app.get('/api/morning', async () => getMorningSurface(options.store));
+  app.get('/api/morning', async () => getMorningSurface(options.store, Date.now(), true));
   // V6-5 cross-model spot checks: the landing pad for an external `codex
   // exec` runner's discrepancy filing (morningSpotCheck.ts's documented
   // manual/runner path). Bearer-authed, same tier as the other
@@ -592,6 +596,52 @@ function registerBriefingRoute(app: FastifyInstance, options: HttpServerOptions)
       reply.send({ ok: true, id: finding.id });
     },
   );
+}
+
+export interface MemoryRouteDeps {
+  store?: MemoryStore;
+  tally?: MemoryTallyStore;
+  streak?: Pick<MorningStreakStore, 'getSnapshot'>;
+}
+
+/**
+ * V7 memory controls use the existing unauthenticated tailnet webview tier.
+ * The direct-mode POST cannot bypass eligibility: enabled=true calls the
+ * same receipted 7-day promotion path; enabled=false is the single instant
+ * revocation flag. Exported so route guards can be tested via Fastify.inject
+ * without opening a localhost socket in managed test sandboxes.
+ */
+export function registerMemoryRoutes(app: FastifyInstance, deps: MemoryRouteDeps = {}): void {
+  const store = deps.store ?? memoryStore;
+  const tally = deps.tally ?? memoryTallyStore;
+  const streak = deps.streak ?? morningStreakStore;
+
+  app.get('/api/memory/status', async () => store.getStatus());
+  app.post<{ Body: Record<string, unknown> }>('/api/memory/direct', async (request, reply) => {
+    if (request.body?.enabled === false) {
+      reply.send(store.revokeDirect());
+      return;
+    }
+    if (request.body?.enabled === true) {
+      const result = store.promoteIfEligible();
+      if (!result.ok) reply.code(409);
+      reply.send(result);
+      return;
+    }
+    reply.code(400).send({ ok: false, reason: 'expected-enabled-boolean' });
+  });
+
+  app.get('/api/memory/tally', async () => tally.getSnapshot(streak.getSnapshot()));
+  app.post<{ Body: Record<string, unknown> }>('/api/memory/tally', async (request, reply) => {
+    const attribution =
+      typeof request.body?.attribution === 'string' ? request.body.attribution : '';
+    const result = tally.recordAttribution(attribution);
+    if (!result.ok) {
+      reply.code(400).send(result);
+      return;
+    }
+    reply.send({ ok: true, tally: tally.getSnapshot(streak.getSnapshot()) });
+  });
 }
 
 // ── Routine inbox tray (v4 T7 slice 2) ──────────────────────────

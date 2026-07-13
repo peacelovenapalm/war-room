@@ -297,6 +297,35 @@ export const HELP_SECTIONS: HelpSection[] = [
     ],
   },
   {
+    id: 'memory-recall',
+    title: 'SEARCH memory & receipts',
+    category: 'BRIEFING & SHIFT',
+    intro:
+      'SEARCH puts distilled decisions before graph topology. Knowledge is staged, citable, and allowed to age visibly.',
+    entries: [
+      {
+        glyph: '◆',
+        word: 'ANSWER',
+        text: 'The newest matching decision verdict. Tap ▸ RECEIPTS for date, session id, source line, and note path.',
+      },
+      {
+        glyph: '◷',
+        word: 'STALE',
+        text: 'The decision has not been reconfirmed inside the freshness window; it remains visible and citable.',
+      },
+      {
+        glyph: '⚑',
+        word: 'CONTRADICTION',
+        text: 'A newer receipt disagrees on the same topic. Both answers remain; a human arbitrates.',
+      },
+      {
+        glyph: '✓/↺',
+        word: 'ANSWERED / RE-DERIVED',
+        text: 'One-tap attribution for whether memory settled the question or you had to derive it again.',
+      },
+    ],
+  },
+  {
     id: 'chrome',
     title: 'Chrome',
     category: 'CHROME',

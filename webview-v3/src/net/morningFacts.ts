@@ -46,8 +46,21 @@ export interface OvernightSection {
 
 export interface MorningStreakSection {
   count: number;
+  lastRecordedDate: string | null;
   lastBreachReason: string | null;
   lastBreachAt: string | null;
+}
+
+export interface MorningMemorySection {
+  graphAnswered: number;
+  rederived: number;
+  surfacesOpenedPerMorning: number;
+  morningDate: string | null;
+  persistence: 'process';
+  writePathEnabled: boolean;
+  writeMode: 'staged' | 'direct';
+  cleanDayCount: number;
+  promotionEligible: boolean;
 }
 
 export interface MorningSurface {
@@ -59,6 +72,7 @@ export interface MorningSurface {
   degraded: boolean;
   degradedReasons: string[];
   streak: MorningStreakSection;
+  memory: MorningMemorySection;
 }
 
 export const MORNING_REFRESH_INTERVAL_MS = 60_000;

@@ -40,7 +40,23 @@ function makeSurface(overrides: Partial<MorningSurface> = {}): MorningSurface {
     needsYouCount: 0,
     degraded: false,
     degradedReasons: [],
-    streak: { count: 3, lastBreachReason: null, lastBreachAt: null },
+    streak: {
+      count: 3,
+      lastRecordedDate: '2026-07-13',
+      lastBreachReason: null,
+      lastBreachAt: null,
+    },
+    memory: {
+      graphAnswered: 0,
+      rederived: 0,
+      surfacesOpenedPerMorning: 0,
+      morningDate: '2026-07-13',
+      persistence: 'process',
+      writePathEnabled: false,
+      writeMode: 'staged',
+      cleanDayCount: 0,
+      promotionEligible: false,
+    },
     ...overrides,
   };
 }

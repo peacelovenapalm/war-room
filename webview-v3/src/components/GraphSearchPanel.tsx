@@ -1,16 +1,18 @@
 import { useEffect, useRef, useState } from 'react';
 
+import { GRAPH_SEARCH_DEBOUNCE_MS, MEMORY_ATTRIBUTION_FEEDBACK_MS } from '../constants';
 import {
+  type DecisionSearchMatch,
   formatEdgeLine,
   type GraphNode,
   type GraphSearchResult,
   groupEdgesByHop,
   kindGlyph,
   matchLabel,
+  type MemoryAttribution,
+  recordMemoryAttribution,
 } from '../net/graphFacts';
 import { Modal } from './Modal';
-
-const DEBOUNCE_MS = 300;
 
 export interface GraphSearchPanelProps {
   isOpen: boolean;
@@ -63,6 +65,40 @@ function ResolvedBlock({ resolved }: { resolved: NonNullable<GraphSearchResult['
   );
 }
 
+function DecisionBlock({ decision }: { decision: DecisionSearchMatch }) {
+  return (
+    <article className="graph-search__decision" data-testid="graph-search-decision">
+      <div className="graph-search__decision-answer">
+        <strong>◆ ANSWER — {decision.answer}</strong>
+        <span className="modal__muted">topic: {decision.topic}</span>
+      </div>
+      {decision.stale && (
+        <div className="modal__warn" data-testid="graph-search-decision-stale">
+          ◷ STALE — older than the decision freshness window
+        </div>
+      )}
+      {decision.contradiction && (
+        <div className="modal__warn" data-testid="graph-search-decision-contradiction">
+          ⚑ CONTRADICTION — competing answer{decision.competingAnswers.length === 1 ? '' : 's'}:{' '}
+          {decision.competingAnswers.join(' · ')}
+        </div>
+      )}
+      <details className="graph-search__receipts">
+        <summary>▸ RECEIPTS ({String(decision.receipts.length)})</summary>
+        {decision.receipts.map((receipt) => (
+          <div key={receipt.receiptId} className="graph-search__receipt">
+            <div>
+              {receipt.date} · session {receipt.sessionId} · line {String(receipt.lineNumber)}
+            </div>
+            <div>“{receipt.verbatim}”</div>
+            <div className="modal__muted">{receipt.notePath}</div>
+          </div>
+        ))}
+      </details>
+    </article>
+  );
+}
+
 /** GRAPH SEARCH panel (4C, T7 first slice): search the vault knowledge
  *  graph via GET /api/graph/search. Debounced text input, one-tap-real
  *  match rows (tapping re-queries with that node's exact id, which
@@ -76,7 +112,9 @@ export function GraphSearchPanel({ isOpen, onClose }: GraphSearchPanelProps) {
   const [result, setResult] = useState<GraphSearchResult | null>(null);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState(false);
+  const [attributionFeedback, setAttributionFeedback] = useState<string | null>(null);
   const debounceRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const feedbackRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const requestSeq = useRef(0);
   const hasQuery = query.trim().length > 0;
 
@@ -92,6 +130,7 @@ export function GraphSearchPanel({ isOpen, onClose }: GraphSearchPanelProps) {
       setError(false);
       setLoading(false);
       setDepth(1);
+      setAttributionFeedback(null);
     }
   }
 
@@ -121,11 +160,35 @@ export function GraphSearchPanel({ isOpen, onClose }: GraphSearchPanelProps) {
         }
       };
       void run();
-    }, DEBOUNCE_MS);
+    }, GRAPH_SEARCH_DEBOUNCE_MS);
     return () => {
       if (debounceRef.current) clearTimeout(debounceRef.current);
     };
   }, [isOpen, hasQuery, query, depth]);
+
+  useEffect(
+    () => () => {
+      if (feedbackRef.current) clearTimeout(feedbackRef.current);
+    },
+    [],
+  );
+
+  const attribute = (value: MemoryAttribution) => {
+    void recordMemoryAttribution(value).then((ok) => {
+      setAttributionFeedback(
+        ok
+          ? value === 'graph-answered'
+            ? '✓ RECORDED — graph answered'
+            : '↺ RECORDED — had to re-derive'
+          : '⚠ NOT RECORDED — tap to retry',
+      );
+      if (feedbackRef.current) clearTimeout(feedbackRef.current);
+      feedbackRef.current = setTimeout(
+        () => setAttributionFeedback(null),
+        MEMORY_ATTRIBUTION_FEEDBACK_MS,
+      );
+    });
+  };
 
   return (
     <Modal isOpen={isOpen} onClose={onClose} title="GRAPH SEARCH" testId="graph-search-panel">
@@ -179,6 +242,25 @@ export function GraphSearchPanel({ isOpen, onClose }: GraphSearchPanelProps) {
         </div>
       )}
 
+      {hasQuery && !loading && result && result.decisions.available && (
+        <section className="graph-search__decisions" data-testid="graph-search-decisions">
+          <div className="graph-search__lane-label">◆ DECISIONS — ANSWER FIRST</div>
+          {result.decisions.matches.length === 0 ? (
+            <div className="modal__muted">no decision receipts</div>
+          ) : (
+            result.decisions.matches.map((decision) => (
+              <DecisionBlock key={decision.topic} decision={decision} />
+            ))
+          )}
+        </section>
+      )}
+
+      {hasQuery && !loading && result && !result.decisions.available && (
+        <div className="modal__warn" data-testid="graph-search-decisions-unavailable">
+          ⊘ NO MEMORY — WAR_ROOM_VAULT_DIR not configured
+        </div>
+      )}
+
       {hasQuery && !loading && result && result.available && (
         <>
           {result.matches.length === 0 && result.resolved === undefined && (
@@ -199,6 +281,31 @@ export function GraphSearchPanel({ isOpen, onClose }: GraphSearchPanelProps) {
           )}
           {result.resolved !== undefined && <ResolvedBlock resolved={result.resolved} />}
         </>
+      )}
+
+      {hasQuery && !loading && result && (
+        <div className="graph-search__attribution" data-testid="graph-search-attribution">
+          <span className="modal__muted">DID THIS SETTLE IT?</span>
+          <button
+            type="button"
+            className="verb"
+            onClick={() => {
+              attribute('graph-answered');
+            }}
+          >
+            ✓ THIS ANSWERED IT
+          </button>
+          <button
+            type="button"
+            className="verb"
+            onClick={() => {
+              attribute('rederived');
+            }}
+          >
+            ↺ HAD TO RE-DERIVE
+          </button>
+          {attributionFeedback && <span>{attributionFeedback}</span>}
+        </div>
       )}
     </Modal>
   );

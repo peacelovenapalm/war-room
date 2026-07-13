@@ -11,9 +11,11 @@ import * as path from 'path';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 
 import { clearGraphCache, GRAPH_SEARCH_MAX_MATCHES, searchGraph } from '../src/graphProvider.js';
+import { MemoryStore } from '../src/memoryStore.js';
 
 let tmpDir: string;
 const savedEnv = process.env['WAR_ROOM_GRAPH_DIR'];
+const savedVaultEnv = process.env['WAR_ROOM_VAULT_DIR'];
 
 function writeStore(nodes: object[], edges: object[]): void {
   fs.writeFileSync(
@@ -29,6 +31,7 @@ function writeStore(nodes: object[], edges: object[]): void {
 beforeEach(() => {
   tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'graph-provider-'));
   process.env['WAR_ROOM_GRAPH_DIR'] = tmpDir;
+  delete process.env['WAR_ROOM_VAULT_DIR'];
   clearGraphCache();
 });
 
@@ -36,6 +39,8 @@ afterEach(() => {
   fs.rmSync(tmpDir, { recursive: true, force: true });
   if (savedEnv === undefined) delete process.env['WAR_ROOM_GRAPH_DIR'];
   else process.env['WAR_ROOM_GRAPH_DIR'] = savedEnv;
+  if (savedVaultEnv === undefined) delete process.env['WAR_ROOM_VAULT_DIR'];
+  else process.env['WAR_ROOM_VAULT_DIR'] = savedVaultEnv;
   clearGraphCache();
 });
 
@@ -66,7 +71,12 @@ describe('searchGraph', () => {
   it('missing env → available:false, never a throw', () => {
     delete process.env['WAR_ROOM_GRAPH_DIR'];
     clearGraphCache();
-    expect(searchGraph('twe')).toEqual({ available: false, query: 'twe', matches: [] });
+    expect(searchGraph('twe')).toEqual({
+      available: false,
+      query: 'twe',
+      matches: [],
+      decisions: { available: false, matches: [] },
+    });
   });
 
   it('missing files under a set env → available:false (honest, no 500 path)', () => {
@@ -127,5 +137,41 @@ describe('searchGraph', () => {
     const result = searchGraph('twe');
     expect(result.available).toBe(true);
     expect(result.matches).toHaveLength(2);
+  });
+
+  it('returns the decisions lane even when the graph mount is unavailable', () => {
+    delete process.env['WAR_ROOM_GRAPH_DIR'];
+    const decisionDir = path.join(tmpDir, '_inbox', 'war-room-distill');
+    fs.mkdirSync(decisionDir, { recursive: true });
+    fs.writeFileSync(
+      path.join(decisionDir, '_decisions.jsonl'),
+      `${JSON.stringify({
+        topic: 'write mode',
+        verdict: 'STAGED',
+        sessionId: 'session-1',
+        date: '2026-07-13',
+        verbatim: 'Decision[write mode]: STAGED',
+        lineNumber: 4,
+        receiptId: 'wrm-1',
+        notePath: '_inbox/war-room-distill/2026-07-13-session-1.md',
+        recordedAt: '2026-07-13T12:00:00.000Z',
+        contradicts: [],
+      })}\n`,
+    );
+    process.env['WAR_ROOM_VAULT_DIR'] = tmpDir;
+    clearGraphCache();
+    const result = searchGraph(
+      'write mode',
+      1,
+      Date.parse('2026-07-14T12:00:00Z'),
+      new MemoryStore({ vaultRoot: tmpDir, notifyPromotion: () => undefined }),
+    );
+    expect(result.available).toBe(false);
+    expect(result.decisions.matches[0]).toMatchObject({
+      topic: 'write mode',
+      answer: 'STAGED',
+      contradiction: false,
+      stale: false,
+    });
   });
 });

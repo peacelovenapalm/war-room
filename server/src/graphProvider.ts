@@ -20,6 +20,8 @@
 import * as fs from 'fs';
 import * as path from 'path';
 
+import { type DecisionSearchLane, type MemoryStore, memoryStore } from './memoryStore.js';
+
 export interface GraphNode {
   id: string;
   kind?: string;
@@ -56,6 +58,9 @@ export interface GraphSearchResult {
   /** Set only when the query resolved to exactly ONE node (python
    *  find_node discipline: exact id/title/stem/`:suffix` match). */
   resolved?: { node: GraphNode; edges: GraphNeighborEdge[] };
+  /** V7-3 answer-first lane. Independent from the read-only graph mount:
+   *  a missing graph may still have staged decision receipts available. */
+  decisions: DecisionSearchLane;
 }
 
 const CACHE_TTL_MS = 60_000;
@@ -171,11 +176,17 @@ function neighborEdges(store: GraphStore, start: string, depth: number): GraphNe
 
 /** Search the graph: substring matches + (when unambiguous) 1..depth-hop
  *  neighbor edges. Pure read — no state beyond the TTL cache. */
-export function searchGraph(query: string, depth = 1, now: number = Date.now()): GraphSearchResult {
+export function searchGraph(
+  query: string,
+  depth = 1,
+  now: number = Date.now(),
+  decisionStore: Pick<MemoryStore, 'searchDecisions'> = memoryStore,
+): GraphSearchResult {
   const store = loadStore(now);
   const q = query.trim();
-  if (!store) return { available: false, query: q, matches: [] };
-  if (q === '') return { available: true, query: q, matches: [] };
+  const decisions = decisionStore.searchDecisions(q, now);
+  if (!store) return { available: false, query: q, matches: [], decisions };
+  if (q === '') return { available: true, query: q, matches: [], decisions };
 
   const low = q.toLowerCase();
   const matches: GraphNode[] = [];
@@ -201,5 +212,5 @@ export function searchGraph(query: string, depth = 1, now: number = Date.now()):
         }
       : undefined;
 
-  return { available: true, query: q, matches, resolved };
+  return { available: true, query: q, matches, resolved, decisions };
 }
