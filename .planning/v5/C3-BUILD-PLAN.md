@@ -16,9 +16,9 @@ scope; it sequences it.
 | 1. Wrapper name                 | "wr-claude is fine"                                                 | Command ships as `wr claude` (bin `wr`, subcommand `claude`) per the design's placeholder; a `wr-claude` single-bin alias is acceptable if simpler. Builder picks the mechanically simpler of the two, no bikeshedding.                                                                                                  |
 | 2. Opt-in vs opt-out            | "default to opt in"                                                 | Opt-in ONLY. Greg's bare `claude` muscle memory is untouched. NO shell shadowing of `claude`, no opt-out escape hatch built. Revisit opt-out only after daily use, in a future gate.                                                                                                                                     |
 | 3. tmux tradeoffs (§3.3)        | "default to recommendation"                                         | Ship with the design's mitigations as BUILD TASKS, not fast-follows: first-run banner naming the scrollback change; verify Ctrl-b collision with Claude Code before shipping (war-room tmux.conf via `-f` if it collides — never touch `~/.tmux.conf`); wrapper re-derives and re-exits with the inner claude exit code. |
-| 4. PROMPT wire shape (§4.2)     | "explain the difference"                                            | Explained at the MacBook 2026-07-12; recommendation on the table: **shared type + `verb: 'answer'\|'prompt'` discriminant** (one queue, guards can't drift) over a parallel promptQueue. **OPEN until Greg confirms** — see §3 T5 precondition. If he says "go with your recommendation," shared-verb it is.             |
+| 4. PROMPT wire shape (§4.2)     | "explain the difference" → "go with your recommendation" (same day) | **CLOSED: shared type + `verb: 'answer'\|'prompt'` discriminant** (one queue, guards can't drift). Corollary: T5 must ship runners to all machines before first PROMPT use (stale runner would deliver a prompt but audit it as `answer-delivered`).                                                                     |
 | 5. `launchedVia` manifest field | "agree, you can add"                                                | Build it: additive manifest field distinguishing wrapper-born vs CALL-modal-born sessions.                                                                                                                                                                                                                               |
-| 6. Launch mechanism (d) vs (c)  | "unsure"                                                            | Plan assumes **(d)** (wrapper as WS dispatch client — zero runner/gate code touched, 2–7 s launch latency). Explained at the MacBook; Greg may flip to (c) any time before T2 starts. (c) = export-refactor of runner gate helpers, instant launch, touches security-critical code.                                      |
+| 6. Launch mechanism (d) vs (c)  | "unsure" → "go with your recommendation" (same day)                 | **CLOSED: (d)** — wrapper as WS dispatch client, zero runner/gate code touched, 2–7 s launch latency accepted. (c) remains the documented fallback ONLY if the build proves the latency unacceptable in daily use, and would need its own gate.                                                                          |
 | 7. Build authorization          | "start to build the plan… ready for a new agent to continue/finish" | This document. Code starts when Greg launches a session with §5's kickoff prompt.                                                                                                                                                                                                                                        |
 
 ## 2. Non-negotiables carried from the design
@@ -82,11 +82,12 @@ pointer to runner logs, non-zero exit.
 _Pass:_ kill/mask the server locally and observe the exact fail-closed
 message; no unmanaged claude process spawned.
 
-**T5 — PROMPT verb, wire + server + runner.** _Precondition: Greg has
-confirmed gate 4 (shared-verb recommendation vs parallel queue)._
+**T5 — PROMPT verb, wire + server + runner.** Gate 4 CLOSED: shared
+type — add `verb: 'answer' | 'prompt'` to the existing answer
+instruction, one queue, no parallel promptQueue.
 `core/asyncapi.yaml` schema change + regen; `dispatchStore.ts`
 enqueue/drain path; `bin/lib/managed-sessions.mjs` delivery
-(`deliverPrompt` thin wrapper or `verb` param); all ANSWER guards
+(`verb` param or `deliverPrompt` thin wrapper); all ANSWER guards
 applied identically. **Ship runners to every machine (MACBOOK + MINI)
 before first real PROMPT use** — MINI is a bundle-ship
 (`scripts/mini-drift-check.sh` verifies).
@@ -125,12 +126,10 @@ Greg flips gate 6), multi-attach resize handling, anything on RUN-MAP
 ```
 Read .planning/v5/C3-BUILD-PLAN.md and .planning/v5/C3-DESIGN.md in
 /Users/greg/code/war-room (branch war-room/v3). Greg has gated the
-design; the plan's §1 table is his decision record. Execute tasks
-T1–T7 in order, each to its stated pass/fail. Check §1 gate 4 and
-gate 6 for whether Greg has confirmed the PROMPT wire shape and
-mechanism (d) — if gate 4 is still OPEN, stop before T5 and ask him;
-everything through T4 is unblocked. Mechanism (d) is the working
-assumption: zero changes to dispatch-runner.mjs / dispatch-rules.mjs
+design; the plan's §1 table is his decision record and ALL gates are
+CLOSED (gate 4 = shared verb, gate 6 = mechanism (d)). Execute tasks
+T1–T7 in order, each to its stated pass/fail. Mechanism (d) is
+locked: zero changes to dispatch-runner.mjs / dispatch-rules.mjs
 — treat any diff touching them as a plan violation. Fail closed when
 the server is unreachable. Full gate + codex cross-model review at the
 end (T7). No NEXUS deploy without Greg's explicit go.
