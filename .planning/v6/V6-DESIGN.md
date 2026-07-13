@@ -120,10 +120,9 @@ vault-notifier clone) firing its own Bark push at the same 06:00
 America/Denver cron gate `gen_morning_page.py` already runs on. War
 Room's NEW push (`server/src/morningPush.ts`, wired in `httpServer.ts`)
 now fires independently on the SAME schedule via `WAR_ROOM_MORNING_PUSH_HOUR`
-
-- `WAR_ROOM_MORNING_TZ` (deploy runbook defaults: `6` / `America/Denver`).
-  During the parallel-run window BOTH pushes fire — deliberate, per §0.3's
-  recorded default in this same file.
+and `WAR_ROOM_MORNING_TZ` (deploy runbook defaults: `6` / `America/Denver`).
+During the parallel-run window BOTH pushes fire — deliberate, per §0.3's
+recorded default in this same file.
 
 To silence the OLD push once the streak clears 5, on nexus (wherever
 `gen_morning_page.py`'s Bark POST call lives — verify the exact call site
