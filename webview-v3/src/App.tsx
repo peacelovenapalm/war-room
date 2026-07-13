@@ -18,6 +18,7 @@ import { GraphSearchPanel } from './components/GraphSearchPanel';
 import { HelpModal } from './components/HelpModal';
 import { HudStrip, type ViewMode } from './components/HudStrip';
 import { InboxPanel } from './components/InboxPanel';
+import { MorningPanel } from './components/MorningPanel';
 import { OpsReviewPanel } from './components/OpsReviewPanel';
 import { type DockPanelKind, PanelDock } from './components/PanelDock';
 import { PinDock } from './components/PinDock';
@@ -278,6 +279,13 @@ export default function App() {
   /** Push-landing deep link (state/launch.ts): the agent id a notification
    *  wants auto-opened, cleared once the walk fires (or never set). */
   const launchTargetRef = useRef<number | null>(parseLaunchTarget(readLocationSearch()).agentId);
+  /** V6-1 morning push deep link (?open=morning, morningPush.ts's own
+   *  link) — a PANEL target, not an agent one, so it opens immediately on
+   *  mount rather than waiting for any particular agent to show up in the
+   *  live roster. */
+  const launchPanelRef = useRef<DockPanelKind | null>(
+    parseLaunchTarget(readLocationSearch()).panel,
+  );
   const prevFloorFeedIdsRef = useRef<readonly number[]>([]);
 
   const [grayscale, setGrayscale] = useState(false);
@@ -1086,6 +1094,18 @@ export default function App() {
     [openPanelWithFlight],
   );
 
+  // V6-1 morning push deep link: open the target panel ONCE on mount — no
+  // roster dependency (unlike launchTargetRef's agent walk below), so this
+  // doesn't wait on any WS data. openPanelWithFlight degrades to a plain
+  // open when the panel has no in-world prop anchor (MORNING doesn't).
+  useEffect(() => {
+    const panel = launchPanelRef.current;
+    if (panel === null) return;
+    launchPanelRef.current = null;
+    openPanelWithFlight(panel);
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- fire-once-on-mount by design (launchPanelRef is a ref, not reactive state)
+  }, []);
+
   // T6 item 4, "skippable": ANY input while a panel-open flight/grow is in
   // progress cancels it immediately — capture phase so it fires before the
   // event reaches whatever it's aimed at, but harmless (a plain state
@@ -1376,6 +1396,11 @@ export default function App() {
         <GraphSearchPanel isOpen={openPanel === 'graph-search'} onClose={closePanel} />
         <DistrictsView isOpen={openPanel === 'districts'} onClose={closePanel} />
         <InboxPanel isOpen={openPanel === 'inbox'} onClose={closePanel} />
+        <MorningPanel
+          isOpen={openPanel === 'morning'}
+          onClose={closePanel}
+          connectionStatus={connectionStatus}
+        />
       </PanelGrowOriginProvider>
 
       {viewingResult && (

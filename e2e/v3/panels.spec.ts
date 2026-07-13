@@ -58,6 +58,51 @@ const REST_JSON: Record<string, unknown> = {
     },
     generatedAt: '2026-07-10T00:00:00Z',
   },
+  // V6-1 morning surface — a "needs you" default fixture; the ALL CALM /
+  // degraded states are exercised via morningOverride in their own tests.
+  '/api/morning': {
+    generatedAt: '2026-07-10T06:00:00Z',
+    morningJson: {
+      available: true,
+      stale: false,
+      dataAgeSeconds: 300,
+      date: '2026-07-10',
+      top3: [
+        {
+          n: 1,
+          action: 'ship the panel ports',
+          why: 'stage-3 gate',
+          source: 'todo',
+          tags: ['build'],
+        },
+      ],
+      flags: 'routine: summary',
+      prs: { count: 1, list: [{ number: 42, title: 'fix the flaky test', branch: 'lane/x' }] },
+    },
+    board: {
+      dataAgeSeconds: 0,
+      needsInput: { count: 1, names: ['agent 2 on MACBOOK'] },
+      heldBudget: { count: 1, jobs: [{ machine: 'MACBOOK', promptPreview: 'fix the flaky test' }] },
+    },
+    overnight: {
+      dataAgeSeconds: 0,
+      windowStart: '2026-07-09T18:00:00Z',
+      windowEnd: '2026-07-10T06:00:00Z',
+      receiptCount: 1,
+      receipts: [
+        {
+          ts: '2026-07-10T02:00:00Z',
+          actionKind: 'requeue-failed-dispatch',
+          ok: true,
+          detail: 'requeued rework-1',
+        },
+      ],
+    },
+    needsYouCount: 1,
+    degraded: false,
+    degradedReasons: [],
+    streak: { count: 3, lastBreachReason: null, lastBreachAt: null },
+  },
   // v4 T7 routine inbox tray — newest-first fixture across two routines.
   '/api/inbox': {
     available: true,
@@ -248,6 +293,9 @@ async function serveV3Dist(
     /** INBOX (v4 T7 slice 2) — overrides REST_JSON's default GET
      *  /api/inbox fixture, e.g. the honest available:false state. */
     inboxOverride?: unknown;
+    /** MORNING (V6-1) — overrides REST_JSON's default GET /api/morning
+     *  fixture, e.g. a degraded or all-calm surface. */
+    morningOverride?: unknown;
   } = {},
 ): Promise<StaticHost> {
   if (!fs.existsSync(path.join(V3_DIST, 'index.html'))) {
@@ -358,6 +406,11 @@ async function serveV3Dist(
     if (requestPath === '/api/inbox' && options.inboxOverride !== undefined) {
       res.writeHead(200, { 'Content-Type': 'application/json' });
       res.end(JSON.stringify(options.inboxOverride));
+      return;
+    }
+    if (requestPath === '/api/morning' && options.morningOverride !== undefined) {
+      res.writeHead(200, { 'Content-Type': 'application/json' });
+      res.end(JSON.stringify(options.morningOverride));
       return;
     }
     if (requestPath === '/api/ops/auto' && options.autoStatusOverride !== undefined) {
@@ -510,6 +563,7 @@ test.describe('stage-3 panel ports (desktop chrome model)', () => {
         'ops',
         'graph-search',
         'inbox',
+        'morning',
         'settings',
         'debug',
         'help',
@@ -1717,6 +1771,163 @@ test.describe('stage-3 panel ports (desktop chrome model)', () => {
         '⊘ NO INBOX SOURCE — routines mount not present on this deployment',
       );
       await expect(page.getByTestId('inbox-list')).toHaveCount(0);
+    } finally {
+      await context.close();
+      await host.close();
+    }
+  });
+
+  test('MORNING: one glance renders needs-input, held budget, top 3, PRs, overnight, and streak from the real /api/morning fixture', async ({
+    browser,
+  }) => {
+    const host = await serveV3Dist();
+    const context = await browser.newContext({ viewport: VIEWPORT });
+    try {
+      const page = await context.newPage();
+      await page.goto(`${host.url}/`);
+      await expect(page.getByTestId('hud-connection')).toHaveText('● LIVE', { timeout: 20_000 });
+
+      await page.getByTestId('dock-morning').click();
+      await expect(page.getByTestId('morning-panel')).toBeVisible();
+      await expect(page.getByTestId('morning-all-calm')).toHaveCount(0); // this fixture has real work pending
+
+      await expect(page.getByTestId('morning-needs-input')).toContainText('NEEDS INPUT (1)');
+      await expect(page.getByTestId('morning-needs-input')).toContainText('agent 2 on MACBOOK');
+
+      await expect(page.getByTestId('morning-held-budget')).toContainText('HELD BUDGET (1)');
+      await expect(page.getByTestId('morning-held-budget')).toContainText('fix the flaky test');
+
+      await expect(page.getByTestId('morning-top3')).toContainText('ship the panel ports');
+      await expect(page.getByTestId('morning-flags')).toContainText('routine: summary');
+      await expect(page.getByTestId('morning-prs')).toContainText('OPEN ROUTINE PRS (1)');
+      await expect(page.getByTestId('morning-prs')).toContainText('fix the flaky test');
+
+      await expect(page.getByTestId('morning-overnight')).toContainText('requeue-failed-dispatch');
+      await expect(page.getByTestId('morning-streak')).toContainText('3');
+    } finally {
+      await context.close();
+      await host.close();
+    }
+  });
+
+  test('MORNING: ALL CALM renders the explicit shape+word state when every section is genuinely quiet', async ({
+    browser,
+  }) => {
+    const host = await serveV3Dist({
+      morningOverride: {
+        generatedAt: '2026-07-10T06:00:00Z',
+        morningJson: {
+          available: true,
+          stale: false,
+          dataAgeSeconds: 300,
+          date: '2026-07-10',
+          top3: [],
+          flags: null,
+          prs: { count: 0, list: [] },
+        },
+        board: {
+          dataAgeSeconds: 0,
+          needsInput: { count: 0, names: [] },
+          heldBudget: { count: 0, jobs: [] },
+        },
+        overnight: {
+          dataAgeSeconds: 0,
+          windowStart: '2026-07-09T18:00:00Z',
+          windowEnd: '2026-07-10T06:00:00Z',
+          receiptCount: 0,
+          receipts: [],
+        },
+        needsYouCount: 0,
+        degraded: false,
+        degradedReasons: [],
+        streak: { count: 5, lastBreachReason: null, lastBreachAt: null },
+      },
+    });
+    const context = await browser.newContext({ viewport: VIEWPORT });
+    try {
+      const page = await context.newPage();
+      await page.goto(`${host.url}/`);
+      await expect(page.getByTestId('hud-connection')).toHaveText('● LIVE', { timeout: 20_000 });
+
+      await page.getByTestId('dock-morning').click();
+      await expect(page.getByTestId('morning-all-calm')).toContainText(
+        '✓ ALL CALM — nothing needs you',
+      );
+      await expect(page.getByTestId('morning-degraded')).toHaveCount(0);
+    } finally {
+      await context.close();
+      await host.close();
+    }
+  });
+
+  test('MORNING: a degraded surface renders the honest ⊘ line, never a fake ALL CALM', async ({
+    browser,
+  }) => {
+    const host = await serveV3Dist({
+      morningOverride: {
+        generatedAt: '2026-07-10T06:00:00Z',
+        morningJson: {
+          available: false,
+          stale: false,
+          dataAgeSeconds: null,
+          date: null,
+          top3: [],
+          flags: null,
+          prs: { count: 0, list: [] },
+        },
+        board: {
+          dataAgeSeconds: 0,
+          needsInput: { count: 0, names: [] },
+          heldBudget: { count: 0, jobs: [] },
+        },
+        overnight: {
+          dataAgeSeconds: 0,
+          windowStart: '2026-07-09T18:00:00Z',
+          windowEnd: '2026-07-10T06:00:00Z',
+          receiptCount: 0,
+          receipts: [],
+        },
+        needsYouCount: 0,
+        degraded: true,
+        degradedReasons: ['morning.json unavailable (mount absent or unreadable)'],
+        streak: {
+          count: 0,
+          lastBreachReason: 'morning.json unavailable',
+          lastBreachAt: '2026-07-10T06:00:00Z',
+        },
+      },
+    });
+    const context = await browser.newContext({ viewport: VIEWPORT });
+    try {
+      const page = await context.newPage();
+      await page.goto(`${host.url}/`);
+      await expect(page.getByTestId('hud-connection')).toHaveText('● LIVE', { timeout: 20_000 });
+
+      await page.getByTestId('dock-morning').click();
+      await expect(page.getByTestId('morning-degraded')).toContainText(
+        '⊘ DEGRADED — morning.json unavailable',
+      );
+      await expect(page.getByTestId('morning-json-unavailable')).toContainText('⊘ NO DATA');
+      await expect(page.getByTestId('morning-all-calm')).toHaveCount(0); // degraded is never presented as calm
+    } finally {
+      await context.close();
+      await host.close();
+    }
+  });
+
+  // V6-1 ?open=morning deep link — the morning push's own landing target
+  // (morningPush.ts's morningDeepLink), opening the panel immediately on
+  // cold load without waiting for any agent roster.
+  test('MORNING: ?open=morning deep-links straight into the panel on cold load', async ({
+    browser,
+  }) => {
+    const host = await serveV3Dist();
+    const context = await browser.newContext({ viewport: VIEWPORT });
+    try {
+      const page = await context.newPage();
+      await page.goto(`${host.url}/?open=morning`);
+      await expect(page.getByTestId('hud-connection')).toHaveText('● LIVE', { timeout: 20_000 });
+      await expect(page.getByTestId('morning-panel')).toBeVisible();
     } finally {
       await context.close();
       await host.close();

@@ -24,6 +24,7 @@ import {
   MAX_AGENT_OUTPUT_LINES_PER_POST,
   MAX_AGENT_OUTPUT_TOTAL_LINE_BYTES,
   MAX_HOOK_BODY_SIZE,
+  MORNING_PUSH_CHECK_INTERVAL_MS,
   SELF_HEAL_TICK_INTERVAL_MS,
 } from './constants.js';
 import { contractStore } from './contractStore.js';
@@ -43,6 +44,9 @@ import { searchGraph } from './graphProvider.js';
 import { getInboxListing, readInboxFile } from './inboxProvider.js';
 import { matchDayDerivation } from './matchDayDerivation.js';
 import { matchDayStore, toMatchDayEvent } from './matchDayStore.js';
+import { runMorningPushTick } from './morningPush.js';
+import { getMorningSurface } from './morningSurface.js';
+import { narrativeFindingStore } from './narrativeFindingStore.js';
 import {
   createBudgetPauseNotifier,
   createEmployeeQuitNotifier,
@@ -339,6 +343,16 @@ export async function createHttpServer(options: HttpServerOptions): Promise<Http
   selfHealTimer.unref?.();
   app.addHook('onClose', () => clearInterval(selfHealTimer));
 
+  // Morning push tick (V6-1 "ONE pre-triaged push", morningPush.ts) — same
+  // interval idiom, checked every MORNING_PUSH_CHECK_INTERVAL_MS; the tick
+  // itself gates on local-hour + once-per-day so most invocations are a
+  // cheap no-op.
+  const morningPushTimer = setInterval(() => {
+    runMorningPushTick(options.store);
+  }, MORNING_PUSH_CHECK_INTERVAL_MS);
+  morningPushTimer.unref?.();
+  app.addHook('onClose', () => clearInterval(morningPushTimer));
+
   // World events (v2 mechanic G4, §6.3) — the coarse "live tick" GAME-DESIGN
   // §2 introduces: only rolls while ≥1 socket is connected (checked inside
   // the callback, not by gating the interval itself, so it naturally stops
@@ -551,6 +565,33 @@ function registerBriefingRoute(app: FastifyInstance, options: HttpServerOptions)
   // discoverable STATE.md renders honestly as source:'unknown', never a
   // fake number.
   app.get('/api/districts', async () => getDistricts());
+  // Morning surface (V6-1 "one glance, one push"): composes morning.json +
+  // live board state + overnight receipts into ONE payload. Same trust
+  // tier + analyze-on-demand cache posture as everything else on this
+  // route group (morningSurface.ts).
+  app.get('/api/morning', async () => getMorningSurface(options.store));
+  // V6-5 cross-model spot checks: the landing pad for an external `codex
+  // exec` runner's discrepancy filing (morningSpotCheck.ts's documented
+  // manual/runner path). Bearer-authed, same tier as the other
+  // runner-ingest routes (POST /api/agents/poll, /api/answers/:id/status)
+  // -- this is a WRITE from an untrusted-until-authed caller, unlike the
+  // read-only routes around it.
+  app.post<{ Body: Record<string, unknown> }>(
+    '/api/ops/narrative-finding',
+    { preHandler: bearerAuth(options.token) },
+    async (request, reply) => {
+      const body = request.body ?? {};
+      const date = typeof body.date === 'string' ? body.date : undefined;
+      const summary = typeof body.summary === 'string' ? body.summary : undefined;
+      const detail = typeof body.detail === 'string' ? body.detail : '';
+      if (!date || !summary) {
+        reply.code(400).send({ error: 'expected body { date, summary, detail? }' });
+        return;
+      }
+      const finding = narrativeFindingStore.file({ date, summary, detail });
+      reply.send({ ok: true, id: finding.id });
+    },
+  );
 }
 
 // ── Routine inbox tray (v4 T7 slice 2) ──────────────────────────

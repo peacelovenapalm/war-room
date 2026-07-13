@@ -20,4 +20,5 @@ export type DockPanelKind =
   | 'ops'
   | 'graph-search'
   | 'districts'
-  | 'inbox';
+  | 'inbox'
+  | 'morning';

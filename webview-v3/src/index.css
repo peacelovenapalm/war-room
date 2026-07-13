@@ -1641,6 +1641,32 @@ body,
   margin: 0;
 }
 
+/* ── Morning panel (V6-1 "one glance, one push") ────────────────────── */
+
+.morning__section {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  padding-bottom: 8px;
+  margin-bottom: 8px;
+  border-bottom: 1px solid #232936;
+}
+
+.morning__section-label {
+  font-size: 11px;
+  font-weight: 700;
+  letter-spacing: 0.04em;
+  opacity: 0.85;
+}
+
+.morning__list {
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+  margin: 0;
+  padding-left: 16px;
+}
+
 .shift-morning {
   display: flex;
   flex-direction: column;

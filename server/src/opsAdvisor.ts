@@ -29,6 +29,7 @@ import type { AgentStateStore } from './agentStateStore.js';
 import { budgetStore } from './budgetStore.js';
 import { BUDGET_PAUSE_5H_PCT_BASE, BUDGET_PAUSE_7D_PCT_BASE } from './budgetStore.js';
 import {
+  NARRATIVE_FINDING_MAX_AGE_MS,
   OPS_ADVISOR_CACHE_TTL_MS,
   OPS_BLOCKED_ALERT_MS,
   OPS_BLOCKED_WARN_MS,
@@ -38,12 +39,23 @@ import {
   OPS_RECEIPT_SAMPLE_LIMIT,
 } from './constants.js';
 import { DISPATCH_MACHINE_AD_TTL_MS, dispatchStore } from './dispatchStore.js';
+import { narrativeFindingStore } from './narrativeFindingStore.js';
 import { reworkBinStore } from './reworkBinStore.js';
 import { shiftStats } from './shiftStats.js';
 
 export type OpsFindingSeverity = 'info' | 'warn' | 'alert';
 export type OpsFindingKind =
-  'blocked-age' | 'dead-telemetry' | 'dispatch-waste' | 'budget-burn' | 'efficiency' | 'all-clear';
+  | 'blocked-age'
+  | 'dead-telemetry'
+  | 'dispatch-waste'
+  | 'budget-burn'
+  | 'efficiency'
+  // V6-5 cross-model spot checks: a discrepancy an external `codex exec`
+  // pass filed between a morning's narrative summary and its raw section
+  // data. Read-only, like every other finding kind — never carries
+  // proposedActions.
+  | 'narrative'
+  | 'all-clear';
 
 export interface OpsReceipt {
   label: string;
@@ -411,6 +423,22 @@ function efficiencyFindings(now: number): OpsFinding[] {
   ];
 }
 
+// ── NARRATIVE (V6-5 cross-model spot checks) ─────────────────
+
+function narrativeFindings(now: number): OpsFinding[] {
+  return narrativeFindingStore.getRecent(NARRATIVE_FINDING_MAX_AGE_MS, now).map((f) => ({
+    id: f.id,
+    kind: 'narrative',
+    severity: 'warn',
+    summary: f.summary,
+    detail: f.detail,
+    receipts: [
+      { label: 'morning date', value: f.date },
+      { label: 'filed', value: new Date(f.ts).toISOString() },
+    ],
+  }));
+}
+
 // ── Assembly + cache ──────────────────────────────────────────
 
 let cache: { at: number; value: OpsReview } | null = null;
@@ -426,6 +454,7 @@ export function getOpsReview(store: AgentStateStore, now: number = Date.now()): 
     ...dispatchWasteFindings(),
     ...budgetBurnFindings(now),
     ...efficiencyFindings(now),
+    ...narrativeFindings(now),
   ];
 
   if (findings.length === 0) {
