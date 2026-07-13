@@ -253,9 +253,19 @@ interface DispatchRecord {
   /** Send correlation (asyncapi DispatchRequest.requestId) — client-
    *  generated, echoed on every broadcast for this record. */
   requestId?: string;
+  /** C3 born-managed wrapper — which entry point issued this action
+   *  "session" request (asyncapi LaunchedViaValue). Additive/optional;
+   *  meaningful only for action==='session'. Server-side-only today (not
+   *  broadcast on DispatchUpdate) — the drawer reads it via a dedicated
+   *  lookup keyed by the launched session's dispatchId (getLaunchedVia). */
+  launchedVia?: LaunchedViaValue;
   createdAt: number;
   updatedAt: number;
 }
+
+/** C3 born-managed wrapper — mirrors asyncapi's LaunchedViaValue enum. */
+export type LaunchedViaValue = 'wrapper' | 'call-modal';
+const LAUNCHED_VIA_VALUES: readonly LaunchedViaValue[] = ['wrapper', 'call-modal'];
 
 /** Input to `enqueue()` — mirrors the DispatchRequest WS message. */
 export interface DispatchEnqueueInput {
@@ -292,6 +302,11 @@ export interface DispatchEnqueueInput {
    *  REQUEST_ID_MAX_CHARS; anything longer is dropped (never truncated —
    *  a truncated id would mis-correlate). */
   requestId?: string;
+  /** C3 born-managed wrapper — which client issued this request; see
+   *  DispatchRecord.launchedVia's doc. Dropped silently (never a whole
+   *  enqueue() failure) when malformed — same tolerance as every other
+   *  optional identity field on this input. */
+  launchedVia?: string;
 }
 
 export type DispatchEnqueueResult =
@@ -385,6 +400,19 @@ export interface ManagedSessionAd {
   createdAt?: number;
 }
 
+/** C3 free-form PROMPT verb (gate 4 CLOSED: shared type, `verb` discriminant,
+ *  ONE queue — never a parallel promptQueue). 'answer' replies to a session
+ *  currently blocked/waiting; 'prompt' sends free text to a managed session
+ *  regardless of waiting state. Every mechanical guard below (text
+ *  validation, one-shot nonce, at-most-once drain, duplicate-outcome drop,
+ *  literal tmux delivery) applies identically to both — the runner's own
+ *  delivery path (processAnswerInstructions/deliverAnswer) never branches on
+ *  verb at all, by design: a stale runner that hasn't been told about PROMPT
+ *  still delivers the text correctly, it just audits the outcome as
+ *  'answer-delivered' (documented staleness, not a bug — see C3-BUILD-PLAN
+ *  T5's runner-fleet-currency note). */
+export type AnswerVerb = 'answer' | 'prompt';
+
 /** What rides the poll response's `answer` array — the same drained
  *  at-most-once imperative channel as stop[]. `nonce` is minted here
  *  (one per request) and consumed exactly once runner-side. */
@@ -393,6 +421,7 @@ export interface AnswerInstruction {
   managedSessionRef: string;
   text: string;
   nonce: string;
+  verb: AnswerVerb;
 }
 
 export type AnswerStatus = 'pending' | 'delivered' | 'denied';
@@ -409,6 +438,7 @@ interface AnswerRecord {
   nonce: string;
   status: AnswerStatus;
   reason?: string;
+  verb: AnswerVerb;
   createdAt: number;
   updatedAt: number;
 }
@@ -422,6 +452,7 @@ export interface AnswerReceipt {
   text: string;
   status: AnswerStatus;
   reason?: string;
+  verb: AnswerVerb;
   createdAt: number;
   updatedAt: number;
 }
@@ -710,6 +741,15 @@ export class DispatchStore {
         input.requestId.length <= REQUEST_ID_MAX_CHARS
           ? input.requestId
           : undefined,
+      // C3 born-managed wrapper — session-only (dispatch/focus silently
+      // drop it, same as timeoutSec's action-scoping above), closed enum
+      // (anything else is dropped, never trusted as free text).
+      launchedVia:
+        input.action === 'session' &&
+        typeof input.launchedVia === 'string' &&
+        (LAUNCHED_VIA_VALUES as readonly string[]).includes(input.launchedVia)
+          ? (input.launchedVia as LaunchedViaValue)
+          : undefined,
       createdAt: now,
       updatedAt: now,
     } as const;
@@ -955,6 +995,11 @@ export class DispatchStore {
     // Omitted = legacy pid-only match (unchanged), for callers that can't yet
     // observe a start time.
     expectedStartTime?: number,
+    // C3 free-form PROMPT verb — defaults to 'answer' (every pre-C3 caller,
+    // including every existing test, keeps its exact behavior unchanged).
+    // Gate 4 CLOSED: shared type/queue, verb is data on the SAME instruction,
+    // never a parallel queue.
+    verb: AnswerVerb = 'answer',
   ): { ok: true; id: string } | { ok: false; reason: string } {
     if (typeof machine !== 'string' || machine.trim() === '') {
       return { ok: false, reason: 'missing-machine' };
@@ -990,6 +1035,7 @@ export class DispatchStore {
       text,
       nonce: randomUUID(),
       status: 'pending',
+      verb,
       createdAt: now,
       updatedAt: now,
     };
@@ -1000,6 +1046,7 @@ export class DispatchStore {
       managedSessionRef: record.managedSessionRef,
       text: record.text,
       nonce: record.nonce,
+      verb: record.verb,
     });
     this.answerQueue.set(machine, queue);
     this.auditAnswer('answer-requested', record);
@@ -1063,6 +1110,7 @@ export class DispatchStore {
         text: r.text,
         status: r.status,
         reason: r.reason,
+        verb: r.verb,
         createdAt: r.createdAt,
         updatedAt: r.updatedAt,
       });
@@ -1390,6 +1438,18 @@ export class DispatchStore {
       machine: record.machine,
       cwd: record.cwd,
     };
+  }
+
+  /** C3 born-managed wrapper — read-only lookup for the drawer: which
+   *  entry point issued the action==='session' request that created this
+   *  dispatchId (the SAME id the runner names its tmux session after —
+   *  `war-room-<dispatchId>` — so a managed-session advertisement's
+   *  `dispatchId` field is a direct key into this store's own records,
+   *  zero runner/manifest involvement). Undefined for an unknown id OR a
+   *  record that predates this field (additive — old records simply have
+   *  no opinion, never a fabricated default). */
+  getLaunchedVia(dispatchId: string): LaunchedViaValue | undefined {
+    return this.ensureLoaded().get(dispatchId)?.launchedVia;
   }
 
   /** Rework re-dispatch prefill (v3 Scrap & Rework Bin — KICKOFF-v3.1 §1

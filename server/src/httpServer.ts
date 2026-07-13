@@ -1003,6 +1003,31 @@ function registerDispatchRoutes(app: FastifyInstance, options: HttpServerOptions
   // dispatch state the way the WS-only non-terminal replay (getActive) would.
   app.get('/api/dispatch/recent', async () => dispatchStore.getRecent());
 
+  // GET /api/dispatch/launched-via?machine=&pid= -- C3 born-managed wrapper,
+  // read-only drawer lookup: resolves (machine, pid) -> the managed
+  // session's dispatchId via the machine's LIVE runner advertisement (same
+  // resolution requestAnswer uses), then looks up which client issued that
+  // session's launch request. Unauthenticated, same tailnet-only trust tier
+  // as /api/dispatch/machines. `{ launchedVia: undefined }` for anything
+  // unmanaged/unknown/pre-C3 — additive, never a fabricated default.
+  app.get<{ Querystring: { machine?: string; pid?: string } }>(
+    '/api/dispatch/launched-via',
+    async (request, reply) => {
+      const machine = sanitizeMachineLabel(request.query.machine);
+      const pid = Number(request.query.pid);
+      if (!machine || !Number.isInteger(pid)) {
+        reply.send({ launchedVia: undefined });
+        return;
+      }
+      const managed = dispatchStore.getManagedFor(machine).find((s) => s.panePid === pid);
+      if (!managed) {
+        reply.send({ launchedVia: undefined });
+        return;
+      }
+      reply.send({ launchedVia: dispatchStore.getLaunchedVia(managed.dispatchId) });
+    },
+  );
+
   // POST /api/dispatch/poll -- runner poll (Bearer + X-Machine). The body advertises
   // this tick's allowlisted providers/roots/focus capability; the response carries
   // this machine's ringing requests WITH the full prompt -- the only place it
@@ -1335,7 +1360,28 @@ function registerAgentAnswerRoutes(app: FastifyInstance, options: HttpServerOpti
       reply.send({ ok: false, reason: 'missing-machine-pid-or-text' });
       return;
     }
-    reply.send(dispatchStore.requestAnswer(machine, pid, text, Date.now(), startTime));
+    reply.send(dispatchStore.requestAnswer(machine, pid, text, Date.now(), startTime, 'answer'));
+  });
+
+  // POST /api/agents/prompt -- C3 free-form PROMPT verb. SAME route family,
+  // SAME trust tier (unauthenticated, tailnet-only), SAME body shape, SAME
+  // queue as /api/agents/answer — the only difference is the verb tag
+  // (gate 4 CLOSED: shared type, no parallel promptQueue, no new trust
+  // surface). Every guard requestAnswer applies (text cap, control-char
+  // reject, one-shot nonce, at-most-once drain, duplicate-outcome drop)
+  // covers PROMPT identically; the only semantic difference is that a
+  // PROMPT is not gated on the target session currently being blocked.
+  app.post<{ Body: Record<string, unknown> }>('/api/agents/prompt', async (request, reply) => {
+    const body = request.body ?? {};
+    const machine = sanitizeMachineLabel(body.machine);
+    const pid = typeof body.pid === 'number' ? body.pid : undefined;
+    const text = typeof body.text === 'string' ? body.text : undefined;
+    const startTime = typeof body.startTime === 'number' ? body.startTime : undefined;
+    if (!machine || pid === undefined || text === undefined) {
+      reply.send({ ok: false, reason: 'missing-machine-pid-or-text' });
+      return;
+    }
+    reply.send(dispatchStore.requestAnswer(machine, pid, text, Date.now(), startTime, 'prompt'));
   });
 
   // GET /api/agents/answer/:id -- the drawer's delivery-outcome poll

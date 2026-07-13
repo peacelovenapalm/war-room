@@ -168,6 +168,9 @@ export function handleClientMessage(
         // every dispatchUpdate so the sending client can match its own
         // sends exactly (no fuzzy machine+action matching).
         requestId: typeof msg.requestId === 'string' ? msg.requestId : undefined,
+        // C3 born-managed wrapper — which client sent this (session-only;
+        // enqueue() drops it for dispatch/focus and validates the enum).
+        launchedVia: typeof msg.launchedVia === 'string' ? msg.launchedVia : undefined,
       });
       break;
     }

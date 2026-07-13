@@ -293,6 +293,126 @@ describe('DispatchStore: managed advertisement + answer plane', () => {
   });
 });
 
+// ── C3 free-form PROMPT verb (gate 4 CLOSED: shared type, verb discriminant,
+//    ONE queue, no parallel promptQueue) ────────────────────────────────
+
+describe('DispatchStore: PROMPT verb (shared queue with ANSWER)', () => {
+  const AD = [{ dispatchId: 'sess-1', tmuxSession: 'war-room-sess-1', panePid: 4242 }];
+
+  it('mints a prompt instruction on the SAME queue answer instructions ride (no parallel promptQueue)', () => {
+    const store = new DispatchStore();
+    store.recordManagedSessions('M1', AD);
+    const answer = store.requestAnswer('M1', 4242, 'an answer', Date.now(), undefined, 'answer');
+    const prompt = store.requestAnswer('M1', 4242, 'a prompt', Date.now(), undefined, 'prompt');
+    expect(answer.ok && prompt.ok).toBe(true);
+
+    // Both drain together, in order, off the SAME per-machine queue —
+    // proving there is exactly one queue, not a promptQueue mirroring
+    // AnswerInstruction 1:1 (the design's rejected alternative).
+    const drained = store.drainAnswersFor('M1');
+    expect(drained).toHaveLength(2);
+    expect(drained[0].verb).toBe('answer');
+    expect(drained[0].text).toBe('an answer');
+    expect(drained[1].verb).toBe('prompt');
+    expect(drained[1].text).toBe('a prompt');
+    // Both carry a one-shot nonce, same mechanic, no verb-specific variant.
+    expect(drained[0].nonce).toBeTruthy();
+    expect(drained[1].nonce).toBeTruthy();
+    expect(drained[0].nonce).not.toBe(drained[1].nonce);
+  });
+
+  it('requestAnswer defaults to verb "answer" when omitted — every pre-C3 caller is unchanged', () => {
+    const store = new DispatchStore();
+    store.recordManagedSessions('M1', AD);
+    store.requestAnswer('M1', 4242, 'legacy call site');
+    const drained = store.drainAnswersFor('M1');
+    expect(drained[0].verb).toBe('answer');
+  });
+
+  it('PROMPT applies every ANSWER guard identically: control-chars/overlong/empty text rejected', () => {
+    const store = new DispatchStore();
+    store.recordManagedSessions('M1', AD);
+    expect(store.requestAnswer('M1', 4242, 'a\nb', Date.now(), undefined, 'prompt')).toEqual({
+      ok: false,
+      reason: 'control-chars-rejected',
+    });
+    expect(
+      store.requestAnswer(
+        'M1',
+        4242,
+        'x'.repeat(ANSWER_TEXT_MAX_CHARS + 1),
+        Date.now(),
+        undefined,
+        'prompt',
+      ),
+    ).toEqual({ ok: false, reason: 'text-too-long' });
+    expect(store.requestAnswer('M1', 4242, '   ', Date.now(), undefined, 'prompt')).toEqual({
+      ok: false,
+      reason: 'invalid-text',
+    });
+  });
+
+  it('PROMPT reaches ONLY managed sessions — same not-managed deny as ANSWER, no reach extension', () => {
+    const store = new DispatchStore();
+    // No recordManagedSessions call — pid 4242 is not managed anywhere.
+    expect(store.requestAnswer('M1', 4242, 'steer this', Date.now(), undefined, 'prompt')).toEqual({
+      ok: false,
+      reason: 'not-managed',
+    });
+  });
+
+  it('replay-deny: PROMPT nonce is one-shot exactly like ANSWER (server-side half via reportAnswerStatus)', () => {
+    const store = new DispatchStore();
+    store.recordManagedSessions('M1', AD);
+    const req = store.requestAnswer('M1', 4242, 'go', Date.now(), undefined, 'prompt');
+    if (!req.ok) throw new Error('expected ok');
+    expect(store.getAnswerStatus(req.id)).toEqual({
+      found: true,
+      status: 'pending',
+      reason: undefined,
+    });
+    store.reportAnswerStatus(req.id, 'delivered', undefined);
+    // A later runner report claiming the SAME id replayed is a duplicate
+    // outcome, not a fresh transition — server-side replay defense.
+    store.reportAnswerStatus(req.id, 'denied', 'nonce-replayed');
+    expect(store.getAnswerStatus(req.id)).toEqual({
+      found: true,
+      status: 'delivered',
+      reason: undefined,
+    });
+  });
+
+  it('duplicate-outcome-drop: first PROMPT delivery report wins, a second is dropped', () => {
+    const store = new DispatchStore();
+    store.recordManagedSessions('M1', AD);
+    const req = store.requestAnswer('M1', 4242, 'go', Date.now(), undefined, 'prompt');
+    if (!req.ok) throw new Error('expected ok');
+    store.reportAnswerStatus(req.id, 'delivered', undefined);
+    store.reportAnswerStatus(req.id, 'delivered', undefined); // duplicate — dropped
+    expect(store.getAnswerReceipts('M1')).toHaveLength(1);
+    expect(store.getAnswerReceipts('M1')[0].verb).toBe('prompt');
+    expect(store.getAnswerReceipts('M1')[0].status).toBe('delivered');
+  });
+
+  it('PROMPT is not gated on the session being blocked/waiting — requestAnswer has no such check', () => {
+    // The store never tracks a "waiting" state at all (that's poll-state,
+    // a completely different plane) — a PROMPT to a mid-task session
+    // succeeds exactly like an ANSWER would, proving §4.1's "regardless of
+    // whether it's currently blocked" scope.
+    const store = new DispatchStore();
+    store.recordManagedSessions('M1', AD);
+    const result = store.requestAnswer(
+      'M1',
+      4242,
+      'steer mid-task',
+      Date.now(),
+      undefined,
+      'prompt',
+    );
+    expect(result.ok).toBe(true);
+  });
+});
+
 // ── Route-level (wired server) ─────────────────────────────────────
 
 describe('answer plane HTTP routes', () => {
@@ -324,7 +444,13 @@ describe('answer plane HTTP routes', () => {
     return (await res.json()) as {
       pending: Array<Record<string, unknown>>;
       stop: unknown[];
-      answer: Array<{ id: string; managedSessionRef: string; text: string; nonce: string }>;
+      answer: Array<{
+        id: string;
+        managedSessionRef: string;
+        text: string;
+        nonce: string;
+        verb?: string;
+      }>;
     };
   }
 
@@ -457,6 +583,95 @@ describe('answer plane HTTP routes', () => {
     expect(body.pending).toHaveLength(1);
     expect(body.pending[0].action).toBe('session');
     expect(body.pending[0].prompt).toBeUndefined();
+    ws.close();
+  });
+
+  it('POST /api/agents/prompt is the SAME route family as /answer — same trust tier, verb-tagged queue entry', async () => {
+    const machine = uniqueMachine('MACBOOK');
+    const config = await server.start({ embedded: false, store: new AgentStateStore() });
+    const managedSessions = [
+      { dispatchId: 'sess-prompt', tmuxSession: 'war-room-sess-prompt', panePid: 5150 },
+    ];
+    await poll(config.port, config.token, machine, { sessions: true, managedSessions });
+
+    const promptRes = (await (
+      await fetch(`http://127.0.0.1:${config.port}/api/agents/prompt`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ machine, pid: 5150, text: 'go do the other thing now' }),
+      })
+    ).json()) as { ok: boolean; id: string };
+    expect(promptRes.ok).toBe(true);
+
+    const second = await poll(config.port, config.token, machine, {
+      sessions: true,
+      managedSessions,
+    });
+    expect(second.answer).toHaveLength(1);
+    expect(second.answer[0].text).toBe('go do the other thing now');
+    expect(second.answer[0].verb).toBe('prompt');
+
+    // Unauthenticated /api/agents/prompt against an unmanaged pid denies
+    // exactly like /api/agents/answer does — PROMPT never extends reach.
+    const denied = (await (
+      await fetch(`http://127.0.0.1:${config.port}/api/agents/prompt`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ machine, pid: 99999, text: 'unreachable' }),
+      })
+    ).json()) as { ok: boolean; reason?: string };
+    expect(denied).toEqual({ ok: false, reason: 'not-managed' });
+  });
+
+  it('GET /api/dispatch/launched-via resolves wrapper vs call-modal from the ORIGINAL dispatchRequest, zero runner involvement', async () => {
+    const machine = uniqueMachine('MACBOOK');
+    const config = await server.start({ embedded: false, store: new AgentStateStore() });
+    const ws = new WebSocket(`ws://127.0.0.1:${config.port}/ws`);
+    await new Promise((resolve) => ws.addEventListener('open', resolve, { once: true }));
+
+    ws.send(
+      JSON.stringify({
+        type: 'dispatchRequest',
+        action: 'session',
+        machine,
+        provider: 'claude',
+        cwd: '/tmp',
+        requestId: 'req-wrapper',
+        launchedVia: 'wrapper',
+      }),
+    );
+    await new Promise((resolve) => setTimeout(resolve, 50));
+
+    const body = await poll(config.port, config.token, machine);
+    expect(body.pending).toHaveLength(1);
+    const dispatchId = body.pending[0].id as string;
+
+    // Runner accepts (as it would after a real tmux launch) — advertise it
+    // as a live managed session on the NEXT poll.
+    await fetch(`http://127.0.0.1:${config.port}/api/dispatch/${dispatchId}/decision`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${config.token}` },
+      body: JSON.stringify({ decision: 'accept', pid: 6161 }),
+    });
+    const managedSessions = [{ dispatchId, tmuxSession: `war-room-${dispatchId}`, panePid: 6161 }];
+    await poll(config.port, config.token, machine, { sessions: true, managedSessions });
+
+    const lookup = (await (
+      await fetch(
+        `http://127.0.0.1:${config.port}/api/dispatch/launched-via?machine=${encodeURIComponent(machine)}&pid=6161`,
+      )
+    ).json()) as { launchedVia?: string };
+    expect(lookup.launchedVia).toBe('wrapper');
+
+    // An unmanaged pid (or unknown machine) resolves to undefined — never a
+    // fabricated default.
+    const unknown = (await (
+      await fetch(
+        `http://127.0.0.1:${config.port}/api/dispatch/launched-via?machine=${encodeURIComponent(machine)}&pid=99999`,
+      )
+    ).json()) as { launchedVia?: string };
+    expect(unknown.launchedVia).toBeUndefined();
+
     ws.close();
   });
 });
