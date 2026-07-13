@@ -79,3 +79,32 @@ export interface AutoStatus {
   receipts: AutoActionReceipt[];
   whitelistLine: string;
 }
+
+/** V6-4 (autonomy rung 1): the four pre-approved self-heal action classes.
+ *  Mirrors server/src/selfHeal.ts's SELF_HEAL_CLASSES exactly — GET
+ *  /api/ops/self-heal's response, verbatim. */
+export const SELF_HEAL_CLASSES = [
+  'restart-dead-runner',
+  'refresh-stale-clone',
+  'mechanical-vault-fix',
+  'rerun-failed-routine',
+] as const;
+export type SelfHealClass = (typeof SELF_HEAL_CLASSES)[number];
+
+export interface SelfHealReceipt {
+  ts: number;
+  class: SelfHealClass;
+  target: string;
+  plane: 'shell-dispatch' | 'proposal-only';
+  outcome: 'executed' | 'suppressed' | 'failed';
+  suppressedReason?: string;
+  detail: string;
+  dispatchId?: string;
+  undoNote: string;
+}
+
+export interface SelfHealStatus {
+  flags: Record<SelfHealClass, boolean>;
+  /** Newest first. */
+  receipts: SelfHealReceipt[];
+}

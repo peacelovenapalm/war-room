@@ -26,6 +26,9 @@ import {
   type OpsProposalVerb,
   type OpsProposedAction,
   type OpsReview,
+  SELF_HEAL_CLASSES,
+  type SelfHealClass,
+  type SelfHealStatus,
   SEVERITY_GLYPHS,
 } from '../state/opsReview';
 import { Modal } from './Modal';
@@ -219,6 +222,70 @@ function AutoSection({ status }: { status: AutoStatus }) {
   );
 }
 
+const SELF_HEAL_OUTCOME_GLYPH: Record<string, string> = {
+  executed: '✓',
+  suppressed: '⊘',
+  failed: '✗',
+};
+
+/** V6-4 (autonomy rung 1): the four pre-approved self-heal action classes —
+ *  per-class ON/OFF toggle (default ON, server-persisted) + the receipts
+ *  ledger, shape+word colorblind-safe (✓ executed / ⊘ suppressed / ✗
+ *  failed). Extends the SAME OPS REVIEW panel rather than a new one, same
+ *  posture as the RUNG 3 AUTO section just above it. */
+function SelfHealSection({
+  status,
+  onToggle,
+  pendingClass,
+}: {
+  status: SelfHealStatus;
+  onToggle: (cls: SelfHealClass, enabled: boolean) => void;
+  pendingClass: SelfHealClass | null;
+}) {
+  return (
+    <div className="ops-self-heal" data-testid="ops-self-heal-section">
+      <ul className="ops-self-heal__flags" data-testid="ops-self-heal-flags">
+        {SELF_HEAL_CLASSES.map((cls) => {
+          const enabled = status.flags[cls];
+          return (
+            <li key={cls} data-testid={`ops-self-heal-flag-${cls}`} data-enabled={enabled}>
+              <span>
+                {enabled ? '●' : '○'} {cls}
+              </span>
+              <button
+                type="button"
+                className="verb"
+                disabled={pendingClass === cls}
+                data-testid={`ops-self-heal-toggle-${cls}`}
+                onClick={() => {
+                  onToggle(cls, !enabled);
+                }}
+              >
+                {enabled ? 'DISABLE' : 'ENABLE'}
+              </button>
+            </li>
+          );
+        })}
+      </ul>
+      {status.receipts.length > 0 && (
+        <ul className="ops-self-heal__receipts" data-testid="ops-self-heal-receipts">
+          {status.receipts.map((r, i) => (
+            <li key={i} data-testid="ops-self-heal-receipt" data-outcome={r.outcome}>
+              <span>{SELF_HEAL_OUTCOME_GLYPH[r.outcome] ?? '?'}</span>{' '}
+              <span>{formatReceiptTs(r.ts)}</span> <strong>{r.class}</strong>{' '}
+              <span className="modal__muted">— {r.detail}</span>
+              {r.suppressedReason && (
+                <div className="modal__muted">reason: {r.suppressedReason}</div>
+              )}
+              <div className="modal__muted">undo: {r.undoNote}</div>
+            </li>
+          ))}
+        </ul>
+      )}
+    </div>
+  );
+}
+
 /** OPS REVIEW panel (T3 self-healing ladder): Ops Advisor findings list —
  *  GET /api/ops/review on open + every 60s while open. RUNG 1 (read-only):
  *  every finding cites its raw receipts, expandable per row. RUNG 2 (gated
@@ -240,6 +307,8 @@ export function OpsReviewPanel({
   const [review, setReview] = useState<OpsReview | null>(null);
   const [error, setError] = useState(false);
   const [autoStatus, setAutoStatus] = useState<AutoStatus | null>(null);
+  const [selfHealStatus, setSelfHealStatus] = useState<SelfHealStatus | null>(null);
+  const [selfHealPending, setSelfHealPending] = useState<SelfHealClass | null>(null);
   const [proposals, setProposals] = useState<Record<string, ProposalState>>({});
   const cancelledRef = useRef(false);
 
@@ -296,6 +365,47 @@ export function OpsReviewPanel({
       clearInterval(interval);
     };
   }, [isOpen]);
+
+  // V6-4: self-heal status — same open + 60s-refresh cadence as AUTO's own
+  // independent endpoint.
+  useEffect(() => {
+    if (!isOpen) return;
+    let cancelled = false;
+    const load = async () => {
+      try {
+        const res = await fetch('/api/ops/self-heal');
+        if (!res.ok) throw new Error(`HTTP ${String(res.status)}`);
+        const data = (await res.json()) as SelfHealStatus;
+        if (!cancelled) setSelfHealStatus(data);
+      } catch {
+        /* honest omission: the SELF-HEAL section simply doesn't render this cycle */
+      }
+    };
+    void load();
+    const interval = setInterval(() => void load(), REFRESH_INTERVAL_MS);
+    return () => {
+      cancelled = true;
+      clearInterval(interval);
+    };
+  }, [isOpen]);
+
+  const handleSelfHealToggle = (cls: SelfHealClass, enabled: boolean) => {
+    setSelfHealPending(cls);
+    void fetch(`/api/ops/self-heal/flags/${cls}`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ enabled }),
+    })
+      .then((res) => res.json())
+      .then(() => fetch('/api/ops/self-heal'))
+      .then((res) => res.json())
+      .then((data: SelfHealStatus) => {
+        setSelfHealStatus(data);
+      })
+      .finally(() => {
+        setSelfHealPending(null);
+      });
+  };
 
   const setPhase = (key: string, phase: ProposalPhase, reason?: string, requestId?: string) => {
     if (cancelledRef.current) return;
@@ -423,6 +533,21 @@ export function OpsReviewPanel({
           <p className="modal__footnote">
             Rung 3: guardrailed auto-execution, whitelist ships empty — only Greg's own hand-edit
             turns an action on. Every fire leaves the receipt above; nothing here taps anything.
+          </p>
+        </>
+      )}
+      {selfHealStatus && (
+        <>
+          <h3 className="ops-self-heal__heading">SELF-HEAL</h3>
+          <SelfHealSection
+            status={selfHealStatus}
+            onToggle={handleSelfHealToggle}
+            pendingClass={selfHealPending}
+          />
+          <p className="modal__footnote">
+            Four pre-approved classes only, default ON, revocable per class. Every decision — fired,
+            suppressed, or failed — consults STOP-ALL and the budget gate first and leaves a receipt
+            above, whether or not it actually ran anything.
           </p>
         </>
       )}

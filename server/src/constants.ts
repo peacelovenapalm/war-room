@@ -145,6 +145,30 @@ export const AUTO_REQUEUE_CONSECUTIVE_FAILURE_STOP = 2;
  *  worldEventStore's EVENT_LOG_CAP convention. */
 export const AUTO_EXECUTOR_RECEIPT_CAP = 200;
 
+// ── Self-Heal (V6-4 autonomy rung 1 — four pre-approved action classes) ─
+/** Receipts ledger retention (capped, oldest pruned) — mirrors
+ *  autoExecutor.ts's AUTO_EXECUTOR_RECEIPT_CAP convention. */
+export const SELF_HEAL_RECEIPT_CAP = 200;
+/** restart-dead-runner: a machine's dispatch advertisement age past this
+ *  is called dead. Deliberately a larger multiple of
+ *  dispatchStore.DISPATCH_MACHINE_AD_TTL_MS (30s) than opsAdvisor's own
+ *  DEAD-TELEMETRY alert threshold (3x) — self-heal only fires a receipted
+ *  decision on a genuinely sustained outage, not a routine blip opsAdvisor
+ *  already flags at a lower bar. */
+export const SELF_HEAL_RUNNER_DEAD_MS = 5 * 60_000; // 5 minutes
+/** refresh-stale-clone: the routine inbox's newest entry mtime age past
+ *  this is called stale (the vault clone/mirror hasn't produced anything
+ *  new recently). */
+export const SELF_HEAL_CLONE_STALE_MS = 26 * 60 * 60_000; // 26h (a daily routine + margin)
+/** Per (class,target) cooldown between two receipted decisions — bounds
+ *  receipt-ledger spam from a persistently-failing detection candidate
+ *  (e.g. a machine that stays dead for hours) re-deciding every tick. */
+export const SELF_HEAL_ACTION_COOLDOWN_MS = 15 * 60_000; // 15 minutes
+/** Rides its own setInterval (repo has no shared tick primitive — see
+ *  httpServer.ts's standingOrderTimer comment); same order as the
+ *  Auto-Executor's own tick. */
+export const SELF_HEAL_TICK_INTERVAL_MS = 60_000;
+
 // ── Layout/Config Persistence ──────────────────────────────
 export const LAYOUT_FILE_DIR = '.pixel-agents';
 export const LAYOUT_FILE_NAME = 'layout.json';
