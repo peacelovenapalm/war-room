@@ -80,6 +80,7 @@ export interface OvernightReceipt {
   ts: string;
   actionKind: string;
   ok: boolean;
+  pending?: true;
   detail: string;
 }
 
@@ -278,6 +279,7 @@ function loadOvernightSection(now: number): OvernightSection {
       ts: new Date(r.ts).toISOString(),
       actionKind: r.actionKind,
       ok: r.outcome.ok,
+      pending: r.pending,
       detail: r.outcome.detail,
     }));
   return {

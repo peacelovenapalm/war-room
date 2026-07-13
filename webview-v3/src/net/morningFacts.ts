@@ -33,6 +33,7 @@ export interface OvernightReceipt {
   ts: string;
   actionKind: string;
   ok: boolean;
+  pending?: true;
   detail: string;
 }
 

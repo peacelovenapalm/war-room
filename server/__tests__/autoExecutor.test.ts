@@ -157,13 +157,16 @@ describe('deny-by-default on a malformed/partial whitelist', () => {
 describe('enabled: fires through the shared redispatchCrate() implementation', () => {
   it('a single eligible failure auto-requeues once, receipts the outcome, and marks the crate reworked', () => {
     writeWhitelist({ actions: { 'requeue-failed-dispatch': { enabled: true } } });
-    const store = new mods.AgentStateStore();
+    const agentStore = new mods.AgentStateStore();
+    const statePath = path.join(tmpBase, '.pixel-agents', 'auto-executor-state-explicit.json');
+    const executor = new mods.AutoExecutorStore(statePath, whitelistPath());
     const failedId = failAndPile('MACBOOK', 'fix the flaky test', 100);
 
-    const fired = mods.autoExecutorStore.runTick(store, Date.now());
+    const fired = executor.runTick(agentStore, Date.now());
     expect(fired).toHaveLength(1);
     expect(fired[0].actionKind).toBe('requeue-failed-dispatch');
     expect(fired[0].outcome.ok).toBe(true);
+    expect(fired[0].pending).toBeUndefined();
     expect(fired[0].cause.findingId).toBe('dispatch-waste-failed');
     // The cause carries the finding's VERBATIM receipts — never a re-derived summary.
     expect(fired[0].cause.receipts).toEqual(
@@ -175,11 +178,83 @@ describe('enabled: fires through the shared redispatchCrate() implementation', (
 
     // The original crate is no longer piled (reworked); a NEW dispatch exists.
     expect(mods.reworkBinStore.getPiled()).toHaveLength(0);
-    expect(mods.dispatchStore.getRecent(10).length).toBeGreaterThan(1);
+    const requeued = mods.dispatchStore
+      .getRecent(10)
+      .find((r: { status: string }) => r.status === 'ringing');
+    expect(requeued).toBeDefined();
+    expect(fired[0].outcome.detail).toBe(`requeued as dispatch ${requeued.id}`);
 
-    const status = mods.autoExecutorStore.getStatus();
+    const persisted = JSON.parse(fs.readFileSync(statePath, 'utf8')) as {
+      receipts: Array<Record<string, unknown>>;
+    };
+    expect(persisted.receipts).toHaveLength(1);
+    expect(persisted.receipts[0]).toMatchObject({
+      outcome: { ok: true, detail: `requeued as dispatch ${requeued.id}` },
+    });
+    expect(persisted.receipts[0]).not.toHaveProperty('pending');
+
+    const status = executor.getStatus();
     expect(status.receipts).toHaveLength(1);
     expect(status.whitelistLine).toBe('AUTO: requeue-failed-dispatch ON (cap 2, cooldown 10m)');
+  });
+
+  it('persists an intent before redispatch enqueue so an enqueue-then-throw leaves a receipt', () => {
+    writeWhitelist({ actions: { 'requeue-failed-dispatch': { enabled: true } } });
+    const agentStore = new mods.AgentStateStore();
+    failAndPile('MACBOOK', 'fix the flaky test', 100);
+    const statePath = path.join(tmpBase, '.pixel-agents', 'auto-executor-state-explicit.json');
+    const executor = new mods.AutoExecutorStore(statePath, whitelistPath());
+    const enqueue = mods.dispatchStore.enqueue.bind(mods.dispatchStore);
+    const enqueueSpy = vi.spyOn(mods.dispatchStore, 'enqueue').mockImplementation((input: any) => {
+      enqueue(input);
+      throw new Error('injected crash after enqueue');
+    });
+
+    expect(() => executor.runTick(agentStore, Date.now())).toThrow('injected crash after enqueue');
+
+    const persisted = JSON.parse(fs.readFileSync(statePath, 'utf8')) as {
+      receipts: Array<Record<string, unknown>>;
+    };
+    expect(persisted.receipts).toHaveLength(1);
+    expect(persisted.receipts[0]).toMatchObject({
+      actionKind: 'requeue-failed-dispatch',
+      pending: true,
+      outcome: {
+        ok: false,
+        detail: expect.stringMatching(/intent recorded: redispatch piled crate .* failed dispatch/),
+      },
+    });
+    expect(
+      mods.dispatchStore.getRecent(10).some((r: { status: string }) => r.status === 'ringing'),
+    ).toBe(true);
+    enqueueSpy.mockRestore();
+  });
+
+  it('fails closed without redispatching when the intent receipt cannot be persisted', () => {
+    writeWhitelist({ actions: { 'requeue-failed-dispatch': { enabled: true } } });
+    const agentStore = new mods.AgentStateStore();
+    failAndPile('MACBOOK', 'fix the flaky test', 100);
+    const blocker = path.join(tmpBase, 'state-path-blocker');
+    fs.writeFileSync(blocker, 'not a directory', 'utf8');
+    const executor = new mods.AutoExecutorStore(
+      path.join(blocker, 'auto-executor-state.json'),
+      whitelistPath(),
+    );
+
+    const fired = executor.runTick(agentStore, Date.now());
+
+    expect(fired).toHaveLength(1);
+    expect(fired[0]).toMatchObject({
+      outcome: {
+        ok: false,
+        detail: 'intent receipt persistence failed — action not requeued',
+      },
+    });
+    expect(fired[0]).not.toHaveProperty('pending');
+    expect(mods.reworkBinStore.getPiled()).toHaveLength(1);
+    expect(
+      mods.dispatchStore.getRecent(10).some((r: { status: string }) => r.status === 'ringing'),
+    ).toBe(false);
   });
 
   it('executes through the SAME redispatchCrate() the human tap uses — no forked implementation (a not-piled crate is rejected identically)', async () => {

@@ -75,6 +75,9 @@ export interface AutoActionReceipt {
   ts: number;
   actionKind: string;
   cause: { findingId: string; receipts: OpsReceipt[] };
+  /** Present only between the durable intent write and completion of the
+   *  existing redispatch plane. Terminal receipts retain their old shape. */
+  pending?: true;
   outcome: { ok: boolean; detail: string };
   undo: string;
 }
@@ -286,11 +289,23 @@ export class AutoExecutorStore {
     return this.ensureLoaded().killSwitchActive;
   }
 
-  private appendReceipt(receipt: AutoActionReceipt, now: number): void {
+  private appendReceipt(receipt: AutoActionReceipt, now: number): boolean {
     const data = this.ensureLoaded();
     data.receipts.push(receipt);
     while (data.receipts.length > AUTO_EXECUTOR_RECEIPT_CAP) data.receipts.shift();
-    this.persistence.persist(data, now, true);
+    return this.persistence.persist(data, now, true);
+  }
+
+  /** Finalize the same durable intent entry in place, without appending a
+   *  second receipt for one action. */
+  private updateReceipt(
+    receipt: AutoActionReceipt,
+    outcome: AutoActionReceipt['outcome'],
+    now: number,
+  ): void {
+    delete receipt.pending;
+    receipt.outcome = outcome;
+    this.persistence.persist(this.ensureLoaded(), now, true);
   }
 
   /** The requeue-failed-dispatch action kind's guardrail + fire logic for
@@ -352,17 +367,31 @@ export class AutoExecutorStore {
       return null;
     }
 
-    const result = redispatchCrate(crate.id);
+    // D0: redispatchCrate is the existing human+automatic execution plane
+    // and performs dispatchStore.enqueue internally. Persist intent before
+    // entering it so an enqueue-then-crash can never create an unaudited
+    // live dispatch.
     const receipt: AutoActionReceipt = {
       ts: now,
       actionKind: REQUEUE_FAILED_DISPATCH_ACTION_KIND,
       cause: { findingId: finding.id, receipts: finding.receipts },
-      outcome: result.ok
-        ? { ok: true, detail: `requeued as dispatch ${result.dispatchId}` }
-        : { ok: false, detail: result.reason },
+      pending: true,
+      outcome: {
+        ok: false,
+        detail: `intent recorded: redispatch piled crate ${crate.id} for failed dispatch ${failedDispatchId} via the existing redispatchCrate plane`,
+      },
       undo: 'none — the new dispatch can be killed like any manual dispatch once it starts',
     };
+    if (!this.appendReceipt(receipt, now)) {
+      delete receipt.pending;
+      receipt.outcome = {
+        ok: false,
+        detail: 'intent receipt persistence failed — action not requeued',
+      };
+      return receipt;
+    }
 
+    const result = redispatchCrate(crate.id);
     if (result.ok) {
       data.originOf[result.dispatchId] = root;
     }
@@ -382,7 +411,13 @@ export class AutoExecutorStore {
         : effectiveConsecutiveFailures + 1,
       lastDecidedFailureId: failedDispatchId,
     };
-    this.appendReceipt(receipt, now);
+    this.updateReceipt(
+      receipt,
+      result.ok
+        ? { ok: true, detail: `requeued as dispatch ${result.dispatchId}` }
+        : { ok: false, detail: result.reason },
+      now,
+    );
     return receipt;
   }
 

@@ -57,16 +57,18 @@ export class V3JsonPersistence<TData extends object> {
     return empty();
   }
 
-  persist(data: TData, now: number, force = false): void {
-    if (process.env.VITEST && this.usingDefaultPath) return;
-    if (!force && now - this.lastPersistAt < PERSIST_THROTTLE_MS) return;
+  persist(data: TData, now: number, force = false): boolean {
+    if (process.env.VITEST && this.usingDefaultPath) return true;
+    if (!force && now - this.lastPersistAt < PERSIST_THROTTLE_MS) return true;
     this.lastPersistAt = now;
     const target = this.persistPath();
     try {
       fs.mkdirSync(path.dirname(target), { recursive: true });
       fs.writeFileSync(target, JSON.stringify(data), 'utf8');
+      return true;
     } catch {
       /* state loss on write failure is acceptable — never crash the server */
+      return false;
     }
   }
 }

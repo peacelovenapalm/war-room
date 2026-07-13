@@ -80,8 +80,12 @@ function alwaysPaused(reason = 'stale-snapshot'): { paused: boolean; reason?: st
 function newStore(): any {
   return new mods.SelfHealStore(
     path.join(tmpBase, '.pixel-agents', 'self-heal-flags-explicit.json'),
-    path.join(tmpBase, '.pixel-agents', 'self-heal-state-explicit.json'),
+    selfHealStatePath(),
   );
+}
+
+function selfHealStatePath(): string {
+  return path.join(tmpBase, '.pixel-agents', 'self-heal-state-explicit.json');
 }
 
 function advertiseMachine(machine: string, scriptIds: string[], now: number): void {
@@ -308,16 +312,29 @@ describe('shell-dispatch classes: honest availability gating', () => {
   });
 
   it('live machine advertising the matching scriptId -> executes through dispatchStore.enqueue (shell)', () => {
+    const store = newStore();
     const now = Date.now();
     advertiseMachine('MACBOOK', ['refresh-stale-clone'], now);
     process.env.WAR_ROOM_SELF_HEAL_TARGET_MACHINE = 'MACBOOK';
 
-    const result = mods.selfHealStore.runAction(
+    const result = store.runAction(
       { class: 'refresh-stale-clone', target: 'routines-clone', detail: 'stale' },
       { now, isAutomationPaused: neverPaused },
     );
     expect(result.receipt?.outcome).toBe('executed');
     expect(result.receipt?.dispatchId).toBeDefined();
+    expect(result.receipt?.pending).toBeUndefined();
+    expect(store.getReceipts()).toHaveLength(1);
+
+    const persisted = JSON.parse(fs.readFileSync(selfHealStatePath(), 'utf8')) as {
+      receipts: Array<Record<string, unknown>>;
+    };
+    expect(persisted.receipts).toHaveLength(1);
+    expect(persisted.receipts[0]).toMatchObject({
+      outcome: 'executed',
+      dispatchId: result.receipt?.dispatchId,
+    });
+    expect(persisted.receipts[0]).not.toHaveProperty('pending');
 
     const recent = mods.dispatchStore.getRecent(10);
     expect(recent).toHaveLength(1);
@@ -327,6 +344,63 @@ describe('shell-dispatch classes: honest availability gating', () => {
       provider: 'shell',
       status: 'ringing',
     });
+  });
+
+  it('persists an intent before enqueue so an enqueue-then-throw leaves an auditable live dispatch', () => {
+    const store = newStore();
+    const now = Date.now();
+    advertiseMachine('MACBOOK', ['refresh-stale-clone'], now);
+    process.env.WAR_ROOM_SELF_HEAL_TARGET_MACHINE = 'MACBOOK';
+    const enqueue = mods.dispatchStore.enqueue.bind(mods.dispatchStore);
+    const enqueueSpy = vi.spyOn(mods.dispatchStore, 'enqueue').mockImplementation((input: any) => {
+      enqueue(input);
+      throw new Error('injected crash after enqueue');
+    });
+
+    expect(() =>
+      store.runAction(
+        { class: 'refresh-stale-clone', target: 'routines-clone', detail: 'stale' },
+        { now, isAutomationPaused: neverPaused },
+      ),
+    ).toThrow('injected crash after enqueue');
+
+    const persisted = JSON.parse(fs.readFileSync(selfHealStatePath(), 'utf8')) as {
+      receipts: Array<Record<string, unknown>>;
+    };
+    expect(persisted.receipts).toHaveLength(1);
+    expect(persisted.receipts[0]).toMatchObject({
+      class: 'refresh-stale-clone',
+      target: 'routines-clone',
+      plane: 'shell-dispatch',
+      pending: true,
+      detail: expect.stringContaining('enqueue compute script "refresh-stale-clone" on MACBOOK'),
+    });
+    expect(mods.dispatchStore.getRecent(10)).toHaveLength(1);
+    enqueueSpy.mockRestore();
+  });
+
+  it('fails closed without enqueueing when the intent receipt cannot be persisted', () => {
+    const blocker = path.join(tmpBase, 'state-path-blocker');
+    fs.writeFileSync(blocker, 'not a directory', 'utf8');
+    const store = new mods.SelfHealStore(
+      path.join(tmpBase, '.pixel-agents', 'self-heal-flags-explicit.json'),
+      path.join(blocker, 'self-heal-state.json'),
+    );
+    const now = Date.now();
+    advertiseMachine('MACBOOK', ['refresh-stale-clone'], now);
+    process.env.WAR_ROOM_SELF_HEAL_TARGET_MACHINE = 'MACBOOK';
+
+    const result = store.runAction(
+      { class: 'refresh-stale-clone', target: 'routines-clone', detail: 'stale' },
+      { now, isAutomationPaused: neverPaused },
+    );
+
+    expect(result.receipt).toMatchObject({
+      outcome: 'failed',
+      detail: 'intent receipt persistence failed — action not enqueued',
+    });
+    expect(result.receipt?.pending).toBeUndefined();
+    expect(mods.dispatchStore.getRecent(10)).toHaveLength(0);
   });
 
   it('rerun-failed-routine follows the identical shell-dispatch gate', () => {

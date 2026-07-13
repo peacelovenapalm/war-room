@@ -64,6 +64,7 @@ export interface AutoActionReceipt {
   ts: number;
   actionKind: string;
   cause: { findingId: string; receipts: OpsReceipt[] };
+  pending?: true;
   outcome: { ok: boolean; detail: string };
   undo: string;
 }
@@ -96,6 +97,7 @@ export interface SelfHealReceipt {
   class: SelfHealClass;
   target: string;
   plane: 'shell-dispatch' | 'proposal-only';
+  pending?: true;
   outcome: 'executed' | 'suppressed' | 'failed';
   suppressedReason?: string;
   detail: string;

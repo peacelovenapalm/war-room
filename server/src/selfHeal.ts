@@ -141,6 +141,10 @@ export interface SelfHealReceipt {
   class: SelfHealClass;
   target: string;
   plane: SelfHealPlane;
+  /** Present only while the durable intent has been written but the
+   *  enqueue outcome is not yet known. Terminal receipts omit it, keeping
+   *  their pre-V10 shape unchanged. */
+  pending?: true;
   outcome: 'executed' | 'suppressed' | 'failed';
   suppressedReason?: string;
   detail: string;
@@ -246,12 +250,27 @@ export class SelfHealStore {
     return this.ensureState().receipts.slice().reverse();
   }
 
-  private appendReceipt(receipt: SelfHealReceipt, now: number): void {
+  private appendReceipt(receipt: SelfHealReceipt, now: number): boolean {
     const state = this.ensureState();
     state.receipts.push(receipt);
     while (state.receipts.length > SELF_HEAL_RECEIPT_CAP) state.receipts.shift();
     state.lastActionAt[`${receipt.class}:${receipt.target}`] = now;
-    this.statePersistence.persist(state, now, true);
+    return this.statePersistence.persist(state, now, true);
+  }
+
+  /** Finalize the exact receipt object appendReceipt persisted before the
+   *  side effect. Mutating in place avoids a second ledger entry while a
+   *  forced persist makes the terminal outcome durable immediately. */
+  private updateReceipt(
+    receipt: SelfHealReceipt,
+    update: Pick<SelfHealReceipt, 'outcome' | 'detail' | 'dispatchId'>,
+    now: number,
+  ): void {
+    delete receipt.pending;
+    receipt.outcome = update.outcome;
+    receipt.detail = update.detail;
+    receipt.dispatchId = update.dispatchId;
+    this.statePersistence.persist(this.ensureState(), now, true);
   }
 
   private withinCooldown(cls: SelfHealClass, target: string, now: number): boolean {
@@ -331,6 +350,28 @@ export class SelfHealStore {
       );
     }
 
+    // D0: persist the intent BEFORE enqueue. If enqueue commits a live
+    // dispatch and the process dies (or throws) before returning to us,
+    // this pending receipt remains as the audit trail for that action.
+    const receipt: SelfHealReceipt = {
+      ts: now,
+      class: cls,
+      target: candidate.target,
+      plane,
+      pending: true,
+      // Retain the legacy terminal union for back-compatible consumers;
+      // `pending: true` is authoritative until updateReceipt removes it.
+      outcome: 'failed',
+      detail: `intent recorded: enqueue compute script "${scriptId}" on ${machine}`,
+      undoNote,
+    };
+    if (!this.appendReceipt(receipt, now)) {
+      delete receipt.pending;
+      receipt.outcome = 'failed';
+      receipt.detail = 'intent receipt persistence failed — action not enqueued';
+      return { ok: true, receipt };
+    }
+
     const enqueued = dispatchStore.enqueue({
       action: 'dispatch',
       machine,
@@ -338,19 +379,17 @@ export class SelfHealStore {
       scriptId,
     });
 
-    const receipt: SelfHealReceipt = {
-      ts: now,
-      class: cls,
-      target: candidate.target,
-      plane,
-      outcome: enqueued.ok ? 'executed' : 'failed',
-      detail: enqueued.ok
-        ? `dispatched compute script "${scriptId}" on ${machine}`
-        : `enqueue failed: ${enqueued.reason}`,
-      dispatchId: enqueued.ok ? enqueued.record.id : undefined,
-      undoNote,
-    };
-    this.appendReceipt(receipt, now);
+    this.updateReceipt(
+      receipt,
+      {
+        outcome: enqueued.ok ? 'executed' : 'failed',
+        detail: enqueued.ok
+          ? `dispatched compute script "${scriptId}" on ${machine}`
+          : `enqueue failed: ${enqueued.reason}`,
+        dispatchId: enqueued.ok ? enqueued.record.id : undefined,
+      },
+      now,
+    );
     return { ok: true, receipt };
   }
 
