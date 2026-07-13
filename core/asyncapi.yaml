@@ -2167,6 +2167,24 @@ components:
             only way a client can tell WHICH of its sends a broadcast
             answers (two rapid sends to the same machine+action are
             otherwise indistinguishable to the send-failure detector).
+        launchedVia:
+          $ref: '#/components/schemas/LaunchedViaValue'
+
+    LaunchedViaValue:
+      description: >-
+        C3 born-managed wrapper — which entry point issued an action
+        "session" DispatchRequest: the CALL modal ("call-modal") or the
+        `wr claude` terminal wrapper ("wrapper"). Additive, optional, and
+        meaningful only for action "session" (dispatch/focus omit it).
+        Recorded server-side on the queue entry the request created and
+        surfaced read-only in the drawer once the session goes managed —
+        the runner's own manifest/tmux plumbing never carries or needs
+        this distinction (mechanism (d): the wrapper is a WS client
+        structurally identical to the CALL modal, never a runner-side
+        code path), so it is derived entirely from which client sent the
+        request, not from anything the runner reports.
+      type: string
+      enum: [wrapper, call-modal]
 
     DispatchEffortValue:
       description: >-

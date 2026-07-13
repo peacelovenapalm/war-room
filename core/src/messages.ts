@@ -791,11 +791,14 @@ export interface DispatchRequest {
   permissionMode?: DispatchPermissionModeValue;
   timeoutSec?: number;
   requestId?: string;
+  launchedVia?: LaunchedViaValue;
 }
 
 export type DispatchEffortValue = 'low' | 'medium' | 'high' | 'xhigh' | 'max';
 
 export type DispatchPermissionModeValue = 'default' | 'plan';
+
+export type LaunchedViaValue = 'wrapper' | 'call-modal';
 
 export interface TailSubscribe {
   type: 'tailSubscribe';
