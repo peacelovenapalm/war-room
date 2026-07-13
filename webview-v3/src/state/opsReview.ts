@@ -98,7 +98,9 @@ export interface SelfHealReceipt {
   target: string;
   plane: 'shell-dispatch' | 'proposal-only';
   pending?: true;
-  outcome: 'executed' | 'suppressed' | 'failed';
+  /** 'pending' appears only together with `pending: true` (durable intent
+   *  written, enqueue outcome not yet known). */
+  outcome: 'executed' | 'suppressed' | 'failed' | 'pending';
   suppressedReason?: string;
   detail: string;
   dispatchId?: string;

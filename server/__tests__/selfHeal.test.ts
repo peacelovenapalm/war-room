@@ -23,6 +23,10 @@ vi.mock('os', async () => {
 
 // Reassigned fresh per test in beforeEach — a truly dynamic module bag.
 let mods: any;
+// Explicit-path store per test: V3JsonPersistence honestly reports the
+// VITEST default-path no-op as a FAILED durable write, which fail-closes
+// the D0 execute path — so every test drives an explicit temp-path store.
+let store: any;
 
 beforeEach(async () => {
   tmpBase = fs.mkdtempSync(path.join(os.tmpdir(), 'self-heal-test-'));
@@ -47,6 +51,7 @@ beforeEach(async () => {
     ...inboxProviderMod,
     ...selfHealMod,
   };
+  store = newStore();
 });
 
 afterEach(() => {
@@ -98,23 +103,23 @@ function advertiseMachine(machine: string, scriptIds: string[], now: number): vo
 
 describe('closed-class guard', () => {
   it('rejects an unknown class at runtime, never trusting the TS type alone', () => {
-    const result = mods.selfHealStore.runAction(
+    const result = store.runAction(
       { class: 'delete-the-vault', target: 'x', detail: 'y' },
       { now: Date.now(), isAutomationPaused: neverPaused },
     );
     expect(result).toEqual({ ok: false, reason: 'unknown-class' });
-    expect(mods.selfHealStore.getReceipts()).toEqual([]);
+    expect(store.getReceipts()).toEqual([]);
   });
 
   it('rejects an unknown class in setClassEnabled', () => {
-    expect(mods.selfHealStore.setClassEnabled('not-a-real-class', false)).toEqual({
+    expect(store.setClassEnabled('not-a-real-class', false)).toEqual({
       ok: false,
       reason: 'unknown-class',
     });
   });
 
   it('rejects an unknown class in spawnStandingOrder', () => {
-    expect(mods.selfHealStore.spawnStandingOrder('not-a-real-class')).toEqual({
+    expect(store.spawnStandingOrder('not-a-real-class')).toEqual({
       ok: false,
       reason: 'unknown-class',
     });
@@ -137,7 +142,7 @@ describe('STOP-ALL suppression', () => {
     process.env.WAR_ROOM_SELF_HEAL_TARGET_MACHINE = 'MACBOOK';
     mods.stopAllLatch.engage(now);
 
-    const result = mods.selfHealStore.runAction(
+    const result = store.runAction(
       { class: 'refresh-stale-clone', target: 'routines-clone', detail: 'stale' },
       { now, isAutomationPaused: neverPaused },
     );
@@ -156,7 +161,7 @@ describe('STOP-ALL suppression', () => {
     advertiseMachine('MACBOOK', ['refresh-stale-clone'], now);
     process.env.WAR_ROOM_SELF_HEAL_TARGET_MACHINE = 'MACBOOK';
     mods.stopAllLatch.engage(now);
-    mods.selfHealStore.runAction(
+    store.runAction(
       { class: 'refresh-stale-clone', target: 'routines-clone', detail: 'stale' },
       { now, isAutomationPaused: neverPaused },
     );
@@ -164,7 +169,7 @@ describe('STOP-ALL suppression', () => {
 
     const later = now + 20 * 60_000; // past the per-target cooldown
     advertiseMachine('MACBOOK', ['refresh-stale-clone'], later);
-    const result = mods.selfHealStore.runAction(
+    const result = store.runAction(
       { class: 'refresh-stale-clone', target: 'routines-clone', detail: 'stale' },
       { now: later, isAutomationPaused: neverPaused },
     );
@@ -178,9 +183,9 @@ describe('budget-pause suppression', () => {
     const now = Date.now();
     advertiseMachine('MACBOOK', ['refresh-stale-clone'], now);
     process.env.WAR_ROOM_SELF_HEAL_TARGET_MACHINE = 'MACBOOK';
-    mods.selfHealStore.setClassEnabled('refresh-stale-clone', false); // would ALSO suppress
+    store.setClassEnabled('refresh-stale-clone', false); // would ALSO suppress
 
-    const result = mods.selfHealStore.runAction(
+    const result = store.runAction(
       { class: 'refresh-stale-clone', target: 'routines-clone', detail: 'stale' },
       { now, isAutomationPaused: () => alwaysPaused('5h-threshold') },
     );
@@ -195,7 +200,7 @@ describe('budget-pause suppression', () => {
 
 describe('per-class flags', () => {
   it('default ON for all four classes', () => {
-    const flags = mods.selfHealStore.getFlags();
+    const flags = store.getFlags();
     for (const cls of mods.SELF_HEAL_CLASSES) {
       expect(flags[cls]).toBe(true);
     }
@@ -244,7 +249,7 @@ describe('per-class flags', () => {
 describe('proposal-only classes never execute', () => {
   it('restart-dead-runner always suppresses with reason "proposal-only" — there is no plane that can reach a dead poller', () => {
     const now = Date.now();
-    const result = mods.selfHealStore.runAction(
+    const result = store.runAction(
       { class: 'restart-dead-runner', target: 'DESKBOX', detail: 'silent 6m' },
       { now, isAutomationPaused: neverPaused },
     );
@@ -259,7 +264,7 @@ describe('proposal-only classes never execute', () => {
 
   it('mechanical-vault-fix always suppresses with reason "proposal-only" — no vault-health source exists yet', () => {
     const now = Date.now();
-    const result = mods.selfHealStore.runAction(
+    const result = store.runAction(
       { class: 'mechanical-vault-fix', target: 'vault', detail: 'hypothetical' },
       { now, isAutomationPaused: neverPaused },
     );
@@ -274,7 +279,7 @@ describe('proposal-only classes never execute', () => {
 describe('shell-dispatch classes: honest availability gating', () => {
   it('no target machine configured -> suppressed "no-target-machine"', () => {
     const now = Date.now();
-    const result = mods.selfHealStore.runAction(
+    const result = store.runAction(
       { class: 'refresh-stale-clone', target: 'routines-clone', detail: 'stale' },
       { now, isAutomationPaused: neverPaused },
     );
@@ -287,7 +292,7 @@ describe('shell-dispatch classes: honest availability gating', () => {
   it('configured target machine has no live advertisement -> suppressed "machine-not-live"', () => {
     process.env.WAR_ROOM_SELF_HEAL_TARGET_MACHINE = 'GHOSTBOX';
     const now = Date.now();
-    const result = mods.selfHealStore.runAction(
+    const result = store.runAction(
       { class: 'refresh-stale-clone', target: 'routines-clone', detail: 'stale' },
       { now, isAutomationPaused: neverPaused },
     );
@@ -301,7 +306,7 @@ describe('shell-dispatch classes: honest availability gating', () => {
     const now = Date.now();
     advertiseMachine('MACBOOK', ['some-other-script'], now);
     process.env.WAR_ROOM_SELF_HEAL_TARGET_MACHINE = 'MACBOOK';
-    const result = mods.selfHealStore.runAction(
+    const result = store.runAction(
       { class: 'refresh-stale-clone', target: 'routines-clone', detail: 'stale' },
       { now, isAutomationPaused: neverPaused },
     );
@@ -373,6 +378,7 @@ describe('shell-dispatch classes: honest availability gating', () => {
       target: 'routines-clone',
       plane: 'shell-dispatch',
       pending: true,
+      outcome: 'pending',
       detail: expect.stringContaining('enqueue compute script "refresh-stale-clone" on MACBOOK'),
     });
     expect(mods.dispatchStore.getRecent(10)).toHaveLength(1);
@@ -401,13 +407,44 @@ describe('shell-dispatch classes: honest availability gating', () => {
     });
     expect(result.receipt?.pending).toBeUndefined();
     expect(mods.dispatchStore.getRecent(10)).toHaveLength(0);
+
+    // A failed intent persist must NOT arm the per-target cooldown — the
+    // very next attempt retries (another honest failure here, never a
+    // silent { receipt: null } cooldown no-op).
+    const retry = store.runAction(
+      { class: 'refresh-stale-clone', target: 'routines-clone', detail: 'stale' },
+      { now: now + 1000, isAutomationPaused: neverPaused },
+    );
+    expect(retry.receipt).not.toBeNull();
+    expect(retry.receipt?.detail).toBe('intent receipt persistence failed — action not enqueued');
+  });
+
+  it('the VITEST default-path persistence no-op counts as NOT durable — a default-path store fails closed instead of enqueueing on a fabricated success', () => {
+    // Containment regression for the review BLOCKER: V3JsonPersistence
+    // never writes under VITEST+default-path; it must report false so the
+    // D0 intent gate cannot be satisfied by a no-op.
+    const defaultPathStore = new mods.SelfHealStore();
+    const now = Date.now();
+    advertiseMachine('MACBOOK', ['refresh-stale-clone'], now);
+    process.env.WAR_ROOM_SELF_HEAL_TARGET_MACHINE = 'MACBOOK';
+
+    const result = defaultPathStore.runAction(
+      { class: 'refresh-stale-clone', target: 'routines-clone', detail: 'stale' },
+      { now, isAutomationPaused: neverPaused },
+    );
+
+    expect(result.receipt).toMatchObject({
+      outcome: 'failed',
+      detail: 'intent receipt persistence failed — action not enqueued',
+    });
+    expect(mods.dispatchStore.getRecent(10)).toHaveLength(0);
   });
 
   it('rerun-failed-routine follows the identical shell-dispatch gate', () => {
     const now = Date.now();
     advertiseMachine('MACBOOK', ['rerun-failed-routine'], now);
     process.env.WAR_ROOM_SELF_HEAL_TARGET_MACHINE = 'MACBOOK';
-    const result = mods.selfHealStore.runAction(
+    const result = store.runAction(
       { class: 'rerun-failed-routine', target: 'some-routine', detail: 'hypothetical failure' },
       { now, isAutomationPaused: neverPaused },
     );
@@ -419,39 +456,39 @@ describe('shell-dispatch classes: honest availability gating', () => {
 describe('per-target cooldown', () => {
   it('a second decision for the same class+target within the cooldown window is a silent no-op (no new receipt)', () => {
     const now = Date.now();
-    const first = mods.selfHealStore.runAction(
+    const first = store.runAction(
       { class: 'restart-dead-runner', target: 'DESKBOX', detail: 'silent' },
       { now, isAutomationPaused: neverPaused },
     );
     expect(first.receipt).not.toBeNull();
 
-    const second = mods.selfHealStore.runAction(
+    const second = store.runAction(
       { class: 'restart-dead-runner', target: 'DESKBOX', detail: 'still silent' },
       { now: now + 1000, isAutomationPaused: neverPaused },
     );
     expect(second).toEqual({ ok: true, receipt: null });
-    expect(mods.selfHealStore.getReceipts()).toHaveLength(1);
+    expect(store.getReceipts()).toHaveLength(1);
   });
 
   it("a different target for the same class is NOT covered by the other target's cooldown", () => {
     const now = Date.now();
-    mods.selfHealStore.runAction(
+    store.runAction(
       { class: 'restart-dead-runner', target: 'DESKBOX', detail: 'silent' },
       { now, isAutomationPaused: neverPaused },
     );
-    const other = mods.selfHealStore.runAction(
+    const other = store.runAction(
       { class: 'restart-dead-runner', target: 'MINI', detail: 'also silent' },
       { now: now + 1000, isAutomationPaused: neverPaused },
     );
     expect(other.receipt).not.toBeNull();
-    expect(mods.selfHealStore.getReceipts()).toHaveLength(2);
+    expect(store.getReceipts()).toHaveLength(2);
   });
 });
 
 describe('receipt shape', () => {
   it('carries every documented field verbatim', () => {
     const now = Date.now();
-    const result = mods.selfHealStore.runAction(
+    const result = store.runAction(
       { class: 'restart-dead-runner', target: 'DESKBOX', detail: 'silent 6m' },
       { now, isAutomationPaused: neverPaused },
     );
@@ -471,15 +508,15 @@ describe('receipt shape', () => {
 
   it('getReceipts() returns newest-first', () => {
     const now = Date.now();
-    mods.selfHealStore.runAction(
+    store.runAction(
       { class: 'restart-dead-runner', target: 'A', detail: 'x' },
       { now, isAutomationPaused: neverPaused },
     );
-    mods.selfHealStore.runAction(
+    store.runAction(
       { class: 'restart-dead-runner', target: 'B', detail: 'y' },
       { now: now + 1, isAutomationPaused: neverPaused },
     );
-    const receipts = mods.selfHealStore.getReceipts();
+    const receipts = store.getReceipts();
     expect(receipts[0].target).toBe('B');
     expect(receipts[1].target).toBe('A');
   });
@@ -488,7 +525,7 @@ describe('receipt shape', () => {
 describe('standing-order spawn (honest containment decline)', () => {
   it('every spawn attempt is receipted, even though it is honestly declined', () => {
     const now = Date.now();
-    const result = mods.selfHealStore.spawnStandingOrder('refresh-stale-clone', now);
+    const result = store.spawnStandingOrder('refresh-stale-clone', now);
     expect(result.ok).toBe(true);
     expect(result.receipt).toMatchObject({
       class: 'refresh-stale-clone',
@@ -496,7 +533,7 @@ describe('standing-order spawn (honest containment decline)', () => {
       outcome: 'suppressed',
       suppressedReason: 'standing-orders-lack-shell-dispatch-support',
     });
-    expect(mods.selfHealStore.getReceipts()).toHaveLength(1);
+    expect(store.getReceipts()).toHaveLength(1);
   });
 });
 
@@ -580,7 +617,7 @@ describe('runSelfHealTick integration', () => {
     fs.utimesSync(file, oldMtime, oldMtime);
     mods.clearInboxCache();
 
-    const fired = mods.runSelfHealTick({ now, isAutomationPaused: neverPaused });
+    const fired = mods.runSelfHealTick({ now, isAutomationPaused: neverPaused }, store);
     expect(fired.length).toBeGreaterThanOrEqual(2);
     const kinds = fired.map((r: any) => `${r.class}:${r.outcome}`);
     expect(kinds).toEqual(

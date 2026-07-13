@@ -145,7 +145,10 @@ export interface SelfHealReceipt {
    *  enqueue outcome is not yet known. Terminal receipts omit it, keeping
    *  their pre-V10 shape unchanged. */
   pending?: true;
-  outcome: 'executed' | 'suppressed' | 'failed';
+  /** 'pending' appears ONLY together with `pending: true` (the durable
+   *  intent state) — a consumer that ignores the flag still never sees a
+   *  false terminal verdict. Terminal receipts keep the pre-V10 union. */
+  outcome: 'executed' | 'suppressed' | 'failed' | 'pending';
   suppressedReason?: string;
   detail: string;
   dispatchId?: string;
@@ -359,13 +362,17 @@ export class SelfHealStore {
       target: candidate.target,
       plane,
       pending: true,
-      // Retain the legacy terminal union for back-compatible consumers;
-      // `pending: true` is authoritative until updateReceipt removes it.
-      outcome: 'failed',
+      outcome: 'pending',
       detail: `intent recorded: enqueue compute script "${scriptId}" on ${machine}`,
       undoNote,
     };
     if (!this.appendReceipt(receipt, now)) {
+      // Fail closed — but roll back the cooldown stamp appendReceipt set,
+      // or a transient write failure silently no-ops retries for the whole
+      // cooldown window. Safe to delete outright: reaching this point means
+      // withinCooldown() already returned false, so any prior stamp for
+      // this key had expired.
+      delete this.ensureState().lastActionAt[`${cls}:${candidate.target}`];
       delete receipt.pending;
       receipt.outcome = 'failed';
       receipt.detail = 'intent receipt persistence failed — action not enqueued';

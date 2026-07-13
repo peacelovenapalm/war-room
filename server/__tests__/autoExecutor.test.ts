@@ -24,6 +24,10 @@ vi.mock('os', async () => {
 // Reassigned fresh per test in beforeEach — a truly dynamic module bag.
 
 let mods: any;
+// Explicit-path executor per test: V3JsonPersistence honestly reports the
+// VITEST default-path no-op as a FAILED durable write, which fail-closes
+// the D0 execute path — so every test drives an explicit temp-path store.
+let executor: any;
 
 beforeEach(async () => {
   tmpBase = fs.mkdtempSync(path.join(os.tmpdir(), 'auto-executor-test-'));
@@ -44,6 +48,10 @@ beforeEach(async () => {
     ...autoExecutorMod,
     ...opsAdvisorMod,
   };
+  executor = new mods.AutoExecutorStore(
+    path.join(tmpBase, '.pixel-agents', 'auto-executor-state.json'),
+    whitelistPath(),
+  );
 });
 
 afterEach(() => {
@@ -118,12 +126,12 @@ describe('shipped-default: zero executions (load-bearing)', () => {
     failAndPile('DESKBOX', 'ship the panel port', 200);
     failAndPile('MACBOOK', 'run migrations', 300);
 
-    const fired = mods.autoExecutorStore.runTick(store, Date.now());
+    const fired = executor.runTick(store, Date.now());
     expect(fired).toEqual([]);
 
     // Nothing was mutated: every crate is still piled, no new dispatches.
     expect(mods.reworkBinStore.getPiled()).toHaveLength(3);
-    const status = mods.autoExecutorStore.getStatus();
+    const status = executor.getStatus();
     expect(status.receipts).toEqual([]);
     expect(status.whitelistLine).toBe('AUTO: OFF — whitelist empty');
     expect(status.actions['requeue-failed-dispatch'].enabled).toBe(false);
@@ -136,21 +144,21 @@ describe('deny-by-default on a malformed/partial whitelist', () => {
     fs.writeFileSync(whitelistPath(), '{ not valid json', 'utf8');
     const store = new mods.AgentStateStore();
     failAndPile('MACBOOK', 'fix it', 100);
-    expect(mods.autoExecutorStore.runTick(store, Date.now())).toEqual([]);
+    expect(executor.runTick(store, Date.now())).toEqual([]);
   });
 
   it('a whitelist with an empty actions object is OFF', () => {
     writeWhitelist({ actions: {} });
     const store = new mods.AgentStateStore();
     failAndPile('MACBOOK', 'fix it', 100);
-    expect(mods.autoExecutorStore.runTick(store, Date.now())).toEqual([]);
+    expect(executor.runTick(store, Date.now())).toEqual([]);
   });
 
   it('an explicit enabled:false is OFF', () => {
     writeWhitelist({ actions: { 'requeue-failed-dispatch': { enabled: false } } });
     const store = new mods.AgentStateStore();
     failAndPile('MACBOOK', 'fix it', 100);
-    expect(mods.autoExecutorStore.runTick(store, Date.now())).toEqual([]);
+    expect(executor.runTick(store, Date.now())).toEqual([]);
   });
 });
 
@@ -264,7 +272,7 @@ describe('enabled: fires through the shared redispatchCrate() implementation', (
     writeWhitelist({ actions: { 'requeue-failed-dispatch': { enabled: true } } });
     const store = new mods.AgentStateStore();
     failAndPile('MACBOOK', 'fix it', 100);
-    mods.autoExecutorStore.runTick(store, Date.now());
+    executor.runTick(store, Date.now());
     // The crate is now reworked — calling the SHARED function again on the
     // same id must fail the identical way the route would.
     const piled = mods.reworkBinStore
@@ -286,13 +294,13 @@ describe('guardrail: max auto-requeues per ORIGINAL dispatch id', () => {
     failAndPile('MACBOOK', 'fix it', 100);
 
     const now = Date.now();
-    const first = mods.autoExecutorStore.runTick(store, now);
+    const first = executor.runTick(store, now);
     expect(first).toHaveLength(1); // A -> B, count now 1 for the A lineage
 
     // B (the auto-created dispatch) itself fails.
     failNewlyCreatedDispatch();
 
-    const second = mods.autoExecutorStore.runTick(store, now + 1);
+    const second = executor.runTick(store, now + 1);
     expect(second).toEqual([]); // blocked by cap (count 1 >= maxPerId 1)
     expect(mods.reworkBinStore.getPiled()).toHaveLength(1); // B's crate stays piled — never fired, never dismissed
   });
@@ -309,20 +317,20 @@ describe('guardrail: cooldown between auto-requeues of the same lineage', () => 
     failAndPile('MACBOOK', 'fix it', 100);
 
     const t0 = 1_000_000;
-    expect(mods.autoExecutorStore.runTick(store, t0)).toHaveLength(1);
+    expect(executor.runTick(store, t0)).toHaveLength(1);
 
     failNewlyCreatedDispatch();
 
     // Within the cooldown — held back, crate untouched, no receipt.
-    expect(mods.autoExecutorStore.runTick(store, t0 + 500)).toEqual([]);
+    expect(executor.runTick(store, t0 + 500)).toEqual([]);
     expect(mods.reworkBinStore.getPiled()).toHaveLength(1);
-    expect(mods.autoExecutorStore.getStatus().receipts).toHaveLength(1);
+    expect(executor.getStatus().receipts).toHaveLength(1);
 
     // Cooldown elapsed — the SAME still-piled crate fires now.
-    const third = mods.autoExecutorStore.runTick(store, t0 + 1500);
+    const third = executor.runTick(store, t0 + 1500);
     expect(third).toHaveLength(1);
     expect(mods.reworkBinStore.getPiled()).toHaveLength(0);
-    expect(mods.autoExecutorStore.getStatus().receipts).toHaveLength(2);
+    expect(executor.getStatus().receipts).toHaveLength(2);
   });
 });
 
@@ -340,23 +348,23 @@ describe("guardrail: two consecutive auto-failures stops the lineage (human's tu
     failAndPile('MACBOOK', 'fix it', 100); // A — natural failure, not auto-created
 
     const now = Date.now();
-    expect(mods.autoExecutorStore.runTick(store, now)).toHaveLength(1); // A -> B
+    expect(executor.runTick(store, now)).toHaveLength(1); // A -> B
 
     const b = failNewlyCreatedDispatch();
 
     // B was auto-created and has now failed — streak = 1, still under the
     // stop threshold (2), so this fires: B -> C.
-    expect(mods.autoExecutorStore.runTick(store, now + 10)).toHaveLength(1);
+    expect(executor.runTick(store, now + 10)).toHaveLength(1);
 
     failNewlyCreatedDispatch([b]);
 
     // C was ALSO auto-created and has ALSO failed — two consecutive
     // auto-failures (B, then C) — the lineage stops for good, cap (10) is
     // nowhere near reached.
-    const blocked = mods.autoExecutorStore.runTick(store, now + 20);
+    const blocked = executor.runTick(store, now + 20);
     expect(blocked).toEqual([]);
     expect(mods.reworkBinStore.getPiled()).toHaveLength(1); // C's crate stays piled — human's turn
-    expect(mods.autoExecutorStore.getStatus().receipts).toHaveLength(2); // only A->B and B->C fired
+    expect(executor.getStatus().receipts).toHaveLength(2); // only A->B and B->C fired
   });
 });
 
@@ -366,12 +374,12 @@ describe("SHIFT fold: autoActionCount reflects today's real receipts", () => {
     const store = new mods.AgentStateStore();
     failAndPile('MACBOOK', 'fix it', 100);
     const now = Date.now();
-    mods.autoExecutorStore.runTick(store, now);
-    expect(mods.autoExecutorStore.getTodayReceiptCount(now)).toBe(1);
+    executor.runTick(store, now);
+    expect(executor.getTodayReceiptCount(now)).toBe(1);
 
     // A receipt logged "now" must not count against a query anchored 25h earlier.
     const yesterday = now - 25 * 60 * 60_000;
-    expect(mods.autoExecutorStore.getTodayReceiptCount(yesterday)).toBe(0);
+    expect(executor.getTodayReceiptCount(yesterday)).toBe(0);
   });
 });
 
@@ -383,21 +391,21 @@ describe('STOP ALL kill switch: haltAll suppresses every auto path, resumeAll re
     const store = new mods.AgentStateStore();
     failAndPile('MACBOOK', 'fix it', 100);
 
-    expect(mods.autoExecutorStore.haltAll()).toBe(true);
-    expect(mods.autoExecutorStore.haltAll()).toBe(false); // idempotent
+    expect(executor.haltAll()).toBe(true);
+    expect(executor.haltAll()).toBe(false); // idempotent
 
-    expect(mods.autoExecutorStore.runTick(store, Date.now())).toEqual([]);
+    expect(executor.runTick(store, Date.now())).toEqual([]);
     expect(mods.reworkBinStore.getPiled()).toHaveLength(1); // untouched
 
-    const status = mods.autoExecutorStore.getStatus();
+    const status = executor.getStatus();
     expect(status.killSwitchActive).toBe(true);
     expect(status.whitelistLine).toContain('SUSPENDED (STOP ALL engaged)');
 
     // Resume restores the exact pre-halt behavior.
-    expect(mods.autoExecutorStore.resumeAll()).toBe(true);
-    const fired = mods.autoExecutorStore.runTick(store, Date.now());
+    expect(executor.resumeAll()).toBe(true);
+    const fired = executor.runTick(store, Date.now());
     expect(fired).toHaveLength(1);
-    expect(mods.autoExecutorStore.getStatus().killSwitchActive).toBe(false);
+    expect(executor.getStatus().killSwitchActive).toBe(false);
   });
 
   it('the kill switch PERSISTS across a restart (a store reloaded from the same state file mid-STOP-ALL must not silently resume auto-actions)', () => {
@@ -429,9 +437,9 @@ describe('STOP ALL kill switch: haltAll suppresses every auto path, resumeAll re
     expect(held2.record.status).toBe('queued-budget');
     mods.dispatchStore.setBudgetGate(() => null);
     // The same wiring httpServer.ts installs at boot.
-    mods.dispatchStore.setHeldReleaseGate(() => mods.autoExecutorStore.isKillSwitchActive());
+    mods.dispatchStore.setHeldReleaseGate(() => executor.isKillSwitchActive());
 
-    mods.autoExecutorStore.haltAll();
+    executor.haltAll();
     expect(mods.dispatchStore.sweepHeldRollover(Date.now())).toBe(0); // frozen
 
     // A conscious human override beats the kill switch (finding 1's contract).
@@ -439,7 +447,7 @@ describe('STOP ALL kill switch: haltAll suppresses every auto path, resumeAll re
     expect(released.ok).toBe(true);
 
     // Resume unfreezes the automatic path for the remaining held record.
-    mods.autoExecutorStore.resumeAll();
+    executor.resumeAll();
     expect(mods.dispatchStore.sweepHeldRollover(Date.now())).toBe(1);
   });
 });
@@ -453,7 +461,7 @@ describe('whitelist guardrail params are validated — invalid values fall back 
         actions: { 'requeue-failed-dispatch': { enabled: true, params: { cooldownMs: bad } } },
       });
       // The status line proves the EFFECTIVE value is the default 10m.
-      const status = mods.autoExecutorStore.getStatus();
+      const status = executor.getStatus();
       expect(status.whitelistLine).toContain('cooldown 10m');
     }
   });
@@ -463,7 +471,7 @@ describe('whitelist guardrail params are validated — invalid values fall back 
       writeWhitelist({
         actions: { 'requeue-failed-dispatch': { enabled: true, params: { maxPerId: bad } } },
       });
-      const status = mods.autoExecutorStore.getStatus();
+      const status = executor.getStatus();
       expect(status.whitelistLine).toContain('cap 2');
     }
   });
@@ -475,11 +483,11 @@ describe('whitelist guardrail params are validated — invalid values fall back 
     const store = new mods.AgentStateStore();
     const firstId = failAndPile('MACBOOK', 'first', 100);
     const t0 = Date.now();
-    expect(mods.autoExecutorStore.runTick(store, t0)).toHaveLength(1);
+    expect(executor.runTick(store, t0)).toHaveLength(1);
 
     // Fail the auto-created attempt 1 minute later — inside the DEFAULT
     // 10m cooldown. A -1 cooldown taken literally would fire again here.
     failNewlyCreatedDispatch([firstId]);
-    expect(mods.autoExecutorStore.runTick(store, t0 + 60_000)).toEqual([]);
+    expect(executor.runTick(store, t0 + 60_000)).toEqual([]);
   });
 });

@@ -229,6 +229,7 @@ const SELF_HEAL_OUTCOME_GLYPH: Record<string, string> = {
   executed: '✓',
   suppressed: '⊘',
   failed: '✗',
+  pending: '⊘',
 };
 
 /** V6-4 (autonomy rung 1): the four pre-approved self-heal action classes —

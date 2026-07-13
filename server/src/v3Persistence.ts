@@ -58,7 +58,11 @@ export class V3JsonPersistence<TData extends object> {
   }
 
   persist(data: TData, now: number, force = false): boolean {
-    if (process.env.VITEST && this.usingDefaultPath) return true;
+    // The VITEST default-path backstop never writes — so it must never
+    // CLAIM a durable write. Callers that gate side effects on durability
+    // (the D0 intent receipts) fail closed here; tests exercising those
+    // paths pass an explicit temp path, which persists for real.
+    if (process.env.VITEST && this.usingDefaultPath) return false;
     if (!force && now - this.lastPersistAt < PERSIST_THROTTLE_MS) return true;
     this.lastPersistAt = now;
     const target = this.persistPath();
