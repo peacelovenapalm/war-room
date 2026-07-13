@@ -24,6 +24,7 @@ import {
   MAX_AGENT_OUTPUT_LINES_PER_POST,
   MAX_AGENT_OUTPUT_TOTAL_LINE_BYTES,
   MAX_HOOK_BODY_SIZE,
+  SELF_HEAL_TICK_INTERVAL_MS,
 } from './constants.js';
 import { contractStore } from './contractStore.js';
 import { renderDigest } from './digest.js';
@@ -66,6 +67,7 @@ import { reworkBinStore } from './reworkBinStore.js';
 import { redispatchCrate } from './reworkRedispatch.js';
 import { RIVALRY_SWEEP_INTERVAL_MS, rivalryDerivation } from './rivalryDerivation.js';
 import { rivalryStore } from './rivalryStore.js';
+import { getSelfHealStatus, isSelfHealClass, runSelfHealTick, selfHealStore } from './selfHeal.js';
 import { shiftStats } from './shiftStats.js';
 import type { StandingOrderSchedule } from './standingOrderStore.js';
 import { standingOrderStore } from './standingOrderStore.js';
@@ -326,6 +328,17 @@ export async function createHttpServer(options: HttpServerOptions): Promise<Http
   autoExecutorTimer.unref?.();
   app.addHook('onClose', () => clearInterval(autoExecutorTimer));
 
+  // Self-Heal tick (V6-4 autonomy rung 1) — same interval idiom as
+  // autoExecutorTimer just above. Consults the SAME shared budgetGate
+  // every other automation plane already respects (standing orders,
+  // chains); the STOP-ALL latch and per-class flags are checked inside
+  // selfHeal.ts itself on every candidate, not here.
+  const selfHealTimer = setInterval(() => {
+    runSelfHealTick({ now: Date.now(), isAutomationPaused: budgetGate });
+  }, SELF_HEAL_TICK_INTERVAL_MS);
+  selfHealTimer.unref?.();
+  app.addHook('onClose', () => clearInterval(selfHealTimer));
+
   // World events (v2 mechanic G4, §6.3) — the coarse "live tick" GAME-DESIGN
   // §2 introduces: only rolls while ≥1 socket is connected (checked inside
   // the callback, not by gating the interval itself, so it naturally stops
@@ -507,6 +520,29 @@ function registerBriefingRoute(app: FastifyInstance, options: HttpServerOptions)
   // trust level, same "no new polling loop" posture — reads the executor's
   // own already-persisted state.
   app.get('/api/ops/auto', async () => autoExecutorStore.getStatus());
+  // Self-Heal status (V6-4 autonomy rung 1): per-class flags (default ON)
+  // + the receipts ledger — every fired/suppressed/failed decision from
+  // the four pre-approved classes. Same trust tier + "no new polling
+  // loop" posture as /api/ops/auto — reads selfHealStore's own already-
+  // persisted state.
+  app.get('/api/ops/self-heal', async () => getSelfHealStatus());
+  // Per-class enable flag toggle — the "existing automation config
+  // surface" this store's flags live behind, revocable per V6-4's
+  // contract. Deny-by-default validation: an unknown class is rejected,
+  // never silently widening SELF_HEAL_CLASSES.
+  app.post<{ Params: { cls: string }; Body: Record<string, unknown> }>(
+    '/api/ops/self-heal/flags/:cls',
+    async (request, reply) => {
+      const { cls } = request.params;
+      if (!isSelfHealClass(cls)) {
+        reply.code(400).send({ ok: false, reason: 'unknown-class' });
+        return;
+      }
+      const enabled = request.body?.enabled === true;
+      const result = selfHealStore.setClassEnabled(cls, enabled);
+      reply.send(result);
+    },
+  );
   // Districts (Phase 5 Lane C T7/D-35; v5 C1 N-project build-out):
   // per-project milestone state, data-driven from WAR_ROOM_DISTRICTS_DIR
   // (one project per immediate subdirectory) plus the legacy 2-seed env
