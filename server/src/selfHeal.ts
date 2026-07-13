@@ -45,6 +45,16 @@
  * ledger (V3JsonPersistence, capped, newest-last on disk / newest-first on
  * read), exposed alongside it in the SAME OPS REVIEW surface rather than a
  * new panel.
+ *
+ * TRUST TIER (explicit, so reviews don't re-derive it): the HTTP surfaces
+ * (/api/ops/self-heal GET + flags POST) are in the UNAUTHENTICATED
+ * tailnet-only webview tier — the same deliberate tier as
+ * /api/automation/stop-all, /api/automation/resume, and POST
+ * /api/standing-orders. Bearer auth in this codebase is reserved for
+ * runner/hook INGRESS routes; webview-initiated config/control actions
+ * trust network-level tailnet isolation instead. These routes only toggle
+ * per-class flags / read receipts — they can never trigger an action
+ * directly (runAction has no HTTP entry point).
  */
 
 import {
