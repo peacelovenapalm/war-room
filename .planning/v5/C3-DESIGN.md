@@ -1,9 +1,11 @@
 # C3-DESIGN — Born-managed launcher wrapper + free-form PROMPT verb
 
-Status: **DESIGN ONLY.** No code in this doc or from it until Greg gates
-it (see §6). Phase E of `.planning/v5/RUN-MAP-2026-07-12.md` — design
-gate is non-negotiable; the build stays gated regardless of how clean
-this design reads.
+Status: **GATED 2026-07-12 — Greg answered all seven §6 gates.** His
+decisions and the sequenced build are in `.planning/v5/C3-BUILD-PLAN.md`
+(gate 4 = shared verb, gate 6 = mechanism (d), opt-in default). The
+build starts when Greg hands that plan's §5 kickoff prompt to a session.
+Original status (historical): DESIGN ONLY, Phase E of
+`.planning/v5/RUN-MAP-2026-07-12.md`.
 
 ## 0. One-sentence goal
 
