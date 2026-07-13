@@ -1844,3 +1844,20 @@ Phases 0–4, Greg design gate, loop protocol, STATE-v2.0 ledger spec),
 BRIEF principles as rubric, hard rules, panel protocol),
 `SESSION-HANDOFF-2026-07-10.md` (repo root). Execution session entry
 point: KICKOFF-v2.0.md.
+
+---
+
+## POSITION — 2026-07-13 (v5R→v7 run, PAUSED at Greg's direction)
+
+Authoritative ledger: `.planning/v6/SPRINT-STATE.md`. Handoff:
+`SESSION-HANDOFF-2026-07-13-v5v7.md` (kickoff prompt inside).
+
+- Deployed NEXUS = `179d29f` (deploy #1 of the run's 3) — districts fix
+  - `wr claude` wrapper + PROMPT verb, live-verified, codex-reviewed.
+- Greg's phone verdicts (verbatim in the ledger): districts ACCEPTED,
+  C2 sprites ACCEPTED. C4 old-face retirement gate-cleared, deferred.
+- Unmerged reviewed-work branches (all pushed): `lane/c2` 76d6327,
+  `lane/v6-morning` 4fbbc0d, `lane/v6-selfheal` 2b0edbf — codex
+  cross-model review of each diff is the next session's first task,
+  then C4 + merge + deploy #2.
+- V7 (memory rung 1) not started; design at `.planning/v6/V7-DESIGN.md`.

@@ -119,25 +119,33 @@ intentionally NOT started.
    start the §0.3 streak counter honestly, then open V7 per
    `V7-DESIGN.md`.
 
-## 7. Kickoff prompt (next session, verbatim)
+## 7. Kickoff prompt (next session, verbatim — REVIEW FIRST, per Greg)
 
 ```
 Read /Users/greg/code/war-room/SESSION-HANDOFF-2026-07-13-v5v7.md,
 .planning/v6/SPRINT-STATE.md, and .planning/v6/RUN-MAP-v5-v7-2026-07-12.md
 in /Users/greg/code/war-room (branch war-room/v3). Verify live state
-first: git log --oneline -3 (expect HEAD at/after 179d29f) and
+first: git log --oneline -3 (expect HEAD at/after 439ba7f) and
 ssh nexus-ts 'curl -s http://127.0.0.1:3141/api/version' (expect
-179d29f unless superseded). Deploy #1 is done; Greg accepted districts
-AND the C2 sprites (verbatim verdicts in SPRINT-STATE). Resume the run:
-(1) codex cross-model review of lane/v6-morning, lane/v6-selfheal, and
-lane/c2 diffs against 179d29f, reconcile on-branch; (2) execute C4
-old-face retirement (gate-cleared); (3) merge reviewed lanes, full gate
-EXCLUDING the VS Code Electron e2e lane (Greg excluded it — see
-SPRINT-STATE), codex, then deploy #2 with the new morning mounts, live
-verify + Bark, and run one morning-push round trip to start the
-clean-morning streak. The §5 GATED list binds absolutely; deploys only
-at version boundaries; Bark for phone gates; never git add -A; mask
-all secrets.
+179d29f unless superseded). PHASE 0 — REVIEW BEFORE ANYTHING SHIPS
+(Greg's explicit instruction): audit the prior session's work as a
+skeptical second agent — (a) the deployed V5R diff `git diff
+23916c3..179d29f` (already live; confirm the containment claims:
+zero behavioral change in bin/dispatch-runner.mjs and
+bin/lib/dispatch-rules.mjs, PROMPT inherits every ANSWER guard,
+launchedVia is a closed enum), and (b) the three UNMERGED lanes
+against 179d29f: lane/v6-morning @ 4fbbc0d, lane/v6-selfheal @
+2b0edbf, lane/c2 @ 76d6327 — run codex cross-model review on each,
+verify their honest-ceiling claims in code (proposal-only classes,
+standing-order decline receipt, ⊘ degradations), and reconcile
+findings on-branch. Report the review verdict to Greg BEFORE merging
+or pushing anything further. Only after his go: execute C4 old-face
+retirement (gate-cleared, see SPRINT-STATE), merge reviewed lanes,
+full gate EXCLUDING the VS Code Electron e2e lane (Greg excluded it),
+then deploy #2 with the new morning mounts, live verify + Bark, and
+one morning-push round trip to start the clean-morning streak. The
+RUN-MAP §5 GATED list binds absolutely; deploys only at version
+boundaries; Bark for phone gates; never git add -A; mask all secrets.
 ```
 
 ## Process note (RUN-MAP register Q48 dogfood obligation)
