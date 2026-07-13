@@ -207,10 +207,13 @@ function AutoSection({ status }: { status: AutoStatus }) {
             <li
               key={i}
               data-testid="ops-auto-receipt"
-              data-outcome={r.outcome.ok ? 'ok' : 'failed'}
+              data-outcome={r.pending ? 'pending' : r.outcome.ok ? 'ok' : 'failed'}
             >
-              <span className="ops-auto__receipt-glyph">{r.outcome.ok ? '✓' : '✗'}</span>{' '}
+              <span className="ops-auto__receipt-glyph">
+                {r.pending ? '⊘' : r.outcome.ok ? '✓' : '✗'}
+              </span>{' '}
               <span>{formatReceiptTs(r.ts)}</span> <strong>{r.actionKind}</strong>{' '}
+              {r.pending && <strong>PENDING </strong>}
               <span className="modal__muted">— {r.outcome.detail}</span>
               <div className="modal__muted">cause: {r.cause.findingId}</div>
               <div className="modal__muted">undo: {r.undo}</div>
@@ -226,6 +229,7 @@ const SELF_HEAL_OUTCOME_GLYPH: Record<string, string> = {
   executed: '✓',
   suppressed: '⊘',
   failed: '✗',
+  pending: '⊘',
 };
 
 /** V6-4 (autonomy rung 1): the four pre-approved self-heal action classes —
@@ -270,9 +274,14 @@ function SelfHealSection({
       {status.receipts.length > 0 && (
         <ul className="ops-self-heal__receipts" data-testid="ops-self-heal-receipts">
           {status.receipts.map((r, i) => (
-            <li key={i} data-testid="ops-self-heal-receipt" data-outcome={r.outcome}>
-              <span>{SELF_HEAL_OUTCOME_GLYPH[r.outcome] ?? '?'}</span>{' '}
+            <li
+              key={i}
+              data-testid="ops-self-heal-receipt"
+              data-outcome={r.pending ? 'pending' : r.outcome}
+            >
+              <span>{r.pending ? '⊘' : (SELF_HEAL_OUTCOME_GLYPH[r.outcome] ?? '?')}</span>{' '}
               <span>{formatReceiptTs(r.ts)}</span> <strong>{r.class}</strong>{' '}
+              {r.pending && <strong>PENDING </strong>}
               <span className="modal__muted">— {r.detail}</span>
               {r.suppressedReason && (
                 <div className="modal__muted">reason: {r.suppressedReason}</div>

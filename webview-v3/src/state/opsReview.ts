@@ -64,6 +64,7 @@ export interface AutoActionReceipt {
   ts: number;
   actionKind: string;
   cause: { findingId: string; receipts: OpsReceipt[] };
+  pending?: true;
   outcome: { ok: boolean; detail: string };
   undo: string;
 }
@@ -96,7 +97,10 @@ export interface SelfHealReceipt {
   class: SelfHealClass;
   target: string;
   plane: 'shell-dispatch' | 'proposal-only';
-  outcome: 'executed' | 'suppressed' | 'failed';
+  pending?: true;
+  /** 'pending' appears only together with `pending: true` (durable intent
+   *  written, enqueue outcome not yet known). */
+  outcome: 'executed' | 'suppressed' | 'failed' | 'pending';
   suppressedReason?: string;
   detail: string;
   dispatchId?: string;

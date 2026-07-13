@@ -250,7 +250,8 @@ export function MorningPanel({ isOpen, onClose, connectionStatus }: MorningPanel
               <ul className="morning__list">
                 {surface.overnight.receipts.map((r, i) => (
                   <li key={`${r.ts}-${String(i)}`}>
-                    {r.ok ? '✓' : '✗'} {r.actionKind} — {r.detail}
+                    {r.pending ? '⊘ PENDING' : r.ok ? '✓ EXECUTED' : '✗ FAILED'} {r.actionKind} —{' '}
+                    {r.detail}
                   </li>
                 ))}
               </ul>
