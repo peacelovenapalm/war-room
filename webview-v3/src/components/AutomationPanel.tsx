@@ -8,6 +8,7 @@ import {
   pruneChainRuns,
   validateStepTemplatesClient,
 } from '../state/chain';
+import { CHAIN_TEMPLATES, instantiateChainTemplate } from '../state/chainTemplates';
 import {
   canCreateStandingOrder,
   scheduleLabel,
@@ -152,6 +153,30 @@ function ChainsSection({
       <div className="automation-form">
         <span className="modal__muted">NEW CHAIN</span>
         <label className="field">
+          <span className="field__label">
+            START FROM TEMPLATE (optional — prefills, everything stays editable)
+          </span>
+          <select
+            data-testid="chain-template-picker"
+            value=""
+            onChange={(e) => {
+              const template = CHAIN_TEMPLATES.find((t) => t.key === e.target.value);
+              if (!template) return;
+              const filled = instantiateChainTemplate(template);
+              setName(filled.name);
+              setSteps(filled.steps);
+              setMessage(null);
+            }}
+          >
+            <option value="">— blank chain —</option>
+            {CHAIN_TEMPLATES.map((t) => (
+              <option key={t.key} value={t.key}>
+                {t.label}
+              </option>
+            ))}
+          </select>
+        </label>
+        <label className="field">
           <span className="field__label">NAME</span>
           <input
             type="text"
@@ -179,6 +204,15 @@ function ChainsSection({
                 </button>
               )}
             </div>
+            {(step.provider !== undefined || step.model !== undefined) && (
+              // Template-carried fields with no editor input yet — surface
+              // them as text so nothing rides into SAVE invisibly.
+              <span className="modal__muted">
+                provider:{' '}
+                {step.provider === undefined || step.provider === '' ? 'default' : step.provider}
+                {step.model !== undefined && step.model !== '' ? ` · model: ${step.model}` : ''}
+              </span>
+            )}
             <input
               type="text"
               value={step.machine ?? ''}

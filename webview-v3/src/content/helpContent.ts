@@ -216,6 +216,11 @@ export const HELP_SECTIONS: HelpSection[] = [
         text: 'Every new standing order needs one explicit human CONFIRM click before it can ever fire unattended — no perk or setting bypasses this.',
       },
       { glyph: '●/○', word: 'ACTIVE / DISABLED', text: "A confirmed order's current state." },
+      {
+        glyph: '▤',
+        word: 'START FROM TEMPLATE',
+        text: 'Prefills the chain builder with a common harness (imagegen lane, cross-model review). Prefill only — every field stays editable and nothing is saved or run until you hit SAVE CHAIN.',
+      },
     ],
   },
   {
