@@ -27,7 +27,7 @@
 import type { AgentStateStore } from './agentStateStore.js';
 import { MORNING_PUSH_DEFAULT_HOUR, MORNING_PUSH_DEFAULT_TZ } from './constants.js';
 import { shouldSpotCheck, writeMorningSpotCheckSpool } from './morningSpotCheck.js';
-import { morningStreakStore } from './morningStreakStore.js';
+import { MorningStreakStore, morningStreakStore } from './morningStreakStore.js';
 import { getMorningSurface, isMorningAllCalm, type MorningSurface } from './morningSurface.js';
 import { notifyBigMoment, notifyMorningDigest } from './notifyBark.js';
 import { V3JsonPersistence } from './v3Persistence.js';
@@ -180,6 +180,10 @@ export interface MorningPushTickDeps {
   notifyDigest?: typeof notifyMorningDigest;
   notifyBigMomentFn?: typeof notifyBigMoment;
   pushStateStore?: MorningPushStateStore;
+  /** Injectable for tests (temp-path instance) so streak assertions never
+   *  read a REAL ~/.pixel-agents/morning-streak.json left by a live run —
+   *  V3JsonPersistence's VITEST guard covers writes, not reads. */
+  streakStore?: MorningStreakStore;
 }
 
 /** The scheduler's own gate: fires AT MOST once per local calendar day,
@@ -196,6 +200,7 @@ export function runMorningPushTick(
 ): MorningSurface | null {
   const env = deps.env ?? process.env;
   const pushStateStore = deps.pushStateStore ?? morningPushStateStore;
+  const streakStore = deps.streakStore ?? morningStreakStore;
   const timeZone = resolveMorningTimeZone(env);
   const pushHour = resolveMorningPushHour(env);
   const { hour, date } = localHourAndDate(now, timeZone);
@@ -206,14 +211,14 @@ export function runMorningPushTick(
     // (recordOutcome is idempotent per date) instead of letting the
     // streak silently freeze — a skipped morning must never look clean.
     if (hour > pushHour && pushStateStore.getLastPushedDate() !== date) {
-      const snap = morningStreakStore.getSnapshot();
+      const snap = streakStore.getSnapshot();
       // Fresh install / parallel-run not yet started: no history to
       // breach against — the streak begins with the first real push.
       if (snap.lastRecordedDate !== null && snap.lastRecordedDate !== date) {
         console.log(
           `[MorningPush] ⚠ push window missed for ${date} (server down through hour ${String(pushHour)} ${timeZone}) -- recording streak breach`,
         );
-        morningStreakStore.recordOutcome(
+        streakStore.recordOutcome(
           false,
           date,
           'push-window-missed (server down through the entire push hour)',
@@ -243,9 +248,9 @@ export function runMorningPushTick(
 
   // V6-5: yesterday's OWN recorded outcome (not just "was there ever a
   // breach") — read BEFORE today's recordOutcome overwrites it.
-  const previousMorningDegraded = morningStreakStore.getSnapshot().lastOutcomeClean === false;
+  const previousMorningDegraded = streakStore.getSnapshot().lastOutcomeClean === false;
 
-  morningStreakStore.recordOutcome(
+  streakStore.recordOutcome(
     !surface.degraded,
     date,
     surface.degraded ? surface.degradedReasons.join('; ') : undefined,

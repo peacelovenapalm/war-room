@@ -22,7 +22,7 @@ import {
   resolveMorningTimeZone,
   runMorningPushTick,
 } from '../src/morningPush.js';
-import { morningStreakStore } from '../src/morningStreakStore.js';
+import { MorningStreakStore, morningStreakStore } from '../src/morningStreakStore.js';
 import type { MorningSurface } from '../src/morningSurface.js';
 import { clearMorningSurfaceCache } from '../src/morningSurface.js';
 
@@ -262,25 +262,27 @@ describe('runMorningPushTick', () => {
     const pushStateStore = new MorningPushStateStore(
       path.join(os.tmpdir(), `morning-push-missed-${String(Date.now())}.json`),
     );
+    // Temp-path streak store too: the singleton's default path READS the
+    // real ~/.pixel-agents/morning-streak.json when one exists (the
+    // VITEST persistence guard covers writes only).
+    const streakStore = new MorningStreakStore(
+      path.join(os.tmpdir(), `morning-streak-missed-${String(Date.now())}.json`),
+    );
 
     // Parallel-run already started: yesterday was recorded clean.
-    morningStreakStore.recordOutcome(
-      true,
-      '2026-07-12',
-      undefined,
-      Date.parse('2026-07-12T06:00:00Z'),
-    );
-    expect(morningStreakStore.getSnapshot().count).toBeGreaterThan(0);
+    streakStore.recordOutcome(true, '2026-07-12', undefined, Date.parse('2026-07-12T06:00:00Z'));
+    expect(streakStore.getSnapshot().count).toBeGreaterThan(0);
 
     // First tick AFTER the window (server was down 06:00-06:59): breach.
     const result = runMorningPushTick(store, Date.parse('2026-07-13T07:12:00Z'), {
       env,
       notifyDigest,
       pushStateStore,
+      streakStore,
     });
     expect(result).toBeNull();
     expect(notifyDigest).not.toHaveBeenCalled();
-    const snap = morningStreakStore.getSnapshot();
+    const snap = streakStore.getSnapshot();
     expect(snap.count).toBe(0);
     expect(snap.lastRecordedDate).toBe('2026-07-13');
     expect(snap.lastBreachReason).toContain('push-window-missed');
@@ -290,8 +292,9 @@ describe('runMorningPushTick', () => {
       env,
       notifyDigest,
       pushStateStore,
+      streakStore,
     });
-    expect(morningStreakStore.getSnapshot().count).toBe(0);
+    expect(streakStore.getSnapshot().count).toBe(0);
     expect(notifyDigest).not.toHaveBeenCalled();
   });
 
@@ -301,14 +304,18 @@ describe('runMorningPushTick', () => {
     const pushStateStore = new MorningPushStateStore(
       path.join(os.tmpdir(), `morning-push-fresh-${String(Date.now())}.json`),
     );
+    const streakStore = new MorningStreakStore(
+      path.join(os.tmpdir(), `morning-streak-fresh-${String(Date.now())}.json`),
+    );
 
-    expect(morningStreakStore.getSnapshot().lastRecordedDate).toBeNull();
+    expect(streakStore.getSnapshot().lastRecordedDate).toBeNull();
     runMorningPushTick(store, Date.parse('2026-07-13T09:00:00Z'), {
       env: { WAR_ROOM_MORNING_TZ: 'UTC', WAR_ROOM_MORNING_PUSH_HOUR: '6' },
       notifyDigest,
       pushStateStore,
+      streakStore,
     });
-    const snap = morningStreakStore.getSnapshot();
+    const snap = streakStore.getSnapshot();
     expect(snap.lastRecordedDate).toBeNull();
     expect(snap.lastBreachReason).toBeNull();
   });
