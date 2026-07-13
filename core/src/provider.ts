@@ -1,10 +1,9 @@
 /**
  * Provider abstraction for AI agent tools.
  *
- * Only HookProvider ships today (Claude Code). Transcript-polling and push-based
- * provider types will be added when a real second provider (Codex, Goose,
- * Discord, etc.) actually lands, derived from that provider's needs rather than
- * speculation.
+ * HookProvider currently covers Claude Code and Codex. Transcript-polling and
+ * push-based provider types will be added when another provider needs them,
+ * derived from that provider's behavior rather than speculation.
  */
 
 import type { TeamProvider } from './teamProvider.js';
@@ -16,13 +15,24 @@ export type AgentEvent =
       kind: 'toolStart';
       toolId: string;
       toolName: string;
+      /** Provider-produced, display-safe status text. When absent, the runtime
+       *  derives one with HookProvider.formatToolStatus(). */
+      status?: string;
       input?: unknown;
       /** True when the tool was spawned to run in the background (e.g. Claude's
        *  `run_in_background` on Agent/Task). Handlers use this to suppress ghost
        *  sub-agent characters for teammate spawns. */
       runInBackground?: boolean;
     }
-  | { kind: 'toolEnd'; toolId: string }
+  | {
+      kind: 'toolEnd';
+      toolId: string;
+      /** Best-effort outcome metadata. Providers must never place raw tool
+       *  responses in these fields. */
+      status?: string;
+      failed?: boolean;
+      durationMs?: number;
+    }
   | {
       kind: 'turnEnd';
       /** True when the turn ended because the agent went idle waiting on the
@@ -36,6 +46,7 @@ export type AgentEvent =
       parentToolId: string;
       toolId: string;
       toolName: string;
+      status?: string;
       input?: unknown;
       runInBackground?: boolean;
     }
@@ -49,7 +60,7 @@ export type AgentEvent =
       reason: 'idle' | 'completed';
     }
   | { kind: 'progress'; toolId: string; data: unknown }
-  | { kind: 'permissionRequest' }
+  | { kind: 'permissionRequest'; toolName?: string; status?: string }
   | {
       kind: 'sessionStart';
       source?: string;

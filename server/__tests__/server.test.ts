@@ -199,6 +199,37 @@ describe('PixelAgentsServer', () => {
     expect(received[1].__pid).toBeUndefined();
   });
 
+  it('injects authenticated coworker-adapter source metadata and ignores body spoofing', async () => {
+    const config = await server.start();
+    const received: Array<Record<string, unknown>> = [];
+    server.onHookEvent((_providerId: string, event: Record<string, unknown>) => {
+      received.push(event);
+    });
+
+    await fetch(`http://127.0.0.1:${config.port}/api/hooks/codex`, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        Authorization: `Bearer ${config.token}`,
+        'X-War-Room-Hook-Source': 'coworker-adapter',
+      },
+      body: JSON.stringify({ session_id: 'adapter', hook_event_name: 'Stop' }),
+    });
+    await postHook(
+      config.port,
+      config.token,
+      JSON.stringify({
+        session_id: 'spoofed',
+        hook_event_name: 'Stop',
+        __source: 'coworker-adapter',
+      }),
+      'codex',
+    );
+
+    expect(received[0].__source).toBe('coworker-adapter');
+    expect(received[1].__source).toBeUndefined();
+  });
+
   // 6. Hook endpoint rejects oversized body
   it('hook endpoint returns 413 for oversized body', async () => {
     const config = await server.start();

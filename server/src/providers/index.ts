@@ -11,5 +11,25 @@
  * than reaching into each provider directory directly.
  */
 
-export { claudeProvider } from './hook/claude/claude.js';
+import type { HookProvider } from '../../../core/src/provider.js';
+import { claudeProvider } from './hook/claude/claude.js';
+import { codexProvider } from './hook/codex/codex.js';
+
+export { claudeProvider };
 export { copyHookScript } from './hook/claude/claudeHookInstaller.js';
+export { codexProvider };
+
+/** All native hook normalizers keyed by the authenticated ingest provider id. */
+export const hookProviderRegistry: ReadonlyMap<string, HookProvider> = new Map([
+  [claudeProvider.id, claudeProvider],
+  [codexProvider.id, codexProvider],
+]);
+
+/** Webviews currently receive one global tool taxonomy, so expose the union of
+ * bundled provider capabilities. Provider identity still travels per agent. */
+export const hookProviderCapabilities = {
+  readingTools: [...new Set([...claudeProvider.readingTools, ...codexProvider.readingTools])],
+  subagentToolNames: [
+    ...new Set([...claudeProvider.subagentToolNames, ...codexProvider.subagentToolNames]),
+  ],
+};

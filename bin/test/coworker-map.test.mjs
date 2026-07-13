@@ -46,6 +46,7 @@ test('codex: task_started → PreToolUse(Codex); task_complete → PostToolUse +
   assert.equal(start.length, 1);
   assert.equal(start[0].hook_event_name, 'PreToolUse');
   assert.equal(start[0].tool_name, 'Codex');
+  assert.equal(start[0].tool_use_id, 'turn:t-1');
   assert.equal(start[0].session_id, SID);
   assert.equal(start[0].cwd, '/x');
 
@@ -59,7 +60,7 @@ test('codex: task_started → PreToolUse(Codex); task_complete → PostToolUse +
   );
 });
 
-test('codex: shell function_call maps to Bash with the real command', () => {
+test('codex: shell function_call maps to exec with call_id correlation', () => {
   const state = { sessionId: SID };
   const events = mapCodexLine(
     {
@@ -67,24 +68,134 @@ test('codex: shell function_call maps to Bash with the real command', () => {
       payload: {
         type: 'function_call',
         name: 'shell',
+        call_id: 'call-shell-1',
         arguments: JSON.stringify({ command: ['bash', '-lc', 'npm test'] }),
       },
     },
     state,
   );
   assert.equal(events.length, 1);
-  assert.equal(events[0].tool_name, 'Bash');
+  assert.equal(events[0].tool_name, 'exec');
+  assert.equal(events[0].tool_use_id, 'call-shell-1');
   assert.deepEqual(events[0].tool_input, { command: 'bash -lc npm test' });
 });
 
-test('codex: approval requests map to a permission_prompt Notification (NEEDS INPUT)', () => {
+test('codex: approval requests map to PermissionRequest (NEEDS INPUT)', () => {
   const state = { sessionId: SID };
   for (const type of ['exec_approval_request', 'apply_patch_approval_request']) {
     const events = mapCodexLine({ type: 'event_msg', payload: { type } }, state);
     assert.equal(events.length, 1, type);
-    assert.equal(events[0].hook_event_name, 'Notification');
-    assert.equal(events[0].notification_type, 'permission_prompt');
+    assert.equal(events[0].hook_event_name, 'PermissionRequest');
+    assert.equal(events[0].tool_name, type === 'exec_approval_request' ? 'exec' : 'apply_patch');
   }
+});
+
+test('codex: custom_tool_call/output correlate start and end without output bodies', () => {
+  const state = { sessionId: SID, cwd: '/x' };
+  const start = mapCodexLine(
+    {
+      type: 'response_item',
+      payload: {
+        type: 'custom_tool_call',
+        name: 'exec',
+        call_id: 'custom-1',
+        input: 'SECRET COMMAND BODY',
+      },
+    },
+    state,
+  );
+  assert.equal(start[0].hook_event_name, 'PreToolUse');
+  assert.equal(start[0].tool_use_id, 'custom-1');
+
+  const end = mapCodexLine(
+    {
+      type: 'response_item',
+      payload: {
+        type: 'custom_tool_call_output',
+        call_id: 'custom-1',
+        status: 'completed',
+        output: 'SECRET TOOL OUTPUT',
+      },
+    },
+    state,
+  );
+  assert.equal(end[0].hook_event_name, 'PostToolUse');
+  assert.equal(end[0].tool_use_id, 'custom-1');
+  assert.equal(JSON.stringify(end).includes('SECRET TOOL OUTPUT'), false);
+});
+
+test('codex: patch_apply_end emits safe correlated completion status', () => {
+  const events = mapCodexLine(
+    {
+      type: 'event_msg',
+      payload: {
+        type: 'patch_apply_end',
+        call_id: 'patch-1',
+        status: 'failed',
+        success: false,
+        stdout: 'SECRET STDOUT',
+        stderr: 'SECRET STDERR',
+        changes: { '/secret/file': 'private diff' },
+      },
+    },
+    { sessionId: SID },
+  );
+  assert.deepEqual(events, [
+    {
+      session_id: SID,
+      cwd: undefined,
+      hook_event_name: 'PostToolUse',
+      tool_use_id: 'patch-1',
+      tool_response: { success: false, status: 'failed' },
+    },
+  ]);
+});
+
+test('codex: mcp_tool_call_end emits a safe paired lifecycle with duration', () => {
+  const events = mapCodexLine(
+    {
+      type: 'event_msg',
+      payload: {
+        type: 'mcp_tool_call_end',
+        call_id: 'mcp-1',
+        invocation: { server: 'github', tool: 'get_issue', arguments: { id: 'SECRET' } },
+        result: 'SECRET RESULT',
+        duration: 17,
+      },
+    },
+    { sessionId: SID },
+  );
+  assert.deepEqual(
+    events.map((event) => [event.hook_event_name, event.tool_use_id]),
+    [
+      ['PreToolUse', 'mcp-1'],
+      ['PostToolUse', 'mcp-1'],
+    ],
+  );
+  assert.equal(events[0].tool_name, 'mcp__github__get_issue');
+  assert.equal(events[1].tool_response.duration, 17);
+  assert.equal(JSON.stringify(events).includes('SECRET'), false);
+});
+
+test('codex: web_search_end emits paired lifecycle without the private query', () => {
+  const events = mapCodexLine(
+    {
+      type: 'event_msg',
+      payload: {
+        type: 'web_search_end',
+        call_id: 'web-1',
+        action: 'search',
+        query: 'SECRET SEARCH QUERY',
+      },
+    },
+    { sessionId: SID },
+  );
+  assert.deepEqual(
+    events.map((event) => event.hook_event_name),
+    ['PreToolUse', 'PostToolUse'],
+  );
+  assert.equal(events[0].tool_name, 'web_search');
+  assert.equal(JSON.stringify(events).includes('SECRET SEARCH QUERY'), false);
 });
 
 test('codex: lines before identity, unknown types, and garbage are skipped', () => {

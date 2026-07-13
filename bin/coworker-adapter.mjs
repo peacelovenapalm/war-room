@@ -17,6 +17,10 @@
  * (their session_meta line is read for identity), and the first Gemini scan
  * only indexes. No message content is forwarded — tool names/commands only
  * for Codex, bare heartbeats for Gemini.
+ * Every synthetic POST carries X-War-Room-Hook-Source: coworker-adapter. The
+ * server processes activity only until a native hook reaches that session;
+ * hookDelivered then suppresses duplicate activity while retaining the
+ * fallback's synthetic SessionEnd (Codex has no native end hook).
  *
  * Failure policy: unreadable files and unreachable servers skip the tick
  * with a ⚠ log line; the adapter never crashes on bad data.
@@ -46,6 +50,8 @@ import {
 
 const POST_TIMEOUT_MS = 10_000;
 const MIN_INTERVAL_MS = 1_000;
+const HOOK_SOURCE_HEADER = 'x-war-room-hook-source';
+const COWORKER_ADAPTER_HOOK_SOURCE = 'coworker-adapter';
 /** A Gemini session with no new messages for this long goes idle. */
 const GEMINI_IDLE_MS = 45_000;
 /** Only tail rollout files touched within this window (bound the scan). */
@@ -115,6 +121,7 @@ async function postEvents(cfg, provider, events) {
           'content-type': 'application/json',
           authorization: `Bearer ${cfg.token}`,
           'x-machine': cfg.machine,
+          [HOOK_SOURCE_HEADER]: COWORKER_ADAPTER_HOOK_SOURCE,
         },
         body: JSON.stringify(event),
         signal: AbortSignal.timeout(POST_TIMEOUT_MS),
