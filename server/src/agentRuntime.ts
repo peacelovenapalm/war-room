@@ -30,9 +30,9 @@ import {
   startFileWatching,
   startStaleExternalAgentCheck,
 } from './fileWatcher.js';
-import type { HookEvent } from './hookEventHandler.js';
+import type { HookEvent, SessionEndDistillFields } from './hookEventHandler.js';
 import { HookEventHandler } from './hookEventHandler.js';
-import { distillEndedSession } from './memoryDistiller.js';
+import { distillFromSessionEnd } from './memoryDistiller.js';
 import { SessionRouter } from './sessionRouter.js';
 import { shiftStats } from './shiftStats.js';
 import { cancelPermissionTimer, cancelWaitingTimer } from './timerManager.js';
@@ -189,10 +189,10 @@ export class AgentRuntime {
       onTeammateRemoved: (teammateAgentId) => {
         this.removeTeammate(teammateAgentId, 'hooks');
       },
-      onSessionEnd: (agentId) => {
+      onSessionEnd: (agentId, _reason, distill) => {
         const agent = this.store.get(agentId);
         if (!agent) return;
-        this.distillAgent(agent);
+        this.distillAgent(agent, distill);
         this.dismissalTracker.clearSeededMtime(agent.jsonlFile);
         this.dismissalTracker.dismiss(agent.jsonlFile);
         if (agent.isTeamLead) {
@@ -228,16 +228,19 @@ export class AgentRuntime {
     this.hookEventHandler.unregisterAgent(sessionId);
   }
 
-  private distillAgent(agent: AgentState): void {
+  private distillAgent(agent: AgentState, distill?: SessionEndDistillFields): void {
     if (this.distilledSessionIds.has(agent.sessionId)) return;
     this.distilledSessionIds.add(agent.sessionId);
-    // V7-1: hook SessionEnd and manifest/stale removal both funnel here.
-    // The job returns disabled before transcript access unless an explicit
-    // WAR_ROOM_VAULT_DIR exists; no homedir/vault fallback is possible.
-    distillEndedSession({
+    // V7-1/V8: hook SessionEnd (optionally carrying a client-side distilled
+    // note or failure marker -- see memoryDistiller.ts distillFromSessionEnd)
+    // and manifest/stale removal both funnel here. The job returns disabled
+    // before any transcript/vault access unless an explicit WAR_ROOM_VAULT_DIR
+    // exists; no homedir/vault fallback is possible.
+    distillFromSessionEnd({
       sessionId: agent.sessionId,
       transcriptPath: agent.jsonlFile,
       model: 'deterministic-v1',
+      clientDistill: distill,
     });
   }
 

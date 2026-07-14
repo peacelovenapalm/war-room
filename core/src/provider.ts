@@ -71,7 +71,52 @@ export type AgentEvent =
        *  external sessions against known workspace folders. */
       cwd?: string;
     }
-  | { kind: 'sessionEnd'; reason?: string };
+  | {
+      kind: 'sessionEnd';
+      reason?: string;
+      /** V8: client-side distill. Hooks-only external sessions run on a
+       *  machine the server can never read a transcript from, so the hook
+       *  script distills locally at SessionEnd and ships only the finished
+       *  note (never the raw transcript). Present when local distill
+       *  succeeded; mutually exclusive with distillSkipped/distillFailed. */
+      distilledNote?: ClientDistilledNote;
+      /** True when the session's transcript carried the skip-distill tag.
+       *  No note is included; the server records an honest skip receipt. */
+      distillSkipped?: boolean;
+      /** True when local distill failed (missing/unreadable transcript,
+       *  parse error). Never fabricated as a note. */
+      distillFailed?: boolean;
+      /** Short, non-sensitive failure reason string when distillFailed is
+       *  true (e.g. 'no-transcript-path', a truncated error message). */
+      distillFailReason?: string;
+    };
+
+/**
+ * Wire shape of a client-distilled session note (mirrors server
+ * DistilledNote in server/src/memoryDistillerCore.ts). Defined independently
+ * here — rather than imported — because core/ must depend on nothing:
+ * server-side code re-validates every field before it ever reaches the
+ * MemoryStore write chokepoint; this type only describes the JSON on the
+ * wire.
+ */
+export interface ClientDistilledNote {
+  sessionId: string;
+  date: string;
+  model: string;
+  distilledAt: string;
+  confidence: 'EXTRACTED';
+  decisions: Array<{
+    topic: string;
+    verdict: string;
+    sessionId: string;
+    date: string;
+    verbatim: string;
+    lineNumber: number;
+  }>;
+  facts: Array<{ text: string; verbatim: string; lineNumber: number }>;
+  openThreads: Array<{ text: string; verbatim: string; lineNumber: number }>;
+  links: string[];
+}
 
 // ── Hook-based Provider (CLIs with hooks APIs) ────────────────
 

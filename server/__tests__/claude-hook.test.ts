@@ -106,6 +106,163 @@ describe('claude-hook.js integration', () => {
     expect(code).toBe(0);
   });
 
+  // V8: SessionEnd distills locally and attaches the note/marker to the POST body
+  it('attaches a client-distilled note on SessionEnd when transcript_path is readable', async () => {
+    skipIfNotBuilt();
+    if (!fs.existsSync(HOOK_SCRIPT)) return;
+
+    const transcriptPath = path.join(tmpBase, 'session.jsonl');
+    fs.writeFileSync(
+      transcriptPath,
+      [
+        JSON.stringify({ type: 'user', message: { content: 'Fact: hooks are the trigger' } }),
+        JSON.stringify({
+          type: 'assistant',
+          message: { content: [{ type: 'text', text: 'Decision[write mode]: STAGED' }] },
+        }),
+      ].join('\n'),
+    );
+
+    const received: string[] = [];
+    const server = http.createServer((req, res) => {
+      let body = '';
+      req.on('data', (c: Buffer) => (body += c.toString()));
+      req.on('end', () => {
+        received.push(body);
+        res.writeHead(200);
+        res.end('ok');
+      });
+    });
+    await new Promise<void>((r) => server.listen(0, '127.0.0.1', r));
+    writeServerJson((server.address() as { port: number }).port, 'test-token');
+
+    const event = JSON.stringify({
+      session_id: 'abc',
+      hook_event_name: 'SessionEnd',
+      reason: 'exit',
+      transcript_path: transcriptPath,
+    });
+    const { code } = await runHookScript(event);
+    server.close();
+
+    expect(code).toBe(0);
+    expect(received).toHaveLength(1);
+    const body = JSON.parse(received[0]) as {
+      distilledNote?: { decisions: Array<{ topic: string; verdict: string }>; facts: unknown[] };
+      distillSkipped?: boolean;
+      distillFailed?: boolean;
+    };
+    expect(body.distillFailed).toBeUndefined();
+    expect(body.distillSkipped).toBeUndefined();
+    expect(body.distilledNote?.decisions).toEqual([
+      expect.objectContaining({ topic: 'write mode', verdict: 'STAGED' }),
+    ]);
+    expect(body.distilledNote?.facts).toHaveLength(1);
+  });
+
+  it('attaches distillSkipped when the transcript carries the skip tag', async () => {
+    skipIfNotBuilt();
+    if (!fs.existsSync(HOOK_SCRIPT)) return;
+
+    const transcriptPath = path.join(tmpBase, 'skip-session.jsonl');
+    fs.writeFileSync(
+      transcriptPath,
+      JSON.stringify({ type: 'user', message: { content: 'please #wr-skip-distill' } }),
+    );
+
+    const received: string[] = [];
+    const server = http.createServer((req, res) => {
+      let body = '';
+      req.on('data', (c: Buffer) => (body += c.toString()));
+      req.on('end', () => {
+        received.push(body);
+        res.writeHead(200);
+        res.end('ok');
+      });
+    });
+    await new Promise<void>((r) => server.listen(0, '127.0.0.1', r));
+    writeServerJson((server.address() as { port: number }).port, 'test-token');
+
+    const { code } = await runHookScript(
+      JSON.stringify({
+        session_id: 'abc',
+        hook_event_name: 'SessionEnd',
+        reason: 'exit',
+        transcript_path: transcriptPath,
+      }),
+    );
+    server.close();
+
+    expect(code).toBe(0);
+    const body = JSON.parse(received[0]) as { distillSkipped?: boolean; distilledNote?: unknown };
+    expect(body.distillSkipped).toBe(true);
+    expect(body.distilledNote).toBeUndefined();
+  });
+
+  it('attaches a distillFailed marker, never a fabricated note, when transcript_path is missing/unreadable', async () => {
+    skipIfNotBuilt();
+    if (!fs.existsSync(HOOK_SCRIPT)) return;
+
+    const received: string[] = [];
+    const server = http.createServer((req, res) => {
+      let body = '';
+      req.on('data', (c: Buffer) => (body += c.toString()));
+      req.on('end', () => {
+        received.push(body);
+        res.writeHead(200);
+        res.end('ok');
+      });
+    });
+    await new Promise<void>((r) => server.listen(0, '127.0.0.1', r));
+    writeServerJson((server.address() as { port: number }).port, 'test-token');
+
+    // No transcript_path at all -- the hooks-only external-session case that
+    // originally motivated V8 (the server can never read a remote transcript).
+    const { code } = await runHookScript(
+      JSON.stringify({ session_id: 'abc', hook_event_name: 'SessionEnd', reason: 'exit' }),
+    );
+    server.close();
+
+    expect(code).toBe(0);
+    const body = JSON.parse(received[0]) as {
+      distillFailed?: boolean;
+      distillFailReason?: string;
+      distilledNote?: unknown;
+    };
+    expect(body.distillFailed).toBe(true);
+    expect(body.distillFailReason).toBe('no-transcript-path');
+    expect(body.distilledNote).toBeUndefined();
+  });
+
+  it('non-SessionEnd events are never touched by the distiller', async () => {
+    skipIfNotBuilt();
+    if (!fs.existsSync(HOOK_SCRIPT)) return;
+
+    const received: string[] = [];
+    const server = http.createServer((req, res) => {
+      let body = '';
+      req.on('data', (c: Buffer) => (body += c.toString()));
+      req.on('end', () => {
+        received.push(body);
+        res.writeHead(200);
+        res.end('ok');
+      });
+    });
+    await new Promise<void>((r) => server.listen(0, '127.0.0.1', r));
+    writeServerJson((server.address() as { port: number }).port, 'test-token');
+
+    const { code } = await runHookScript(
+      JSON.stringify({ session_id: 'abc', hook_event_name: 'Stop' }),
+    );
+    server.close();
+
+    expect(code).toBe(0);
+    const body = JSON.parse(received[0]) as Record<string, unknown>;
+    expect('distilledNote' in body).toBe(false);
+    expect('distillFailed' in body).toBe(false);
+    expect('distillSkipped' in body).toBe(false);
+  });
+
   // 6. Script handles server timeout
   it('exits within 5s when server does not respond', async () => {
     skipIfNotBuilt();

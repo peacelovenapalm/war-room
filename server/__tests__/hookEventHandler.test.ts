@@ -67,6 +67,17 @@ function createMockWebview() {
   };
 }
 
+/** V8: sessionEnd AgentEvent's distill fields, all absent -- the shape
+ *  onSessionEnd receives when a SessionEnd hook payload carries no
+ *  client-side distill result (e.g. codex/coworker sessions, or any Claude
+ *  event that predates the hook script attaching them). */
+const EMPTY_DISTILL = {
+  distilledNote: undefined,
+  distillSkipped: undefined,
+  distillFailed: undefined,
+  distillFailReason: undefined,
+};
+
 describe('HookEventHandler', () => {
   let agents: AgentStateStore;
   let waitingTimers: Map<number, ReturnType<typeof setTimeout>>;
@@ -411,7 +422,7 @@ describe('HookEventHandler', () => {
       reason: 'exit',
       __source: 'coworker-adapter',
     });
-    expect(onSessionEnd).toHaveBeenCalledWith(1, 'exit');
+    expect(onSessionEnd).toHaveBeenCalledWith(1, 'exit', EMPTY_DISTILL);
   });
 
   it('adopts a local adapter session without requiring X-Machine or SessionStart', () => {
@@ -709,7 +720,7 @@ describe('HookEventHandler', () => {
 
     // Exit is immediate, no pendingClear delay
     expect(agent.isWaiting).toBe(true);
-    expect(onSessionEnd).toHaveBeenCalledWith(1, 'exit');
+    expect(onSessionEnd).toHaveBeenCalledWith(1, 'exit', EMPTY_DISTILL);
   });
 
   it('SessionEnd(reason=resume) delays onSessionEnd for SESSION_END_GRACE_MS', async () => {
@@ -733,7 +744,7 @@ describe('HookEventHandler', () => {
 
     // Wait for grace period (2000ms + margin)
     await new Promise((r) => setTimeout(r, 2500));
-    expect(onSessionEnd).toHaveBeenCalledWith(1, 'resume');
+    expect(onSessionEnd).toHaveBeenCalledWith(1, 'resume', EMPTY_DISTILL);
     expect(agent.pendingClear).toBe(false);
   });
 
