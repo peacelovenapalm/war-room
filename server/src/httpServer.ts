@@ -61,6 +61,7 @@ import { addRoom, buyFurniture, expandOffice, getOfficeLayout, sell } from './of
 import type { RoomType } from './officeLayoutTypes.js';
 import { RoomType as RoomTypeValues } from './officeLayoutTypes.js';
 import { getOpsReview, opsReviewSummary } from './opsAdvisor.js';
+import { appendOutputChunkInBoundedParts } from './outputChunkAppender.js';
 import { outputRingStore, outputStreamKey, parseOutputStreamKey } from './outputRingStore.js';
 import { perfectOpsDay } from './perfectOpsDay.js';
 import { applyPollStates, parsePollBody, startPollStateSweep } from './pollStateHandler.js';
@@ -1050,7 +1051,12 @@ function registerAgentOutputRoute(app: FastifyInstance, options: HttpServerOptio
       // line-boundary contract, and the client immediately replaces every
       // intermediate cumulative token total with the final one.
       if (renderedChunks.length > 0) {
-        outputRingStore.append('agent', String(agentId), 'transcript', renderedChunks.join(''));
+        appendOutputChunkInBoundedParts(
+          'agent',
+          String(agentId),
+          'transcript',
+          renderedChunks.join(''),
+        );
       }
       applyTokenUsageBatch(agentId, agent, usageDeltas, options.store);
       reply.send({ ok: true });

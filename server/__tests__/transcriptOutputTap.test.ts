@@ -42,6 +42,7 @@ vi.mock('os', async () => {
 });
 
 const { AgentStateStore } = await import('../src/agentStateStore.js');
+const { OUTPUT_CHUNK_APPEND_BYTE_BUDGET } = await import('../src/constants.js');
 const { readNewLines } = await import('../src/fileWatcher.js');
 const { outputRingStore } = await import('../src/outputRingStore.js');
 const { PixelAgentsServer } = await import('../src/server.js');
@@ -221,6 +222,36 @@ describe('readNewLines → ring integration (real JSONL fixtures)', () => {
     expect(chunks.map((c) => c.seq)).toEqual([0]);
     expect(chunks.every((c) => c.source === 'agent' && c.stream === 'transcript')).toBe(true);
     expect(chunks.every((c) => c.id === String(id))).toBe(true);
+  });
+
+  it('splits a large coalesced poll without losing its content or older retained history', () => {
+    const olderChunk = 'already retained\n';
+    const largeTexts = [
+      `first:${'🙂'.repeat(4_500)}`,
+      `second:${'界'.repeat(6_000)}`,
+      `third:${'é'.repeat(9_000)}`,
+    ];
+    const expectedBatch = largeTexts.map((text) => `${text}\n`).join('');
+    expect(Buffer.byteLength(expectedBatch, 'utf8')).toBeGreaterThan(
+      OUTPUT_CHUNK_APPEND_BYTE_BUDGET,
+    );
+    const { id } = seedAgentWithFile(largeTexts.map(assistantText));
+    outputRingStore.append('agent', String(id), 'transcript', olderChunk);
+
+    readNewLines(id, agents, waitingTimers, permissionTimers);
+
+    const replay = outputRingStore.replay('agent', String(id));
+    const batchChunks = replay.slice(1);
+    expect(batchChunks.length).toBeGreaterThan(1);
+    expect(
+      batchChunks.every(
+        (chunk) => Buffer.byteLength(chunk.chunk, 'utf8') <= OUTPUT_CHUNK_APPEND_BYTE_BUDGET,
+      ),
+    ).toBe(true);
+    expect(batchChunks.map((chunk) => chunk.chunk).join('')).toBe(expectedBatch);
+    expect(replay.map((chunk) => chunk.chunk).join('')).toBe(`${olderChunk}${expectedBatch}`);
+    expect(replay[0]).toMatchObject({ chunk: olderChunk, seq: 0, truncated: false });
+    expect(replay.map((chunk) => chunk.seq)).toEqual(replay.map((_, index) => index));
   });
 
   it('broadcasts only the final token total for a multi-record poll', () => {

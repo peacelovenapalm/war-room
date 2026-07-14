@@ -29,6 +29,7 @@
 
 import * as path from 'path';
 
+import { appendOutputChunkInBoundedParts } from './outputChunkAppender.js';
 import { outputRingStore } from './outputRingStore.js';
 
 /** Longest rendered argument inside a tool one-liner. */
@@ -154,9 +155,10 @@ export function tapTranscriptLine(agentId: number, line: string): void {
 }
 
 /**
- * Append the renderable records from one file-watcher poll as one chunk.
- * readNewLines already parsed these records for lifecycle state, so this
- * avoids both reparsing and one WS fan-out per line in the same 500ms poll.
+ * Append the renderable records from one file-watcher poll as the fewest
+ * size-bounded chunks. readNewLines already parsed these records for
+ * lifecycle state, so this avoids both reparsing and one WS fan-out per line
+ * in the same 500ms poll.
  */
 export function tapTranscriptRecords(agentId: number, records: readonly unknown[]): void {
   try {
@@ -166,7 +168,7 @@ export function tapTranscriptRecords(agentId: number, records: readonly unknown[
       if (text !== undefined) rendered.push(`${text}\n`);
     }
     if (rendered.length === 0) return;
-    outputRingStore.append('agent', String(agentId), 'transcript', rendered.join(''));
+    appendOutputChunkInBoundedParts('agent', String(agentId), 'transcript', rendered.join(''));
   } catch {
     // Telemetry only: swallow everything.
   }

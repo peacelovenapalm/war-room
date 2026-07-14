@@ -54,6 +54,13 @@ export const HOOK_SOURCE_HEADER = 'x-war-room-hook-source';
 /** Header/tag value for the rollout-tail fallback lane. */
 export const COWORKER_ADAPTER_HOOK_SOURCE = 'coworker-adapter';
 
+// ── Output streaming ───────────────────────────────────────
+/** Maximum UTF-8 payload bytes in one coalesced output-ring append. One
+ *  quarter of the ring's 128KB per-stream retention budget leaves room for
+ *  earlier history while bounding a maximum-size 1MB remote ingest batch
+ *  to about 32 sequential chunks (well below the 1024-chunk ring cap). */
+export const OUTPUT_CHUNK_APPEND_BYTE_BUDGET = 32 * 1024; // 32KB
+
 // ── Remote agent output ingest (T1 remote live-tail, S1/S3) ─
 /** POST /api/agents/output body caps (mirrors the poll route's ingest-cap
  *  style): a batch larger than this, a line longer than this, or a batch
