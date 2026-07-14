@@ -1929,3 +1929,41 @@ Handoff: `SESSION-HANDOFF-2026-07-14-live-bugs.md`.
   (session-scratch path, see handoff §4).
 - Root `CLAUDE.md` confirmed stale re: `webview-v3` (the actual live
   UI) — not documented there at all. Not fixed this session.
+
+## POSITION — 2026-07-14 (Group B correctness fixes + web-perf pass, NOT merged)
+
+Handoff: `SESSION-HANDOFF-2026-07-14-groupb-and-perf.md`.
+
+- Finished the 6 parked Group B2-B7 correctness bugs via a fresh codex
+  `gpt-5.6-sol high` fix-lane on `lane/live-bugs-fix` (7 commits), then
+  an independent code-review pass (not trusting self-authored tests)
+  found a real multi-agent WS-reconnect race the fix introduced —
+  confirmed by hand-reading the actual reducer/message-flow code — plus
+  a medium spurious-notification bug and an orphaned dead-code item.
+  A scoped follow-up codex pass fixed all three (3 more commits),
+  independently re-verified clean.
+- Caught and fixed a process-hygiene incident: `npm run e2e` (full
+  suite) launches a real VS Code Electron instance, wrong for this
+  Tailscale-hosted box and irrelevant to `webview-v3` — killed it,
+  switched to the correctly-scoped `npm run e2e:v3-dpr` for the rest
+  of the session.
+- Diagnosed a near-total e2e collapse (31/39 failing) via a live
+  browser repro + a temporary pageerror probe (removed before
+  committing) down to 2 stale e2e-mock fixture gaps exposed (not
+  caused) by Group B — fixed in the mock, not application code
+  (1 commit). e2e back to 36 passed / 3 known-preexisting failures
+  (down from 6 last session — the MORNING flakes are gone now that
+  the mock fixture actually matches the real contract).
+- Web-perf pass (codex `gpt-5.6-sol high`, `/web-perf` skill
+  methodology): oversized poster PNGs resized (~2.1MB saved,
+  survived an external "model at capacity" interruption mid-run —
+  verified the partial work was sound before committing), ~842KB of
+  dead legacy-asset WS replay skipped for v3 clients via a
+  backward-compatible additive protocol field, static assets
+  Brotli-compressed + cache-headered (74% smaller transfer), 13
+  rarely-opened panels lazy-loaded (~25%/21% smaller critical JS
+  raw/gzip). Independently re-verified: gates green, e2e/v3 clean at
+  the same 36/3 baseline, zero regressions.
+- **30 commits total on `lane/live-bugs-fix`, all gates green,
+  e2e-verified twice this session. NOT merged, NOT pushed** — held
+  for Greg's review, same established precedent as last session.
