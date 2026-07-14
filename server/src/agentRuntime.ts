@@ -47,6 +47,13 @@ export interface RuntimeLifecycleCallbacks {
   onTeammateRemoved?: (teammateId: number, agent: AgentState, source: string) => void;
 }
 
+/**
+ * SessionEnd can arrive through both hooks and later manifest/stale cleanup.
+ * Retain enough completed ids to suppress late duplicates without allowing a
+ * long-lived server's /clear and /resume history to grow without bound.
+ */
+export const DISTILLED_SESSION_DEDUPE_CAP = 1_024;
+
 export class AgentRuntime {
   // Per-agent timer Maps (shared by all fileWatcher/hookEventHandler operations)
   readonly fileWatchers = new Map<number, fs.FSWatcher>();
@@ -248,6 +255,10 @@ export class AgentRuntime {
   ): void {
     if (this.distilledSessionIds.has(sessionId)) return;
     this.distilledSessionIds.add(sessionId);
+    if (this.distilledSessionIds.size > DISTILLED_SESSION_DEDUPE_CAP) {
+      const oldestSessionId = this.distilledSessionIds.values().next().value;
+      if (oldestSessionId !== undefined) this.distilledSessionIds.delete(oldestSessionId);
+    }
     // V7-1/V8: hook SessionEnd (optionally carrying a client-side distilled
     // note or failure marker -- see memoryDistiller.ts distillFromSessionEnd)
     // and manifest/stale removal both funnel here. The job returns disabled
