@@ -9,6 +9,8 @@
  * serves the wrong face at root or strands every existing bookmark.
  */
 
+import { brotliCompressSync } from 'node:zlib';
+
 import * as crypto from 'crypto';
 import * as fs from 'fs';
 import * as os from 'os';
@@ -69,6 +71,33 @@ describe('face-merge static routing', () => {
     expect(await root.text()).toContain('V3-FACE');
     const deep = await fetch(`http://127.0.0.1:${String(port)}/some/spa/route`);
     expect(await deep.text()).toContain('V3-FACE');
+  });
+
+  it('serves precompressed build assets with content-aware caching and etags', async () => {
+    const assetsDir = path.join(rootFaceDir, 'assets');
+    fs.mkdirSync(assetsDir);
+    const hashedPath = path.join(assetsDir, 'app-AbCd1234.js');
+    const source = 'console.log("compressed build asset");'.repeat(100);
+    fs.writeFileSync(hashedPath, source);
+    fs.writeFileSync(`${hashedPath}.br`, brotliCompressSync(source));
+    fs.writeFileSync(path.join(assetsDir, 'stable-sprite.json'), '{}');
+
+    const port = await startServer(true);
+    const root = await fetch(`http://127.0.0.1:${String(port)}/`);
+    expect(root.headers.get('cache-control')).toBe('public, max-age=0, must-revalidate');
+    expect(root.headers.get('etag')).toMatch(/^W\//);
+
+    const hashed = await fetch(`http://127.0.0.1:${String(port)}/assets/app-AbCd1234.js`, {
+      headers: { 'accept-encoding': 'br' },
+    });
+    expect(hashed.headers.get('content-encoding')).toBe('br');
+    expect(hashed.headers.get('vary')).toContain('Accept-Encoding');
+    expect(hashed.headers.get('cache-control')).toBe('public, max-age=31536000, immutable');
+    expect(hashed.headers.get('etag')).toMatch(/^W\//);
+    expect(await hashed.text()).toBe(source);
+
+    const stable = await fetch(`http://127.0.0.1:${String(port)}/assets/stable-sprite.json`);
+    expect(stable.headers.get('cache-control')).toBe('public, max-age=3600');
   });
 
   it('serves the legacy face at /v1/ with its own SPA fallback', async () => {

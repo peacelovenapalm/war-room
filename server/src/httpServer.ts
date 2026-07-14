@@ -129,6 +129,36 @@ export interface HttpServerHandle {
 
 const startTime = Date.now();
 
+const ONE_YEAR_SECONDS = 365 * 24 * 60 * 60;
+const ONE_HOUR_SECONDS = 60 * 60;
+const HASHED_BUILD_ASSET_RE = /(?:^|[/\\])[^/\\]+-[A-Za-z0-9_-]{8,}\.(?:css|js)$/;
+const staticResponses = new WeakSet<object>();
+
+/** Cache policy for standalone static files. Vite's content-hashed JS/CSS
+ * is safe for immutable caching; stable-name sprites can skip repeat
+ * requests briefly but must pick up deploys; HTML/SW/manifest files always
+ * revalidate so a new build can take control immediately. `filePath` may
+ * name a selected .br/.gz sibling when preCompressed is active. */
+function setStaticCacheHeader(
+  response: { setHeader(name: string, value: string): void },
+  filePath: string,
+): void {
+  staticResponses.add(response);
+  const sourcePath = filePath.replace(/\.(?:br|gz)$/, '');
+  if (HASHED_BUILD_ASSET_RE.test(sourcePath)) {
+    response.setHeader('Cache-Control', `public, max-age=${String(ONE_YEAR_SECONDS)}, immutable`);
+    return;
+  }
+  if (
+    /\.(?:html|webmanifest)$/.test(sourcePath) ||
+    /[/\\](?:registerSW|sw)\.js$/.test(sourcePath)
+  ) {
+    response.setHeader('Cache-Control', 'public, max-age=0, must-revalidate');
+    return;
+  }
+  response.setHeader('Cache-Control', `public, max-age=${String(ONE_HOUR_SECONDS)}`);
+}
+
 /**
  * Create a Fastify server with hook endpoint, health check, and WebSocket support.
  *
@@ -143,6 +173,24 @@ export async function createHttpServer(options: HttpServerOptions): Promise<Http
 
   await app.register(fastifyCors, { origin: true });
   await app.register(fastifyWebsocket);
+  app.addHook('onSend', (_request, reply, payload, done) => {
+    if (staticResponses.has(reply.raw)) {
+      const vary = reply.getHeader('Vary');
+      const varyValues = Array.isArray(vary) ? vary.join(', ') : String(vary ?? '');
+      if (
+        !varyValues
+          .toLowerCase()
+          .split(/\s*,\s*/)
+          .includes('accept-encoding')
+      ) {
+        reply.header(
+          'Vary',
+          varyValues === '' ? 'Accept-Encoding' : `${varyValues}, Accept-Encoding`,
+        );
+      }
+    }
+    done(null, payload);
+  });
 
   // Static SPA serving (standalone mode only).
   // Face-merge cutover (FACE-MERGE-PLAN Tier 3): the v3 "Living Studio"
@@ -156,6 +204,9 @@ export async function createHttpServer(options: HttpServerOptions): Promise<Http
     await app.register(fastifyStatic, {
       root: options.staticDir,
       prefix: '/',
+      cacheControl: false,
+      preCompressed: true,
+      setHeaders: setStaticCacheHeader,
     });
     const staticDirLegacy = options.staticDirLegacy;
     if (staticDirLegacy) {
@@ -163,6 +214,9 @@ export async function createHttpServer(options: HttpServerOptions): Promise<Http
         root: staticDirLegacy,
         prefix: '/v1/',
         decorateReply: false,
+        cacheControl: false,
+        preCompressed: true,
+        setHeaders: setStaticCacheHeader,
       });
     }
     app.setNotFoundHandler((req, reply) => {
