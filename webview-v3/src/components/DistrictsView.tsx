@@ -24,6 +24,7 @@ import {
   isDistrictStale,
   isDistrictUnknown,
 } from '../net/districtFacts';
+import { Modal } from './Modal';
 
 /** Plain-text status word beside the plaque/info-card glyph (house rule:
  *  shape + WORD, never a bare symbol). Mirrors districtStatusGlyph's own
@@ -34,7 +35,6 @@ function districtStatusWord(progress: number | null): string {
   if (progress >= 1) return 'COMPLETE';
   return 'IN PROGRESS';
 }
-import { Modal } from './Modal';
 
 export interface DistrictsViewProps {
   isOpen: boolean;
