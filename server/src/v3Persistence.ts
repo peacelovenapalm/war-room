@@ -27,7 +27,6 @@ const PERSIST_THROTTLE_MS = 5_000;
 export class V3JsonPersistence<TData extends object> {
   private lastPersistAt = 0;
   private resolvedPath: string | undefined;
-  private usingDefaultPath = false;
 
   constructor(
     private readonly fileName: string,
@@ -36,7 +35,6 @@ export class V3JsonPersistence<TData extends object> {
 
   private persistPath(): string {
     if (!this.resolvedPath) {
-      this.usingDefaultPath = this.explicitPath === undefined;
       this.resolvedPath =
         this.explicitPath ?? path.join(os.homedir(), LAYOUT_FILE_DIR, this.fileName);
     }
@@ -62,7 +60,7 @@ export class V3JsonPersistence<TData extends object> {
     // CLAIM a durable write. Callers that gate side effects on durability
     // (the D0 intent receipts) fail closed here; tests exercising those
     // paths pass an explicit temp path, which persists for real.
-    if (process.env.VITEST && this.usingDefaultPath) return false;
+    if (process.env.VITEST && this.explicitPath === undefined) return false;
     if (!force && now - this.lastPersistAt < PERSIST_THROTTLE_MS) return true;
     this.lastPersistAt = now;
     const target = this.persistPath();
