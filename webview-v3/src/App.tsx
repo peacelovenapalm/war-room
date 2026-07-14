@@ -48,7 +48,7 @@ import {
 import type { HotspotKind } from './engine/hotspots';
 import { mapWorldBounds, tileToWorld } from './engine/iso';
 import { type PosterPlacement, renderWorld } from './engine/renderer';
-import { getCanvasResolution } from './engine/resolution';
+import { canvasBackingSize, getCanvasResolution, watchCanvasResolution } from './engine/resolution';
 import { createSoundscapeEngine } from './engine/soundscape';
 import { computeWalkers, type WalkerAgentInput } from './engine/walkers';
 import {
@@ -184,6 +184,13 @@ interface PanelFlightState {
   startTs: number;
 }
 
+interface CanvasRect {
+  left: number;
+  top: number;
+  width: number;
+  height: number;
+}
+
 /**
  * Stage-2 face: HUD strip + triage board + tail sheets + agent drawer, all
  * DOM layers over the canvas world (text is DOM ALWAYS; the canvas draws
@@ -195,6 +202,8 @@ export default function App() {
   const canvasRef = useRef<HTMLCanvasElement | null>(null);
   const renderCountRef = useRef(0);
   const lastResolutionRef = useRef(0);
+  const backingResizeCountRef = useRef(0);
+  const canvasRectRef = useRef<CanvasRect | null>(null);
   const lastCameraRef = useRef<CameraState | null>(null);
   const walkRef = useRef<WalkState>({ targetAgentId: null, from: null, startTs: 0 });
   const panelFlightRef = useRef<PanelFlightState | null>(null);
@@ -362,15 +371,21 @@ export default function App() {
     const container = containerRef.current;
     const canvas = canvasRef.current;
     if (!container || !canvas) return;
-    const rect = container.getBoundingClientRect();
+    const rect = canvasRectRef.current ?? container.getBoundingClientRect();
     const cssSize = { width: Math.max(1, rect.width), height: Math.max(1, rect.height) };
 
     // The ONE density read (engine/resolution.ts) sizes the backing store…
     const resolution = getCanvasResolution();
-    canvas.width = Math.round(cssSize.width * resolution);
-    canvas.height = Math.round(cssSize.height * resolution);
-    canvas.style.width = `${String(cssSize.width)}px`;
-    canvas.style.height = `${String(cssSize.height)}px`;
+    const backing = canvasBackingSize(cssSize, resolution);
+    if (canvas.width !== backing.width || canvas.height !== backing.height) {
+      canvas.width = backing.width;
+      canvas.height = backing.height;
+      backingResizeCountRef.current += 1;
+    }
+    const cssWidth = `${String(cssSize.width)}px`;
+    const cssHeight = `${String(cssSize.height)}px`;
+    if (canvas.style.width !== cssWidth) canvas.style.width = cssWidth;
+    if (canvas.style.height !== cssHeight) canvas.style.height = cssHeight;
 
     // …while the camera is pure fit-to-view: CSS size vs map size, no DPR.
     // ▸ DESK walks blend fit → focus with a bounded (≤2s) ease; both
@@ -526,7 +541,7 @@ export default function App() {
   /** Canvas-relative CSS-px point for a pointer event (world/camera math is
    *  CSS px throughout — never DPR). */
   const pointerPoint = useCallback((e: { clientX: number; clientY: number }) => {
-    const rect = containerRef.current?.getBoundingClientRect();
+    const rect = canvasRectRef.current;
     return { x: e.clientX - (rect?.left ?? 0), y: e.clientY - (rect?.top ?? 0) };
   }, []);
 
@@ -550,7 +565,7 @@ export default function App() {
       if (walkRef.current.from !== null) return;
       const container = containerRef.current;
       if (!container) return;
-      const rect = container.getBoundingClientRect();
+      const rect = canvasRectRef.current ?? container.getBoundingClientRect();
       const cssSize = { width: Math.max(1, rect.width), height: Math.max(1, rect.height) };
       const bounds = mapWorldBounds(DEFAULT_COLS, DEFAULT_ROWS, DEFAULT_MAX_ELEVATION);
       const camera = userCameraRef.current ?? lastCameraRef.current ?? fitToView(cssSize, bounds);
@@ -581,7 +596,7 @@ export default function App() {
       if (walkRef.current.from !== null) return;
       const container = containerRef.current;
       if (!container) return;
-      const rect = container.getBoundingClientRect();
+      const rect = canvasRectRef.current ?? container.getBoundingClientRect();
       const cssSize = { width: Math.max(1, rect.width), height: Math.max(1, rect.height) };
       const bounds = mapWorldBounds(DEFAULT_COLS, DEFAULT_ROWS, DEFAULT_MAX_ELEVATION);
       const camera = userCameraRef.current ?? lastCameraRef.current ?? fitToView(cssSize, bounds);
@@ -613,17 +628,30 @@ export default function App() {
     };
   }, [draw, propStore, characterStore, imageStore]);
 
-  // Redraw on container resize (covers first mount too).
+  // Cache geometry and redraw on container or display-density changes. The
+  // animation hot path reads this rect without forcing layout every frame.
   useEffect(() => {
     const container = containerRef.current;
     if (!container) return;
-    const observer = new ResizeObserver(() => {
+    const measure = () => {
+      const rect = container.getBoundingClientRect();
+      canvasRectRef.current = {
+        left: rect.left,
+        top: rect.top,
+        width: rect.width,
+        height: rect.height,
+      };
       draw();
+    };
+    const observer = new ResizeObserver(() => {
+      measure();
     });
     observer.observe(container);
-    draw();
+    const unwatchResolution = watchCanvasResolution(draw);
+    measure();
     return () => {
       observer.disconnect();
+      unwatchResolution();
       if (rafRef.current !== null) cancelAnimationFrame(rafRef.current);
       rafRef.current = null;
     };
@@ -1078,6 +1106,7 @@ export default function App() {
       getRenderCount: () => renderCountRef.current,
       getAgentCount: () => occupantsRef.current.length,
       getResolution: () => lastResolutionRef.current,
+      getBackingResizeCount: () => backingResizeCountRef.current,
       getCameraState: () => lastCameraRef.current,
       getAssetStats: () => ({
         props: propStore.stats(),

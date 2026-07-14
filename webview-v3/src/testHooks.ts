@@ -12,6 +12,7 @@ export interface WarRoomV3TestHooks {
   getRenderCount: () => number;
   getAgentCount: () => number;
   getResolution: () => number;
+  getBackingResizeCount: () => number;
   getCameraState: () => CameraState | null;
   /** Real-sprite asset store stats (KICKOFF-v3.1 "wire real sprites in") —
    *  chunksLoaded > 0 on a store means at least one real sheet decoded and

@@ -828,6 +828,9 @@ test.describe('stage-3 panel ports (desktop chrome model)', () => {
       // gesture ref.
       await page.waitForTimeout(2_100);
       const before = await page.evaluate(() => window.__warRoomV3TestHooks?.getCameraState());
+      const backingResizesBefore = await page.evaluate(() =>
+        window.__warRoomV3TestHooks?.getBackingResizeCount(),
+      );
       expect(before).not.toBeNull();
 
       const canvas = page.getByTestId('iso-canvas');
@@ -841,6 +844,9 @@ test.describe('stage-3 panel ports (desktop chrome model)', () => {
       await expect
         .poll(async () => await page.evaluate(() => window.__warRoomV3TestHooks?.getCameraState()))
         .not.toEqual(before);
+      expect(await page.evaluate(() => window.__warRoomV3TestHooks?.getBackingResizeCount())).toBe(
+        backingResizesBefore,
+      );
     } finally {
       await context.close();
       await host.close();
