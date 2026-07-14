@@ -16,6 +16,10 @@
          the webmanifest, so the apple-* tags carry standalone mode. The
          icon href is RELATIVE (no leading slash) — correct at /v3/ now and
          at / after the Tier-3 cutover, same reasoning as base './'. -->
+    <!-- apple-mobile-web-app-capable is Apple-only and Chrome/Safari now
+         warn it's deprecated in favor of the standards-track tag below;
+         keep BOTH since Safari still only honors the apple-* one. -->
+    <meta name="mobile-web-app-capable" content="yes" />
     <meta name="apple-mobile-web-app-capable" content="yes" />
     <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent" />
     <meta name="apple-mobile-web-app-title" content="War Room" />
