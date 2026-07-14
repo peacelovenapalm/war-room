@@ -539,6 +539,21 @@ async function serveV3Dist(
 }
 
 test.describe('stage-3 panel ports (desktop chrome model)', () => {
+  test('desktop does not subscribe to hidden all-agent floor-feed tails', async ({ browser }) => {
+    const host = await serveV3Dist();
+    const context = await browser.newContext({ viewport: VIEWPORT });
+    try {
+      const page = await context.newPage();
+      await page.goto(`${host.url}/`);
+      await expect(page.getByTestId('hud-connection')).toHaveText('● LIVE', { timeout: 20_000 });
+      await page.waitForTimeout(100);
+      expect(host.receivedMessages.some((message) => message.type === 'tailSubscribe')).toBe(false);
+    } finally {
+      await context.close();
+      await host.close();
+    }
+  });
+
   test('dock opens every panel; HELP/SETTINGS/DEBUG/SHIFT/BRIEFING/CONTRACTS/AUTOMATION render real content or an honest empty state', async ({
     browser,
   }) => {

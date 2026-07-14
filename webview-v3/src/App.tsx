@@ -1,7 +1,7 @@
 import type { PointerEvent as ReactPointerEvent, WheelEvent as ReactWheelEvent } from 'react';
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 
-import type { ClientMessage } from '../../core/src/messages.js';
+import type { ClientMessage, OutputChunk } from '../../core/src/messages.js';
 import { createBrowserLoaderDeps, createImageStore, createSpriteStore } from './assets/loader';
 import { AgentDrawer } from './components/AgentDrawer';
 import { AutomationPanel } from './components/AutomationPanel';
@@ -284,6 +284,10 @@ export default function App() {
   const dispatchEntriesRef = useRef<DispatchEntry[]>([]);
   const pendingSendsRef = useRef<PendingSend[]>([]);
   const tailsRef = useRef<TailMap>(EMPTY_TAILS);
+  const tailFlushRafRef = useRef<number | null>(null);
+  const pendingFloorFeedChunksRef = useRef<{ message: OutputChunk; label: string; at: number }[]>(
+    [],
+  );
   /** Push-landing deep link (state/launch.ts): the agent id a notification
    *  wants auto-opened, cleared once the walk fires (or never set). */
   const launchTargetRef = useRef<number | null>(parseLaunchTarget(readLocationSearch()).agentId);
@@ -295,9 +299,13 @@ export default function App() {
     parseLaunchTarget(readLocationSearch()).panel,
   );
   const prevFloorFeedIdsRef = useRef<readonly number[]>([]);
+  const floorFeedVisibleRef = useRef(false);
 
   const [grayscale, setGrayscale] = useState(false);
   const [view, setView] = useState<ViewMode>('floor');
+  const [phoneLayout, setPhoneLayout] = useState(
+    () => typeof window !== 'undefined' && window.matchMedia('(max-width: 700px)').matches,
+  );
   const [connectionStatus, setConnectionStatus] = useState<ConnectionStatus>('connecting');
   const [agents, setAgents] = useState<AgentMap>(EMPTY_AGENTS);
   const [toolActivity, setToolActivity] = useState<ToolActivityMap>(EMPTY_TOOL_ACTIVITY);
@@ -337,6 +345,8 @@ export default function App() {
   const [speechBubbles, setSpeechBubbles] = useState<readonly SpeechBubbleEvent[]>([]);
   const prevLoudAgentIdsRef = useRef<ReadonlySet<number>>(new Set());
   const prevDispatchStatusesRef = useRef<ReadonlyMap<string, DispatchEntry['status']>>(new Map());
+  const floorFeedVisible = phoneLayout && view === 'floor';
+  floorFeedVisibleRef.current = floorFeedVisible;
 
   const occupants = useMemo(() => toOccupants(agents, now), [agents, now]);
   const occupantsRef = useRef(occupants);
@@ -714,6 +724,42 @@ export default function App() {
     setTails(next);
   }, []);
 
+  /** WS output may arrive in bursts (including a 1024-chunk replay). Reduce
+   * refs immediately for dedupe/order, but publish at most once per frame so
+   * React never reconciles the whole app once per chunk. */
+  const scheduleTailFlush = useCallback(() => {
+    if (tailFlushRafRef.current !== null) return;
+    tailFlushRafRef.current = requestAnimationFrame(() => {
+      tailFlushRafRef.current = null;
+      setTails((previous) => (previous === tailsRef.current ? previous : tailsRef.current));
+      const pending = pendingFloorFeedChunksRef.current.splice(0);
+      if (pending.length > 0) {
+        setFloorFeed((previous) => {
+          let next = previous;
+          for (const { message, label, at } of pending) {
+            next = appendFloorFeedEntry(next, message, label, at);
+          }
+          return next;
+        });
+      }
+    });
+  }, []);
+
+  useEffect(
+    () => () => {
+      if (tailFlushRafRef.current !== null) cancelAnimationFrame(tailFlushRafRef.current);
+    },
+    [],
+  );
+
+  useEffect(() => {
+    const media = window.matchMedia('(max-width: 700px)');
+    const update = () => setPhoneLayout(media.matches);
+    update();
+    media.addEventListener('change', update);
+    return () => media.removeEventListener('change', update);
+  }, []);
+
   // Live server plane (core/ generated message types) + tail manager. The
   // crisis state machine reduces HERE (and on the age tick below) — agents
   // are reduced outside render, so the ref is the source of truth.
@@ -751,24 +797,25 @@ export default function App() {
               }
               return next;
             });
-            setFloorFeed((previous) => {
-              let next = previous;
-              for (const change of toolChanges) {
-                const label = floorFeedLabel(
-                  'agent',
-                  String(change.agentId),
-                  agentsRef.current.get(change.agentId)?.name,
-                );
-                next = appendFloorFeedLine(
-                  next,
-                  `tool:${String(change.agentId)}:${String(at)}`,
-                  label,
-                  `▸ ${change.toolName}`,
-                  at,
-                );
-              }
-              return next;
-            });
+            if (floorFeedVisibleRef.current)
+              setFloorFeed((previous) => {
+                let next = previous;
+                for (const change of toolChanges) {
+                  const label = floorFeedLabel(
+                    'agent',
+                    String(change.agentId),
+                    agentsRef.current.get(change.agentId)?.name,
+                  );
+                  next = appendFloorFeedLine(
+                    next,
+                    `tool:${String(change.agentId)}:${String(at)}`,
+                    label,
+                    `▸ ${change.toolName}`,
+                    at,
+                  );
+                }
+                return next;
+              });
           }
         }
         setEconomy((previous) => reduceEconomy(previous, message));
@@ -778,22 +825,26 @@ export default function App() {
             // LRU backstop over the stream MAP (panel finding,
             // tailStore.ts:103) — still-subscribed streams are protected;
             // the primary eviction is TailManager's onDropped below.
-            applyTails(
-              enforceStreamCap(
-                appended,
-                MAX_TAIL_STREAMS,
-                new Set(managerRef.current?.activeKeys() ?? []),
-              ),
+            tailsRef.current = enforceStreamCap(
+              appended,
+              MAX_TAIL_STREAMS,
+              new Set(managerRef.current?.activeKeys() ?? []),
             );
             // FLOOR FEED (phone-only, GAME-DESIGN-V3 §3.2 item 4) — a merged
             // agent-labeled log, fed only on a GENUINE new chunk (the same
             // dedupe tailStore just did, via the reference check above).
-            const label = floorFeedLabel(
-              message.source,
-              message.id,
-              agentsRef.current.get(Number(message.id))?.name,
-            );
-            setFloorFeed((previous) => appendFloorFeedEntry(previous, message, label, at));
+            if (floorFeedVisibleRef.current) {
+              pendingFloorFeedChunksRef.current.push({
+                message,
+                label: floorFeedLabel(
+                  message.source,
+                  message.id,
+                  agentsRef.current.get(Number(message.id))?.name,
+                ),
+                at,
+              });
+            }
+            scheduleTailFlush();
           }
         }
         // Stage-3 panel ports — same "verbatim mirror" reducer convention.
@@ -835,7 +886,7 @@ export default function App() {
       managerRef.current = null;
       connection.dispose();
     };
-  }, [applyCrisis, applyTails]);
+  }, [applyCrisis, applyTails, scheduleTailFlush]);
 
   /** send() for panels that write to the real server (CALL modal, Settings
    *  toggles) — queued client-side until the WS is live (connection.ts's
@@ -993,14 +1044,13 @@ export default function App() {
     prevPinsRef.current = pins;
   }, [pins]);
 
-  // FLOOR FEED subscribes to EVERY current agent's tail (not just the
-  // pinned/drawer-open ones) so the merged phone strip has real content
-  // regardless of what else is open — same refcounted diff pattern as the
-  // pin dock above.
+  // FLOOR FEED subscribes to every current agent only while its phone-floor
+  // surface is actually visible. Desktop and phone BOARD mode retain only
+  // drawer/pin subscriptions.
   useEffect(() => {
     const manager = managerRef.current;
     if (!manager) return;
-    const ids = [...agents.keys()];
+    const ids = floorFeedVisible ? [...agents.keys()] : [];
     const previous = prevFloorFeedIdsRef.current;
     for (const id of ids) {
       if (!previous.includes(id)) manager.acquire('agent', String(id));
@@ -1009,7 +1059,7 @@ export default function App() {
       if (!ids.includes(id)) manager.release('agent', String(id));
     }
     prevFloorFeedIdsRef.current = ids;
-  }, [agents]);
+  }, [agents, floorFeedVisible]);
 
   // Push-landing deep link (state/launch.ts): once the target agent shows
   // up in the live roster, auto-open its drawer exactly once — the board

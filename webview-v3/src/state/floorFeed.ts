@@ -12,6 +12,9 @@
 import type { OutputChunk } from '../../../core/src/messages.js';
 
 export const MAX_FLOOR_FEED_ENTRIES = 300;
+/** Keep the phone log DOM bounded even while the retained reducer history
+ * is larger for scroll continuity. */
+export const MAX_FLOOR_FEED_RENDERED = 120;
 
 export interface FloorFeedEntry {
   /** `${source}:${id}:${seq}` — stable React key, also the dedupe identity. */
@@ -23,6 +26,14 @@ export interface FloorFeedEntry {
 }
 
 export const EMPTY_FLOOR_FEED: readonly FloorFeedEntry[] = [];
+
+export function visibleFloorFeedEntries(
+  entries: readonly FloorFeedEntry[],
+): readonly FloorFeedEntry[] {
+  return entries.length > MAX_FLOOR_FEED_RENDERED
+    ? entries.slice(-MAX_FLOOR_FEED_RENDERED)
+    : entries;
+}
 
 /** Real display name for a chunk's source, or an honest fallback when the
  *  agent isn't (or is no longer) in the live roster — never blank. */

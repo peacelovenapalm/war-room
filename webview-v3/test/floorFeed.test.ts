@@ -5,6 +5,8 @@ import {
   appendFloorFeedEntry,
   EMPTY_FLOOR_FEED,
   floorFeedLabel,
+  MAX_FLOOR_FEED_RENDERED,
+  visibleFloorFeedEntries,
   MAX_FLOOR_FEED_ENTRIES,
 } from '../src/state/floorFeed';
 
@@ -32,6 +34,21 @@ describe('floorFeedLabel', () => {
 
   it('falls back to an honest id-based label for an unknown/despawned agent', () => {
     expect(floorFeedLabel('agent', '9', undefined)).toBe('[#9]');
+  });
+});
+
+describe('visibleFloorFeedEntries', () => {
+  it('windows long histories to the newest bounded set', () => {
+    const entries = Array.from({ length: MAX_FLOOR_FEED_RENDERED + 5 }, (_, index) => ({
+      key: String(index),
+      label: '[agent]',
+      text: String(index),
+      receivedAt: index,
+    }));
+    const visible = visibleFloorFeedEntries(entries);
+    expect(visible).toHaveLength(MAX_FLOOR_FEED_RENDERED);
+    expect(visible[0].text).toBe('5');
+    expect(visible.at(-1)?.text).toBe(String(entries.length - 1));
   });
 });
 
