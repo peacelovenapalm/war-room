@@ -800,6 +800,38 @@ test.describe('stage-3 panel ports (desktop chrome model)', () => {
     }
   });
 
+  test('completed desk focus yields the rendered camera to a canvas drag', async ({ browser }) => {
+    const host = await serveV3Dist();
+    const context = await browser.newContext({ viewport: VIEWPORT });
+    try {
+      const page = await context.newPage();
+      await page.goto(`${host.url}/?agentId=1`);
+      await expect(page.getByTestId('agent-drawer')).toBeVisible({ timeout: 20_000 });
+
+      // Wait for the bounded desk walk to finish, then capture the camera
+      // that was actually used by renderWorld rather than an intermediate
+      // gesture ref.
+      await page.waitForTimeout(2_100);
+      const before = await page.evaluate(() => window.__warRoomV3TestHooks?.getCameraState());
+      expect(before).not.toBeNull();
+
+      const canvas = page.getByTestId('iso-canvas');
+      const box = await canvas.boundingBox();
+      expect(box).not.toBeNull();
+      await page.mouse.move(box!.x + box!.width / 2, box!.y + box!.height / 2);
+      await page.mouse.down();
+      await page.mouse.move(box!.x + box!.width / 2 + 30, box!.y + box!.height / 2 - 16);
+      await page.mouse.up();
+
+      await expect
+        .poll(async () => await page.evaluate(() => window.__warRoomV3TestHooks?.getCameraState()))
+        .not.toEqual(before);
+    } finally {
+      await context.close();
+      await host.close();
+    }
+  });
+
   test('T1d FOCUS verb: drawer shows ⌖ FOCUS when the machine advertises focus:true, sends the real dispatchRequest, and shows an honest transient ▸ SENT (never a fake done)', async ({
     browser,
   }) => {

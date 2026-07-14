@@ -376,9 +376,13 @@ export default function App() {
     const userCamera = userCameraRef.current
       ? clampPanToFit(userCameraRef.current, cssSize, bounds)
       : null;
-    const target = desk
+    const focused = desk
       ? focusCamera(cssSize, { worldX: desk.deskWorldX, worldY: desk.deskWorldY }, fit)
-      : (userCamera ?? fit);
+      : fit;
+    // Desk focus owns only the bounded walk itself. Once that animation is
+    // complete, a subsequent drag/zoom must become the rendered camera even
+    // while the focused drawer remains open.
+    const target = walk.from !== null ? focused : (userCamera ?? focused);
     let camera = target;
     if (walk.from !== null) {
       const t = walkProgress(walk.startTs, performance.now());
