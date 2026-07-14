@@ -844,6 +844,13 @@ test.describe('stage-3 panel ports (desktop chrome model)', () => {
     const context = await browser.newContext({ viewport: VIEWPORT });
     try {
       const page = await context.newPage();
+      // getCameraState()/getBackingResizeCount() below only exist once
+      // testHooks.ts's installTestHooksIfE2E() runs, which is gated on
+      // window.__PIXEL_AGENTS_E2E — set this before any app code runs
+      // (matches dpr.spec.ts's setup) or the hooks stay undefined forever.
+      await page.addInitScript(() => {
+        (window as unknown as { __PIXEL_AGENTS_E2E?: boolean }).__PIXEL_AGENTS_E2E = true;
+      });
       await page.goto(`${host.url}/?agentId=1`);
       await expect(page.getByTestId('agent-drawer')).toBeVisible({ timeout: 20_000 });
 

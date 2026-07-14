@@ -1268,8 +1268,15 @@ body,
 }
 
 /* The dock rises above a modal backdrop only while a modal exists, keeping
-   one-click panel switching without painting/clicking over the agent drawer. */
-.app:has(.modal-backdrop) > .panel-dock {
+   one-click panel switching without painting/clicking over the agent drawer.
+   Driven by an explicit `.panel-open` class (set from `openPanel !== null`,
+   the same state that gates every Modal-based panel) rather than
+   `:has(.modal-backdrop)` — WebKit's `.matches(':has(...)')` correctly
+   flips true the instant the backdrop is inserted, but the sibling
+   `.panel-dock`'s computed style doesn't reliably get invalidated/repainted
+   to match (verified live: matches() true, computed z-index still 15).
+   An explicit state class sidesteps that invalidation gap entirely. */
+.app.panel-open > .panel-dock {
   z-index: 47;
 }
 

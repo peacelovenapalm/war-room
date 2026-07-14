@@ -1432,7 +1432,11 @@ export default function App() {
   const drawerTailKey = drawerAgentId !== null ? tailKey('agent', String(drawerAgentId)) : null;
 
   return (
-    <div className={grayscale ? 'app grayscale' : 'app'}>
+    <div
+      className={['app', grayscale ? 'grayscale' : null, openPanel !== null ? 'panel-open' : null]
+        .filter(Boolean)
+        .join(' ')}
+    >
       <HudStrip
         connectionStatus={connectionStatus}
         tally={tally}
