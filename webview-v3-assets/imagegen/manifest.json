@@ -114,8 +114,8 @@
       "name": "poster_stop_all",
       "path": "imagegen/posters/poster_stop_all.png",
       "size": [
-        1024,
-        1536
+        384,
+        576
       ],
       "purpose": "STOP ALL safety poster \u2014 wall prop art; octagon SHAPE + text carry the signal (colorblind-safe, survives grayscale)"
     },
@@ -123,8 +123,8 @@
       "name": "poster_ship_it",
       "path": "imagegen/posters/poster_ship_it.png",
       "size": [
-        1024,
-        1536
+        384,
+        576
       ],
       "purpose": "SHIP IT motivational poster \u2014 wall prop art for the office walls"
     },
@@ -132,8 +132,8 @@
       "name": "placard_wing_a",
       "path": "imagegen/posters/placard_wing_a.png",
       "size": [
-        1536,
-        1024
+        384,
+        256
       ],
       "purpose": "WING A wayfinding placard \u2014 wall prop art; letter + arrow shape carry the signal"
     },
