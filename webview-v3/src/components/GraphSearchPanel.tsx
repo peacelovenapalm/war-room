@@ -3,6 +3,7 @@ import { useEffect, useRef, useState } from 'react';
 import { GRAPH_SEARCH_DEBOUNCE_MS, MEMORY_ATTRIBUTION_FEEDBACK_MS } from '../constants';
 import {
   type DecisionSearchMatch,
+  dedupeMatches,
   formatEdgeLine,
   type GraphNode,
   type GraphSearchResult,
@@ -204,21 +205,27 @@ export function GraphSearchPanel({ isOpen, onClose }: GraphSearchPanelProps) {
           }}
         />
         <div className="graph-search__depth" data-testid="graph-search-depth">
-          {([1, 2] as const).map((d) => (
-            <button
-              key={d}
-              type="button"
-              className="verb"
-              data-testid={`graph-search-depth-${String(d)}`}
-              aria-pressed={depth === d}
-              disabled={depth === d}
-              onClick={() => {
-                setDepth(d);
-              }}
-            >
-              DEPTH {d}
-            </button>
-          ))}
+          {([1, 2] as const).map((d) => {
+            const active = depth === d;
+            return (
+              <button
+                key={d}
+                type="button"
+                className={active ? 'verb verb--active' : 'verb'}
+                data-testid={`graph-search-depth-${String(d)}`}
+                aria-pressed={active}
+                onClick={() => {
+                  setDepth(d);
+                }}
+              >
+                {/* Shape+word active signal (colorblind hard rule) — the
+                    ACTIVE depth must read as visibly selected, not merely
+                    disabled/dimmed (panel finding M7: the old `disabled`
+                    styling made the selected button read as the OFF one). */}
+                {active ? '●' : '○'} DEPTH {d}
+              </button>
+            );
+          })}
         </div>
       </div>
 
@@ -263,22 +270,29 @@ export function GraphSearchPanel({ isOpen, onClose }: GraphSearchPanelProps) {
 
       {hasQuery && !loading && result && result.available && (
         <>
-          {result.matches.length === 0 && result.resolved === undefined && (
-            <div className="modal__muted">no matches</div>
-          )}
-          {result.matches.length > 0 && (
-            <div className="graph-search__matches" data-testid="graph-search-matches">
-              {result.matches.map((node) => (
-                <MatchRow
-                  key={node.id}
-                  node={node}
-                  onTap={(id) => {
-                    setQuery(id);
-                  }}
-                />
-              ))}
-            </div>
-          )}
+          {(() => {
+            const dedupedMatches = dedupeMatches(result.matches, result.resolved?.node.id);
+            return (
+              <>
+                {dedupedMatches.length === 0 && result.resolved === undefined && (
+                  <div className="modal__muted">no matches</div>
+                )}
+                {dedupedMatches.length > 0 && (
+                  <div className="graph-search__matches" data-testid="graph-search-matches">
+                    {dedupedMatches.map((node) => (
+                      <MatchRow
+                        key={node.id}
+                        node={node}
+                        onTap={(id) => {
+                          setQuery(id);
+                        }}
+                      />
+                    ))}
+                  </div>
+                )}
+              </>
+            );
+          })()}
           {result.resolved !== undefined && <ResolvedBlock resolved={result.resolved} />}
         </>
       )}
