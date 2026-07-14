@@ -103,10 +103,9 @@ export function DistrictsView({ isOpen, onClose }: DistrictsViewProps) {
   const [error, setError] = useState(false);
   const [selectedKey, setSelectedKey] = useState<string | null>(null);
   const [plaques, setPlaques] = useState<PlaquePoint[]>([]);
-  // Staleness check needs a "now" — captured once per open (matches the
-  // wasOpen reset pattern below) rather than a ticking clock; a district
-  // view is a poll-refreshed snapshot, not a live timer.
-  const [now] = useState(() => Date.now());
+  // Staleness check needs a "now" — refreshed at the existing district poll
+  // cadence rather than by a separate ticking clock.
+  const [now, setNow] = useState(() => Date.now());
   const cameraRef = useRef<ReturnType<typeof fitToView> | null>(null);
 
   // Plots derived from whatever project list the server returns (v5 C1:
@@ -185,6 +184,7 @@ export function DistrictsView({ isOpen, onClose }: DistrictsViewProps) {
     const load = () => {
       void fetchDistricts().then((data) => {
         if (cancelled) return;
+        setNow(Date.now());
         if (data) {
           setSnapshot(data);
           setError(false);
