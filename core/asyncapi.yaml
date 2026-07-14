@@ -119,6 +119,7 @@ components:
         - $ref: '#/components/schemas/OfficeLayoutUpdated'
         # Command + Automation (v2 mechanic G3 — GAME-DESIGN.md §7)
         - $ref: '#/components/schemas/ChainRunUpdate'
+        - $ref: '#/components/schemas/ChainRunSnapshot'
         - $ref: '#/components/schemas/StandingOrderUpdate'
         - $ref: '#/components/schemas/BudgetUpdate'
         - $ref: '#/components/schemas/AutomationStopped'
@@ -1185,6 +1186,25 @@ components:
           const: chainRunUpdate
         run:
           $ref: '#/components/schemas/ChainRun'
+
+    ChainRunSnapshot:
+      description: >-
+        Authoritative reconnect snapshot containing every active chain run
+        plus a bounded recent terminal tail. `updatedAt` is the server epoch
+        time at which the snapshot was captured; clients replace absent
+        active ids and reconcile included rows by each run's updatedAt.
+      type: object
+      additionalProperties: false
+      required: [type, runs, updatedAt]
+      properties:
+        type:
+          const: chainRunSnapshot
+        runs:
+          type: array
+          items:
+            $ref: '#/components/schemas/ChainRun'
+        updatedAt:
+          type: integer
 
     StandingOrderScheduleDaily:
       type: object

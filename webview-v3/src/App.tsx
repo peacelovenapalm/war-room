@@ -914,7 +914,7 @@ export default function App() {
             return next;
           });
         }
-        if (message.type === 'chainRunUpdate') {
+        if (message.type === 'chainRunUpdate' || message.type === 'chainRunSnapshot') {
           setChainRuns((previous) => reduceChainRuns(previous, message));
           setChainRunReceivedAt((previous) => reduceChainRunReceivedAt(previous, message, at));
         }

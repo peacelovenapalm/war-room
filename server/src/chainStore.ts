@@ -48,6 +48,8 @@ export const CHAIN_MAX_CONCURRENT_RUNS_CHAIN_GANG = 5;
  *  file header. Verified against dispatchStore.ts's live constant, not
  *  retyped from memory. */
 export const CHAIN_STEP_TIMEOUT_MS = 500_000;
+/** Terminal history included beside all active runs in reconnect snapshots. */
+export const CHAIN_RECONNECT_TERMINAL_LIMIT = 20;
 
 /** Effective per-def step cap for the given perk state — 8 base, 12 with
  *  Chain Gang. Computed at the point of enforcement (see file header). */
@@ -300,6 +302,25 @@ export class ChainStore {
    *  rationale as dispatchStore.getActive(). */
   getActiveRuns(): ChainRun[] {
     return this.getRuns().filter((r) => r.status === 'running');
+  }
+
+  /** Authoritative reconnect view: every active run (never cap live work),
+   * plus the most recently updated terminal tail so an offline completion
+   * replaces the client's stale RUNNING chip. */
+  getReconnectSnapshot(
+    now: number = Date.now(),
+    terminalLimit: number = CHAIN_RECONNECT_TERMINAL_LIMIT,
+  ): { runs: ChainRun[]; updatedAt: number } {
+    const all = this.getRuns();
+    const active = all.filter((run) => run.status === 'running');
+    const terminal = all
+      .filter((run) => run.status !== 'running')
+      .sort((a, b) => a.updatedAt - b.updatedAt)
+      .slice(-terminalLimit);
+    return {
+      runs: [...active, ...terminal].sort((a, b) => a.updatedAt - b.updatedAt),
+      updatedAt: now,
+    };
   }
 
   /** A step was just enqueued as a real dispatch (chainOrchestrator is the

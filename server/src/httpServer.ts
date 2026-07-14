@@ -2241,6 +2241,10 @@ function registerWebSocketRoute(
     const unsubscribeChainRuns = chainStore.onRunUpdate((run) => {
       safeSend(socket, { type: 'chainRunUpdate', run });
     });
+    const chainRunSnapshot = chainStore.getReconnectSnapshot();
+    safeSend(socket, { type: 'chainRunSnapshot', ...chainRunSnapshot });
+    // Compatibility replay for clients predating chainRunSnapshot. V3
+    // treats these as same-revision no-op replacements after the snapshot.
     for (const run of chainStore.getActiveRuns()) {
       safeSend(socket, { type: 'chainRunUpdate', run });
     }

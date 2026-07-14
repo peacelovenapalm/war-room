@@ -143,6 +143,18 @@ describe('reduceChainRuns / reduceChainRunReceivedAt', () => {
     const second = reduceChainRunReceivedAt(first, chainRunUpdate, 200);
     expect(second).toEqual({ r1: 200 });
   });
+
+  it('applies an authoritative snapshot and timestamps every included run', () => {
+    const stale = reduceChainRuns([], chainRunUpdate);
+    const snapshot = {
+      type: 'chainRunSnapshot' as const,
+      runs: [{ ...chainRunUpdate.run, id: 'r2', status: 'completed' as const, updatedAt: 20 }],
+      updatedAt: 30,
+    };
+    const runs = reduceChainRuns(stale, snapshot);
+    expect(runs.map((run) => run.id)).toEqual(['r2']);
+    expect(reduceChainRunReceivedAt({ r1: 100 }, snapshot, 200)).toEqual({ r1: 100, r2: 200 });
+  });
 });
 
 describe('reduceBudget', () => {

@@ -12,7 +12,15 @@ import {
   upsertDispatchEntry,
 } from '../net/dispatchFacts';
 import type { BudgetSnapshotClient } from './budget';
-import { type ChainRunClient, upsertChainRun } from './chain';
+import { type ChainRunClient, reconcileChainRunSnapshot, upsertChainRun } from './chain';
+
+function toChainRunClient(run: Extract<ServerMessage, { type: 'chainRunUpdate' }>['run']) {
+  // pausedReason is already emitted by the server but predates its generated
+  // core declaration; keep the narrow compatibility read for both update
+  // and snapshot rows until the protocol field is formally added.
+  const pausedReason = (run as { pausedReason?: string }).pausedReason;
+  return { ...run, pausedReason };
+}
 
 export function reduceDispatchEntries(
   entries: DispatchEntry[],
@@ -66,15 +74,15 @@ export function reconcileDispatchSnapshot(
 }
 
 export function reduceChainRuns(runs: ChainRunClient[], message: ServerMessage): ChainRunClient[] {
-  if (message.type !== 'chainRunUpdate') return runs;
-  // core's generated ChainRun doesn't yet declare `pausedReason` (server-
-  // side addition ahead of the last asyncapi codegen run, same drift as
-  // EconomyUpdate.purchasedPerks — see state/chain.ts's chainMaxSteps
-  // note). Read it through a narrow, documented escape hatch rather than
-  // widening the whole message to `any`.
-  const pausedReason = (message.run as { pausedReason?: string }).pausedReason;
-  const run: ChainRunClient = { ...message.run, pausedReason };
-  return upsertChainRun(runs, run);
+  if (message.type === 'chainRunUpdate') return upsertChainRun(runs, toChainRunClient(message.run));
+  if (message.type === 'chainRunSnapshot') {
+    return reconcileChainRunSnapshot(
+      runs,
+      message.runs.map(toChainRunClient),
+      message.updatedAt,
+    );
+  }
+  return runs;
 }
 
 /** Client receipt time per chain run id — chain.ts's pruneChainRuns needs
@@ -86,8 +94,13 @@ export function reduceChainRunReceivedAt(
   message: ServerMessage,
   now: number = Date.now(),
 ): Record<string, number> {
-  if (message.type !== 'chainRunUpdate') return receivedAtById;
-  return { ...receivedAtById, [message.run.id]: now };
+  if (message.type === 'chainRunUpdate') return { ...receivedAtById, [message.run.id]: now };
+  if (message.type === 'chainRunSnapshot') {
+    const next = { ...receivedAtById };
+    for (const run of message.runs) next[run.id] = now;
+    return next;
+  }
+  return receivedAtById;
 }
 
 export function reduceBudget(

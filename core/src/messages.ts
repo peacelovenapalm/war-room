@@ -38,6 +38,7 @@ export type ServerMessage =
   | OfficeExpanded
   | OfficeLayoutUpdated
   | ChainRunUpdate
+  | ChainRunSnapshot
   | StandingOrderUpdate
   | BudgetUpdate
   | AutomationStopped
@@ -412,6 +413,12 @@ export interface ChainStepRun {
 
 export type ChainStepStatusValue =
   'pending' | 'running' | 'exited' | 'denied' | 'expired' | 'killed';
+
+export interface ChainRunSnapshot {
+  type: 'chainRunSnapshot';
+  runs: ChainRun[];
+  updatedAt: number;
+}
 
 export interface StandingOrderUpdate {
   type: 'standingOrderUpdate';

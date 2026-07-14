@@ -144,9 +144,31 @@ export function validateStepTemplatesClient(
 export function upsertChainRun(runs: ChainRunClient[], update: ChainRunClient): ChainRunClient[] {
   const idx = runs.findIndex((r) => r.id === update.id);
   if (idx === -1) return [...runs, update];
+  if (runs[idx].updatedAt > update.updatedAt) return runs;
   const copy = [...runs];
   copy[idx] = update;
   return copy;
+}
+
+/** Apply an authoritative reconnect snapshot. Terminal entries absent from
+ * the bounded server tail remain until their normal client expiry/dismissal,
+ * but an absent active id is stale by definition and is removed. Included
+ * rows still reconcile by their per-run server updatedAt. */
+export function reconcileChainRunSnapshot(
+  runs: ChainRunClient[],
+  snapshot: readonly ChainRunClient[],
+  serverUpdatedAt: number,
+): ChainRunClient[] {
+  const snapshotIds = new Set(snapshot.map((run) => run.id));
+  let next = runs.filter(
+    (run) =>
+      run.status !== 'running' ||
+      snapshotIds.has(run.id) ||
+      // A live update newer than the server snapshot boundary won the race.
+      run.updatedAt > serverUpdatedAt,
+  );
+  for (const run of snapshot) next = upsertChainRun(next, run);
+  return next;
 }
 
 /** Drop terminal runs past their auto-clear age (FAILED never included —

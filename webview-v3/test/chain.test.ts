@@ -8,6 +8,7 @@ import {
   type ChainRunClient,
   dismissChainRun,
   pruneChainRuns,
+  reconcileChainRunSnapshot,
   upsertChainRun,
   validateStepTemplatesClient,
 } from '../src/state/chain';
@@ -81,6 +82,26 @@ describe('upsertChainRun / pruneChainRuns / dismissChainRun', () => {
     const second = upsertChainRun(first, run({ id: 'a', status: 'completed' }));
     expect(second).toHaveLength(1);
     expect(second[0].status).toBe('completed');
+  });
+
+  it('rejects an older run revision', () => {
+    const current = [run({ id: 'a', status: 'completed', updatedAt: 20 })];
+    expect(upsertChainRun(current, run({ id: 'a', status: 'running', updatedAt: 10 }))).toBe(
+      current,
+    );
+  });
+
+  it('authoritative snapshot prunes absent active ids and hydrates offline terminal outcomes', () => {
+    const current = [
+      run({ id: 'stale-active', status: 'running', updatedAt: 10 }),
+      run({ id: 'older-terminal', status: 'failed', updatedAt: 5 }),
+    ];
+    const next = reconcileChainRunSnapshot(
+      current,
+      [run({ id: 'completed-offline', status: 'completed', updatedAt: 20 })],
+      30,
+    );
+    expect(next.map((item) => item.id)).toEqual(['older-terminal', 'completed-offline']);
   });
 
   it('prunes terminal runs past autoclear, keeps FAILED sticky', () => {
