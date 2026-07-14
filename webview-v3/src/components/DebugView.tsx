@@ -3,6 +3,7 @@ import { useEffect } from 'react';
 import type { AgentMap } from '../net/agentStore';
 import type { ConnectionStatus } from '../net/connection';
 import type { CrisisState } from '../state/crisisStore';
+import { shouldPollDiagnostics } from '../state/diagnosticsPolling';
 import type { EconomySnapshot } from '../state/economy';
 import { Modal } from './Modal';
 
@@ -48,14 +49,13 @@ export function DebugView({
   onRequestDiagnostics,
 }: DebugViewProps) {
   useEffect(() => {
-    if (!isOpen) return;
+    if (!shouldPollDiagnostics(isOpen, connectionStatus)) return;
     onRequestDiagnostics();
     const interval = setInterval(onRequestDiagnostics, REFRESH_MS);
     return () => {
       clearInterval(interval);
     };
-    // eslint-disable-next-line react-hooks/exhaustive-deps -- onRequestDiagnostics is a stable App.tsx callback
-  }, [isOpen]);
+  }, [connectionStatus, isOpen, onRequestDiagnostics]);
 
   const diagById = new Map(diagnostics.map((d) => [d.id, d]));
 

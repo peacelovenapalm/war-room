@@ -27,6 +27,17 @@ export interface ConnectOptions {
 
 const MAX_BACKOFF_MS = 30_000;
 
+/** Read-only/transient demand is reconstructed by its owner on every LIVE
+ * epoch. Queueing it while offline only creates stale bursts (especially
+ * DebugView's 2s diagnostics poll). Durable user commands still queue. */
+export function shouldQueueWhileOffline(message: ClientMessage): boolean {
+  return (
+    message.type !== 'requestDiagnostics' &&
+    message.type !== 'tailSubscribe' &&
+    message.type !== 'tailUnsubscribe'
+  );
+}
+
 export function connectToServer(options: ConnectOptions): ServerConnection {
   const protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
   const url = options.url ?? `${protocol}//${window.location.host}/ws`;
@@ -83,7 +94,7 @@ export function connectToServer(options: ConnectOptions): ServerConnection {
     send(message) {
       if (socket?.readyState === WebSocket.OPEN) {
         socket.send(JSON.stringify(message));
-      } else {
+      } else if (shouldQueueWhileOffline(message)) {
         pending.push(message);
       }
     },
