@@ -86,7 +86,6 @@ import {
   type CrisisState,
   EMPTY_CRISIS_STATE,
   openCrisisCount,
-  reduceCrisisAfterAgentMessage,
   reduceCrisisState,
   sweepAcks,
 } from './state/crisisStore';
@@ -104,6 +103,11 @@ import { parseLaunchTarget } from './state/launch';
 import { panelFlightAnchor } from './state/panelFlight';
 import { type PanelGrowOrigin, PanelGrowOriginProvider } from './state/panelGrowOrigin';
 import { pinAgent, unpinAgent } from './state/pinDock';
+import {
+  type ReconnectReplay,
+  reconnectReplayDeadline,
+  reduceReconnectReplay,
+} from './state/reconnectReplay';
 import { reduceSettings, type SettingsSnapshot } from './state/settings';
 import { readSoundscapeMuted, writeSoundscapeMuted } from './state/soundscape';
 import {
@@ -293,6 +297,8 @@ export default function App() {
   const toolActivityRef = useRef<ToolActivityMap>(EMPTY_TOOL_ACTIVITY);
   const prevToolNamesRef = useRef<Map<number, string | undefined>>(new Map());
   const crisisRef = useRef<CrisisState>(EMPTY_CRISIS_STATE);
+  const reconnectReplayRef = useRef<ReconnectReplay | null>(null);
+  const reconnectReplayTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const acksRef = useRef<AckState>(EMPTY_ACKS);
   const dispatchEntriesRef = useRef<DispatchEntry[]>([]);
   const dispatchWsRevisionRef = useRef(0);
@@ -799,6 +805,30 @@ export default function App() {
     });
   }, []);
 
+  const finishReconnectReplay = useCallback(
+    (replay: ReconnectReplay) => {
+      if (reconnectReplayRef.current !== replay) return;
+      reconnectReplayRef.current = null;
+      reconnectReplayTimerRef.current = null;
+      const at = Date.now();
+      setStatusNow(at);
+      applyCrisis(reduceCrisisState(crisisRef.current, agentsRef.current, at));
+    },
+    [applyCrisis],
+  );
+
+  const scheduleReconnectReplayFinish = useCallback(
+    (replay: ReconnectReplay) => {
+      if (reconnectReplayTimerRef.current !== null)
+        clearTimeout(reconnectReplayTimerRef.current);
+      reconnectReplayTimerRef.current = setTimeout(
+        () => finishReconnectReplay(replay),
+        Math.max(0, reconnectReplayDeadline(replay) - Date.now()),
+      );
+    },
+    [finishReconnectReplay],
+  );
+
   useEffect(
     () => () => {
       if (tailFlushRafRef.current !== null) cancelAnimationFrame(tailFlushRafRef.current);
@@ -821,14 +851,16 @@ export default function App() {
     const connection = connectToServer({
       onMessage: (message) => {
         const at = Date.now();
+        const reconnectReplay = reduceReconnectReplay(reconnectReplayRef.current, message, at);
+        reconnectReplayRef.current = reconnectReplay;
+        if (reconnectReplay !== null) scheduleReconnectReplayFinish(reconnectReplay);
         const nextAgents = reduceAgents(agentsRef.current, message, at);
         if (nextAgents !== agentsRef.current) {
           agentsRef.current = nextAgents;
           setAgents(nextAgents);
           setStatusNow(at);
-          applyCrisis(
-            reduceCrisisAfterAgentMessage(crisisRef.current, nextAgents, message, at),
-          );
+          if (reconnectReplay === null)
+            applyCrisis(reduceCrisisState(crisisRef.current, nextAgents, at));
         }
         // T1c — tool/subagent activity (state/toolActivity.ts), ported
         // from webview-ui's canvas rendering into ambient telemetry: a
@@ -941,11 +973,16 @@ export default function App() {
       applyTails(dropStream(tailsRef.current, key));
     });
     return () => {
+      if (reconnectReplayTimerRef.current !== null) {
+        clearTimeout(reconnectReplayTimerRef.current);
+        reconnectReplayTimerRef.current = null;
+      }
+      reconnectReplayRef.current = null;
       connectionRef.current = null;
       managerRef.current = null;
       connection.dispose();
     };
-  }, [applyCrisis, applyTails, scheduleTailFlush]);
+  }, [applyCrisis, applyTails, scheduleReconnectReplayFinish, scheduleTailFlush]);
 
   /** send() for panels that write to the real server (CALL modal, Settings
    *  toggles) — queued client-side until the WS is live (connection.ts's
@@ -1035,7 +1072,10 @@ export default function App() {
       () => {
         const at = Date.now();
         setStatusNow(at);
-        const reduced = reduceCrisisState(crisisRef.current, agentsRef.current, at);
+        const reduced =
+          reconnectReplayRef.current === null
+            ? reduceCrisisState(crisisRef.current, agentsRef.current, at)
+            : crisisRef.current;
         const swept = sweepAcks(reduced, acksRef.current, at);
         if (swept.acks !== acksRef.current) applyAcks(swept.acks);
         applyCrisis(swept.crisis);

@@ -13,7 +13,6 @@
  *   debris outlives its agent by design (cleanup is still owed).
  */
 
-import type { ServerMessage } from '../../../core/src/messages.js';
 import { agentIdentity, type AgentMap } from '../net/agentStore';
 import type { AckState } from './ackUndo';
 import { AgentVisualState, deriveVisualState, freshPoll } from './visualState';
@@ -118,20 +117,6 @@ export function reduceCrisisState(prev: CrisisState, agents: AgentMap, now: numb
     debris: debrisUnchanged ? prev.debris : debris,
     lastState: lastStateUnchanged ? prev.lastState : lastState,
   };
-}
-
-/**
- * `existingAgents` starts a reconnect telemetry epoch. Its deliberately empty
- * ephemeral fields are only a staging state until the server's explicit poll
- * replay arrives, so they must not be mistaken for a real agent recovery.
- */
-export function reduceCrisisAfterAgentMessage(
-  prev: CrisisState,
-  agents: AgentMap,
-  message: ServerMessage,
-  now: number,
-): CrisisState {
-  return message.type === 'existingAgents' ? prev : reduceCrisisState(prev, agents, now);
 }
 
 export interface AckSweepResult {
