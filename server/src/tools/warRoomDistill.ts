@@ -29,6 +29,10 @@
  */
 import { distillForSessionEnd } from '../memoryDistillerCore.js';
 
+function writeAndExit(output: string): void {
+  process.stdout.write(output, () => process.exit(0));
+}
+
 async function main(): Promise<void> {
   let input = '';
   for await (const chunk of process.stdin) input += chunk;
@@ -37,25 +41,25 @@ async function main(): Promise<void> {
   try {
     data = JSON.parse(input);
   } catch {
-    process.stdout.write(input);
+    writeAndExit(input);
     return;
   }
 
   if (typeof data !== 'object' || data === null || Array.isArray(data)) {
-    process.stdout.write(input);
+    writeAndExit(input);
     return;
   }
 
   const record = data as Record<string, unknown>;
   const eventName = typeof record.hook_event_name === 'string' ? record.hook_event_name : '';
   if (eventName !== 'SessionEnd') {
-    process.stdout.write(input);
+    writeAndExit(input);
     return;
   }
 
   try {
     Object.assign(record, distillForSessionEnd(record));
-    process.stdout.write(JSON.stringify(record));
+    writeAndExit(JSON.stringify(record));
   } catch (e) {
     // distillForSessionEnd never throws internally, but this CLI's job is to
     // NEVER drop or corrupt the payload even if that guarantee ever breaks.
@@ -64,15 +68,11 @@ async function main(): Promise<void> {
     delete record.distilledNote;
     delete record.distillSkipped;
     try {
-      process.stdout.write(JSON.stringify(record));
+      writeAndExit(JSON.stringify(record));
     } catch {
-      process.stdout.write(input);
+      writeAndExit(input);
     }
   }
 }
 
-main()
-  .catch(() => {
-    /* fall through to exit 0 below -- never let the CLI hang the forwarder */
-  })
-  .finally(() => process.exit(0));
+void main().catch(() => process.exit(0));
