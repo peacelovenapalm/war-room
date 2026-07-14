@@ -3,7 +3,7 @@
  * (tailSubscribe / outputChunk in core/asyncapi.yaml).
  *
  * - Chunks are appended in server order; `seq` is monotonically increasing
- *   per stream, so replay-after-resubscribe dedupes on `seq <= lastSeq`.
+ *   per output stream, so each stream owns an independent replay cursor.
  * - ⏸ PAUSE buffers arriving chunks instead of dropping them — the header
  *   shows "+N WHILE PAUSED" and resume flushes the buffer in order.
  * - MAX_TAIL_ENTRIES bounds memory (the server ring is the retention
@@ -36,7 +36,7 @@ export interface TailEntry {
 
 export interface TailStreamState {
   entries: readonly TailEntry[];
-  lastSeq: number;
+  lastSeq: Record<OutputStreamValue, number>;
   /** The server ring evicted earlier chunks — the visible tail is partial. */
   truncated: boolean;
   paused: boolean;
@@ -48,7 +48,7 @@ export interface TailStreamState {
 
 export const EMPTY_TAIL_STREAM: TailStreamState = {
   entries: [],
-  lastSeq: -1,
+  lastSeq: { stdout: -1, stderr: -1, transcript: -1 },
   truncated: false,
   paused: false,
   buffer: [],
@@ -72,19 +72,19 @@ function capped(entries: readonly TailEntry[]): readonly TailEntry[] {
 export function appendChunk(tails: TailMap, chunk: OutputChunk, now = Date.now()): TailMap {
   const key = tailKey(chunk.source, chunk.id);
   const state = tails.get(key) ?? EMPTY_TAIL_STREAM;
-  if (chunk.seq <= state.lastSeq) return tails;
+  if (chunk.seq <= state.lastSeq[chunk.stream]) return tails;
   const entry: TailEntry = { seq: chunk.seq, stream: chunk.stream, text: chunk.chunk };
   const next: TailStreamState = state.paused
     ? {
         ...state,
-        lastSeq: chunk.seq,
+        lastSeq: { ...state.lastSeq, [chunk.stream]: chunk.seq },
         truncated: state.truncated || chunk.truncated,
         buffer: capped([...state.buffer, entry]),
         touchedAt: now,
       }
     : {
         ...state,
-        lastSeq: chunk.seq,
+        lastSeq: { ...state.lastSeq, [chunk.stream]: chunk.seq },
         truncated: state.truncated || chunk.truncated,
         entries: capped([...state.entries, entry]),
         touchedAt: now,
@@ -130,7 +130,7 @@ export function resetTailEpoch(tails: TailMap): TailMap {
     next.set(key, {
       ...state,
       entries: [],
-      lastSeq: -1,
+      lastSeq: { stdout: -1, stderr: -1, transcript: -1 },
       truncated: false,
       buffer: [],
       touchedAt: 0,

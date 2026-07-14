@@ -114,8 +114,8 @@
       "name": "poster_stop_all",
       "path": "imagegen/posters/poster_stop_all.png",
       "size": [
-        1024,
-        1536
+        384,
+        576
       ],
       "purpose": "STOP ALL safety poster \u2014 wall prop art; octagon SHAPE + text carry the signal (colorblind-safe, survives grayscale)"
     },
@@ -123,8 +123,8 @@
       "name": "poster_ship_it",
       "path": "imagegen/posters/poster_ship_it.png",
       "size": [
-        1024,
-        1536
+        384,
+        576
       ],
       "purpose": "SHIP IT motivational poster \u2014 wall prop art for the office walls"
     },
@@ -159,8 +159,8 @@
       "name": "board_logo",
       "path": "imagegen/posters/board_logo.png",
       "size": [
-        1536,
-        1024
+        384,
+        256
       ],
       "purpose": "Studio logo lobby board \u2014 wall prop art; the WAR ROOM wordmark"
     },

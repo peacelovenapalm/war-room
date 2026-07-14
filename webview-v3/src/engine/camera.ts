@@ -140,11 +140,10 @@ export function interactiveZoomBounds(
 const PAN_KEEP_VISIBLE_PX = 48;
 
 /**
- * Clamp a camera's pan offset to "fit-to-view bounds": when the world is
- * narrower/shorter than the canvas on an axis (fully visible already), that
- * axis is LOCKED to the centered fit framing — panning it would just be
- * dead space, so it isn't allowed to wander. Otherwise the offset is
- * clamped so at least PAN_KEEP_VISIBLE_PX of the map stays on-canvas.
+ * Clamp a camera's pan offset to "fit-to-view bounds". A fully-visible axis
+ * keeps a small center-relative drag range so the default framing remains
+ * interactive; larger worlds may pan farther. Every axis is bounded so at
+ * least PAN_KEEP_VISIBLE_PX of the map stays on-canvas.
  * Pure function of camera + canvas size + world bounds — never DPR.
  */
 export function clampPanToFit(
@@ -160,7 +159,15 @@ export function clampPanToFit(
 
   let offsetX: number;
   if (worldPxWidth <= canvasCssSize.width) {
-    offsetX = canvasCssSize.width / 2 - centerX * zoom;
+    const centered = canvasCssSize.width / 2 - centerX * zoom;
+    const maxCenterPan = Math.max(
+      0,
+      Math.min(
+        PAN_KEEP_VISIBLE_PX,
+        canvasCssSize.width / 2 + worldPxWidth / 2 - PAN_KEEP_VISIBLE_PX,
+      ),
+    );
+    offsetX = Math.min(centered + maxCenterPan, Math.max(centered - maxCenterPan, camera.offsetX));
   } else {
     const maxOffsetX = canvasCssSize.width - PAN_KEEP_VISIBLE_PX - world.minX * zoom;
     const minOffsetX = PAN_KEEP_VISIBLE_PX - world.maxX * zoom;
@@ -169,7 +176,15 @@ export function clampPanToFit(
 
   let offsetY: number;
   if (worldPxHeight <= canvasCssSize.height) {
-    offsetY = canvasCssSize.height / 2 - centerY * zoom;
+    const centered = canvasCssSize.height / 2 - centerY * zoom;
+    const maxCenterPan = Math.max(
+      0,
+      Math.min(
+        PAN_KEEP_VISIBLE_PX,
+        canvasCssSize.height / 2 + worldPxHeight / 2 - PAN_KEEP_VISIBLE_PX,
+      ),
+    );
+    offsetY = Math.min(centered + maxCenterPan, Math.max(centered - maxCenterPan, camera.offsetY));
   } else {
     const maxOffsetY = canvasCssSize.height - PAN_KEEP_VISIBLE_PX - world.minY * zoom;
     const minOffsetY = PAN_KEEP_VISIBLE_PX - world.maxY * zoom;

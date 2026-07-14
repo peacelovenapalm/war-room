@@ -1,6 +1,7 @@
 import { useEffect, useState } from 'react';
 
 import type { ClientMessage } from '../../../core/src/messages.js';
+import { useNow } from '../hooks/useNow';
 import type { AgentMap } from '../net/agentStore';
 import {
   ANSWER_POLL_INTERVAL_MS,
@@ -73,7 +74,6 @@ export interface AgentDrawerProps {
    *  a fake IDLE row. */
   toolActivity: ToolActivityMap;
   crisis: CrisisState;
-  now: number;
   tail: TailStreamState | undefined;
   pinned: boolean;
   onTogglePin: () => void;
@@ -107,7 +107,6 @@ export function AgentDrawer({
   agents,
   toolActivity,
   crisis,
-  now,
   tail,
   pinned,
   onTogglePin,
@@ -115,6 +114,7 @@ export function AgentDrawer({
   onClose,
   send,
 }: AgentDrawerProps) {
+  const now = useNow();
   const [machines, setMachines] = useState<DispatchMachine[]>([]);
   const [copied, setCopied] = useState(false);
   const [killPhase, setKillPhase] = useState<KillPhase>('idle');

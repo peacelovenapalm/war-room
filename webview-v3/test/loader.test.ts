@@ -296,7 +296,7 @@ describe('createSpriteStore — lazy, sheet-indexed chunking', () => {
     expect(store.stats().manifestState).toBe('failed');
   });
 
-  it('retries the manifest on a later request after a transient failure (recoverable degradation)', async () => {
+  it('retries a failed manifest only through the explicit retry gate', async () => {
     let fail = true;
     const fetchJson = vi.fn(() =>
       fail ? Promise.reject(new Error('offline')) : Promise.resolve<unknown>(SPRITE_MANIFEST),
@@ -306,16 +306,20 @@ describe('createSpriteStore — lazy, sheet-indexed chunking', () => {
     store.request(['desk']);
     await settle();
     expect(store.stats().manifestState).toBe('failed');
-    // Network recovers; a later request() must not be stuck queuing forever.
+    // Normal renderer requests are idempotent and cannot make a paint loop.
     fail = false;
     store.request(['desk']);
+    await settle();
+    expect(fetchJson).toHaveBeenCalledTimes(1);
+    expect(store.stats().manifestState).toBe('failed');
+    store.retryFailed();
     await settle();
     expect(store.stats().manifestState).toBe('ready');
     expect(store.get('desk').kind).toBe('sprite');
     expect(loadImage).toHaveBeenCalledTimes(1);
   });
 
-  it('degrades to placeholder on sheet failure and allows a retry', async () => {
+  it('degrades to placeholder on sheet failure and retries only explicitly', async () => {
     let fail = true;
     const { deps, loadImage } = makeDeps(SPRITE_MANIFEST, {
       loadImage: vi.fn((url: string) =>
@@ -329,8 +333,26 @@ describe('createSpriteStore — lazy, sheet-indexed chunking', () => {
     fail = false;
     store.request(['worker_teal.walk']);
     await settle();
+    expect(loadImage).toHaveBeenCalledTimes(1);
+    expect(store.get('worker_teal.walk').kind).toBe('placeholder');
+    store.retryFailed();
+    await settle();
     expect(store.get('worker_teal.walk').kind).toBe('sprite');
     expect(loadImage).toHaveBeenCalledTimes(2);
+  });
+
+  it('does not notify redraw listeners when an asset fails', async () => {
+    const { deps } = makeDeps(SPRITE_MANIFEST, {
+      loadImage: vi.fn(() => Promise.reject(new Error('404'))),
+    });
+    const store = createSpriteStore('/assets/props.manifest.json', deps);
+    const listener = vi.fn();
+    store.onChange(listener);
+    store.request(['desk']);
+    await settle();
+    // The successful manifest may notify once; the subsequent failed image
+    // must not issue another paint request for the existing placeholder.
+    expect(listener).toHaveBeenCalledTimes(1);
   });
 
   it('unsubscribes listeners', async () => {

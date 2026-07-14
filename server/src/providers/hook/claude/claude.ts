@@ -158,8 +158,9 @@ function normalizeHookEvent(
       return { sessionId, event: { kind: 'turnEnd' } };
 
     case 'UserPromptSubmit':
-      // No normalized kind for user prompts yet; silently ignore.
-      return null;
+      // Presence-only marker: confirms that a pending session has real user
+      // activity without carrying prompt text across the hook boundary.
+      return { sessionId, event: { kind: 'progress', toolId: 'user-prompt', data: null } };
 
     case 'SubagentStart': {
       const agentType = typeof raw.agent_type === 'string' ? raw.agent_type : 'unknown';

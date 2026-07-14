@@ -157,6 +157,34 @@ const GLOW_HALF_H = TILE_H * 0.9;
  *  for anything world.ts builds, but keeps drawing well-defined). */
 const DEFAULT_ROTATION: Rotation = 'S';
 
+export interface FloorDrawRecord {
+  tileX: number;
+  tileY: number;
+  worldX: number;
+  worldY: number;
+}
+
+const floorRecordCache = new Map<string, readonly FloorDrawRecord[]>();
+
+/** Floor geometry is immutable for a given layout size. Cache its painter
+ * order and world projection instead of rebuilding/sorting it every frame. */
+export function floorDrawRecords(cols: number, rows: number): readonly FloorDrawRecord[] {
+  const key = `${String(cols)}x${String(rows)}`;
+  const cached = floorRecordCache.get(key);
+  if (cached) return cached;
+  const tiles: { tileX: number; tileY: number; layer: number }[] = [];
+  for (let tileY = 0; tileY < rows; tileY++) {
+    for (let tileX = 0; tileX < cols; tileX++) tiles.push({ tileX, tileY, layer: 0 });
+  }
+  const records = sortByDepth(tiles).map((tile) => ({
+    tileX: tile.tileX,
+    tileY: tile.tileY,
+    ...tileToWorld(tile.tileX, tile.tileY),
+  }));
+  floorRecordCache.set(key, records);
+  return records;
+}
+
 /** Resolve+draw a real sprite by name at a world point; returns whether it
  *  actually drew (a sprite lacking the requested rotation still counts as
  *  "resolved but couldn't draw", callers fall back the same as 'placeholder'). */
@@ -200,16 +228,8 @@ export function renderWorld(ctx: CanvasRenderingContext2D, input: RenderInput): 
   const scale = resolution * camera.zoom;
   ctx.setTransform(scale, 0, 0, scale, camera.offsetX * resolution, camera.offsetY * resolution);
 
-  // Floor: row-major is already painter's order for flat tiles, but go
-  // through sortByDepth so floor and props share one code path.
-  const tiles: { tileX: number; tileY: number; layer: number }[] = [];
-  for (let tileY = 0; tileY < rows; tileY++) {
-    for (let tileX = 0; tileX < cols; tileX++) {
-      tiles.push({ tileX, tileY, layer: 0 });
-    }
-  }
-  for (const tile of sortByDepth(tiles)) {
-    const { worldX, worldY } = tileToWorld(tile.tileX, tile.tileY);
+  for (const tile of floorDrawRecords(cols, rows)) {
+    const { worldX, worldY } = tile;
     const drew = tryDrawSprite(
       ctx,
       assets?.propStore,

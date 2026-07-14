@@ -1,12 +1,13 @@
 import { describe, expect, it } from 'vitest';
 
 import {
+  INITIAL_AUTOMATION_LATCH,
   interpretResumeResponse,
   interpretStopAllResponse,
   isExternalStopTransition,
-  pollSaysReleased,
-  reduceAutomationStopped,
-  stoppedFromOrders,
+  latchSnapshotFromHttp,
+  reconcileAutomationLatch,
+  reduceAutomationLatch,
 } from '../src/state/stopAll';
 
 describe('interpretStopAllResponse (hard rule 8: a failed kill switch must SAY so)', () => {
@@ -32,16 +33,20 @@ describe('interpretStopAllResponse (hard rule 8: a failed kill switch must SAY s
   });
 
   it('accepts only httpOk AND body.ok, carrying the halt counts', () => {
-    expect(interpretStopAllResponse(true, { ok: true, haltedOrders: 3, haltedRuns: 2 })).toEqual({
-      ok: true,
-      haltedOrders: 3,
-      haltedRuns: 2,
-    });
+    expect(
+      interpretStopAllResponse(true, {
+        ok: true,
+        haltedOrders: 3,
+        haltedRuns: 2,
+        revision: 7,
+      }),
+    ).toEqual({ ok: true, haltedOrders: 3, haltedRuns: 2, revision: 7 });
     // Missing counts still succeed honestly as zero.
     expect(interpretStopAllResponse(true, { ok: true })).toEqual({
       ok: true,
       haltedOrders: 0,
       haltedRuns: 0,
+      revision: 0,
     });
   });
 });
@@ -50,40 +55,43 @@ describe('interpretResumeResponse', () => {
   it('applies the same httpOk AND body.ok rule', () => {
     expect(interpretResumeResponse(false, { ok: true, resumedOrders: 1 })).toEqual({ ok: false });
     expect(interpretResumeResponse(true, { ok: false })).toEqual({ ok: false });
-    expect(interpretResumeResponse(true, { ok: true, resumedOrders: 4 })).toEqual({
+    expect(interpretResumeResponse(true, { ok: true, resumedOrders: 4, revision: 9 })).toEqual({
       ok: true,
       resumedOrders: 4,
+      revision: 9,
     });
   });
 });
 
-describe('stoppedFromOrders (mount hydration from GET /api/standing-orders)', () => {
-  it('reports stopped when ANY order is kill-switch-halted', () => {
-    expect(stoppedFromOrders([{ stoppedByKillSwitch: false }, { stoppedByKillSwitch: true }])).toBe(
-      true,
-    );
-  });
-
-  it('reports not-stopped for an empty roster or no halted orders', () => {
-    expect(stoppedFromOrders([])).toBe(false);
-    expect(stoppedFromOrders([{}, { stoppedByKillSwitch: false }])).toBe(false);
-  });
-});
-
-describe('reduceAutomationStopped (WS plane keeps every instance in sync)', () => {
-  it('latches stopped on the automationStopped broadcast', () => {
-    expect(
-      reduceAutomationStopped(false, {
+describe('revisioned automation latch reconciliation', () => {
+  it('applies stop and resume broadcasts in revision order', () => {
+    const stopped = reduceAutomationLatch(INITIAL_AUTOMATION_LATCH, {
         type: 'automationStopped',
         haltedOrderIds: ['o1'],
         haltedRunIds: [],
-      }),
-    ).toBe(true);
+        revision: 2,
+      });
+    expect(stopped).toEqual({ engaged: true, revision: 2 });
+    expect(reduceAutomationLatch(stopped, { type: 'automationResumed', revision: 3 })).toEqual({
+      engaged: false,
+      revision: 3,
+    });
   });
 
-  it('ignores unrelated messages', () => {
-    expect(reduceAutomationStopped(false, { type: 'agentClosed', id: 1 })).toBe(false);
-    expect(reduceAutomationStopped(true, { type: 'agentClosed', id: 1 })).toBe(true);
+  it('rejects stale HTTP snapshots and stale broadcasts', () => {
+    const current = { engaged: true, revision: 4 };
+    expect(reconcileAutomationLatch(current, { engaged: false, revision: 3 })).toBe(current);
+    expect(reduceAutomationLatch(current, { type: 'automationResumed', revision: 3 })).toBe(
+      current,
+    );
+  });
+
+  it('parses only a complete revisioned HTTP snapshot', () => {
+    expect(latchSnapshotFromHttp({ engaged: false, revision: 5 })).toEqual({
+      engaged: false,
+      revision: 5,
+    });
+    expect(latchSnapshotFromHttp({ engaged: false })).toBeNull();
   });
 });
 
@@ -101,23 +109,5 @@ describe('isExternalStopTransition (M3: a local receipt must never survive an ex
     // local receipt/confirm-arm must be cleared.
     expect(isExternalStopTransition(false, true)).toBe(true);
     expect(isExternalStopTransition(true, false)).toBe(true);
-  });
-});
-
-describe('pollSaysReleased (M3 follow-up: external RESUME never broadcasts, so App.tsx polls to clear the ENGAGED banner)', () => {
-  it('clears ONLY on an explicit engaged:false', () => {
-    expect(pollSaysReleased({ engaged: false })).toBe(true);
-  });
-
-  it('never clears on engaged:true, obviously', () => {
-    expect(pollSaysReleased({ engaged: true })).toBe(false);
-  });
-
-  it('never clears on a malformed, missing, or non-boolean body — never clear on absence of evidence', () => {
-    expect(pollSaysReleased(null)).toBe(false);
-    expect(pollSaysReleased(undefined)).toBe(false);
-    expect(pollSaysReleased({})).toBe(false);
-    expect(pollSaysReleased({ engaged: 'false' })).toBe(false);
-    expect(pollSaysReleased('released')).toBe(false);
   });
 });

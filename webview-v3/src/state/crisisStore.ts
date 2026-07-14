@@ -102,7 +102,21 @@ export function reduceCrisisState(prev: CrisisState, agents: AgentMap, now: numb
     }
   }
 
-  return { fires, debris, lastState };
+  const firesUnchanged =
+    fires.size === prev.fires.size &&
+    [...fires].every(([id, fire]) => prev.fires.get(id)?.since === fire.since);
+  const debrisUnchanged =
+    debris.size === prev.debris.size &&
+    [...debris].every(([key, record]) => prev.debris.get(key) === record);
+  const lastStateUnchanged =
+    lastState.size === prev.lastState.size &&
+    [...lastState].every(([id, state]) => prev.lastState.get(id) === state);
+  if (firesUnchanged && debrisUnchanged && lastStateUnchanged) return prev;
+  return {
+    fires: firesUnchanged ? prev.fires : fires,
+    debris: debrisUnchanged ? prev.debris : debris,
+    lastState: lastStateUnchanged ? prev.lastState : lastState,
+  };
 }
 
 export interface AckSweepResult {

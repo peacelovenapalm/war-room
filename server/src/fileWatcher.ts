@@ -40,8 +40,12 @@ import {
 } from './constants.js';
 import type { DismissalTracker } from './dismissalTracker.js';
 import { cancelPermissionTimer, cancelWaitingTimer, clearAgentActivity } from './timerManager.js';
-import { tapTranscriptLine } from './transcriptOutputTap.js';
-import { processTranscriptLine } from './transcriptParser.js';
+import { tapTranscriptRecords } from './transcriptOutputTap.js';
+import {
+  applyTokenUsageBatch,
+  processTranscriptLine,
+  type TokenUsageDelta,
+} from './transcriptParser.js';
 import type { AgentState } from './types.js';
 
 /** Dismissal tracker instance. Set once at startup via setDismissalTracker().
@@ -225,16 +229,27 @@ export function readNewLines(
       }
     }
 
+    const records: Record<string, unknown>[] = [];
+    const tokenUsageBatch: TokenUsageDelta[] = [];
     for (const line of lines) {
       if (!line.trim()) continue;
-      processTranscriptLine(agentId, line, agents, waitingTimers, permissionTimers);
+      const record = processTranscriptLine(
+        agentId,
+        line,
+        agents,
+        waitingTimers,
+        permissionTimers,
+        tokenUsageBatch,
+      );
+      if (record) records.push(record);
       // Live output tail (KICKOFF-v2.0 Phase 2 slice 2.4) — ADDITIVE tap
       // only: feeds assistant-text/tool-use lines into the output ring as
-      // telemetry. Parses its own copy of the line and never throws; all
-      // existing behavior above (parser state, /clear detection, timers)
-      // is untouched.
-      tapTranscriptLine(agentId, line);
+      // telemetry. Records parsed by the lifecycle path above are batched
+      // at this existing 500ms poll boundary; all parser state, /clear
+      // detection, and timer behavior remains synchronous and unchanged.
     }
+    tapTranscriptRecords(agentId, records);
+    applyTokenUsageBatch(agentId, agent, tokenUsageBatch, agents);
   } catch (e) {
     // ENOENT is expected for hook-detected agents where the JSONL file hasn't been created yet
     if (e instanceof Error && 'code' in e && (e as NodeJS.ErrnoException).code === 'ENOENT') return;
@@ -822,17 +837,17 @@ export function adoptExternalSessionFromHook(
   machine?: string,
   providerId?: string,
   pid?: number,
-): void {
+): boolean {
   if (transcriptPath) {
     // File-based provider (Claude, Codex): adopt with JSONL file watching
     // Guard: don't adopt if file is already tracked by an agent
     for (const agent of agents.values()) {
-      if (agent.jsonlFile === transcriptPath) return;
+      if (agent.jsonlFile === transcriptPath) return false;
     }
     // Don't check knownJsonlFiles here -- hooks confirmed this is a real session,
     // and seeded files at startup are in knownJsonlFiles but may become active later.
-    if (dismissalTracker!.isDismissed(transcriptPath)) return;
-    if (dismissalTracker!.isPermanentlyDismissed(transcriptPath)) return;
+    if (dismissalTracker!.isDismissed(transcriptPath)) return false;
+    if (dismissalTracker!.isPermanentlyDismissed(transcriptPath)) return false;
 
     knownJsonlFiles.add(transcriptPath);
     const projectDir = path.dirname(transcriptPath);
@@ -865,6 +880,7 @@ export function adoptExternalSessionFromHook(
       if (pid !== undefined) adoptedAgent.pid = pid;
       onAgentCreated?.(adoptedAgent);
     }
+    return adoptedAgent !== undefined;
   } else {
     // Hooks-only provider (OpenCode, Copilot): no transcript file, all state from hooks
     const id = nextAgentIdRef.current++;
@@ -907,6 +923,7 @@ export function adoptExternalSessionFromHook(
       );
     }
     onAgentCreated?.(agent);
+    return true;
   }
 }
 

@@ -38,9 +38,11 @@ export type ServerMessage =
   | OfficeExpanded
   | OfficeLayoutUpdated
   | ChainRunUpdate
+  | ChainRunSnapshot
   | StandingOrderUpdate
   | BudgetUpdate
   | AutomationStopped
+  | AutomationResumed
   | WorldEventFired
   | ContractsUpdated
   | DossierUpdated
@@ -277,6 +279,7 @@ export interface DispatchUpdate {
   resultTail?: string;
   timeoutSec?: number;
   requestId?: string;
+  updatedAt?: number;
 }
 
 export type DispatchActionValue = 'dispatch' | 'focus' | 'session';
@@ -412,6 +415,12 @@ export interface ChainStepRun {
 export type ChainStepStatusValue =
   'pending' | 'running' | 'exited' | 'denied' | 'expired' | 'killed';
 
+export interface ChainRunSnapshot {
+  type: 'chainRunSnapshot';
+  runs: ChainRun[];
+  updatedAt: number;
+}
+
 export interface StandingOrderUpdate {
   type: 'standingOrderUpdate';
   order: StandingOrder;
@@ -473,6 +482,12 @@ export interface AutomationStopped {
   type: 'automationStopped';
   haltedOrderIds: string[];
   haltedRunIds: string[];
+  revision: number;
+}
+
+export interface AutomationResumed {
+  type: 'automationResumed';
+  revision: number;
 }
 
 export interface WorldEventFired {
@@ -712,7 +727,10 @@ export interface AgentDiagnostics {
 
 export interface WebviewReady {
   type: 'webviewReady';
+  client?: WebviewClientValue;
 }
+
+export type WebviewClientValue = 'webview-v3';
 
 export interface LaunchAgent {
   type: 'launchAgent';

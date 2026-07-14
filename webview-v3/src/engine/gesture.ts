@@ -95,6 +95,23 @@ export interface GestureMoveResult {
   camera: CameraState | null;
 }
 
+/** Desktop wheel zoom, anchored at the cursor and constrained by the same
+ * interactive bounds as touch pinch. Positive delta zooms out; negative
+ * delta zooms in, matching browser wheel conventions. */
+export function gestureWheelZoom(
+  camera: CameraState,
+  point: { x: number; y: number },
+  deltaY: number,
+  canvasCssSize: Size,
+  world: Bounds,
+): CameraState {
+  const bounds = interactiveZoomBounds(canvasCssSize, world);
+  const rawFactor = Math.exp(-deltaY * 0.002);
+  const targetZoom = Math.min(bounds.max, Math.max(bounds.min, camera.zoom * rawFactor));
+  const factor = camera.zoom > 0 ? targetZoom / camera.zoom : 1;
+  return clampPanToFit(zoomAt(camera, point.x, point.y, factor), canvasCssSize, world);
+}
+
 /**
  * Apply one pointermove sample. `camera` is the CURRENT camera (already
  * clamped from the previous call); `canvasCssSize`/`world` are the same

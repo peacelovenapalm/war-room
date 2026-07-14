@@ -227,8 +227,14 @@ describe('dispatch HTTP routes', () => {
 
     const recentRes = await fetch(`http://127.0.0.1:${config.port}/api/dispatch/recent`);
     expect(recentRes.status).toBe(200);
-    const recent = (await recentRes.json()) as Array<{ id: string; resultTail?: string }>;
-    expect(recent.find((r) => r.id === id)?.resultTail).toBe('CODEX DISPATCH OK\n');
+    const recent = (await recentRes.json()) as Array<{
+      id: string;
+      resultTail?: string;
+      updatedAt?: number;
+    }>;
+    const completed = recent.find((r) => r.id === id);
+    expect(completed?.resultTail).toBe('CODEX DISPATCH OK\n');
+    expect(completed?.updatedAt).toEqual(expect.any(Number));
     ws.close();
   });
 

@@ -36,7 +36,7 @@ describe('appendChunk', () => {
     tails = appendChunk(tails, chunk(1, 'b\n'));
     const state = tails.get(KEY);
     expect(state?.entries.map((e) => e.text)).toEqual(['a\n', 'b\n']);
-    expect(state?.lastSeq).toBe(1);
+    expect(state?.lastSeq.transcript).toBe(1);
   });
 
   it('dedupes replayed chunks by seq (resubscribe overlap is harmless)', () => {
@@ -53,6 +53,18 @@ describe('appendChunk', () => {
     tails = appendChunk(tails, chunk(0, 'dispatch\n', { source: 'dispatch', id: 'd-1' }));
     expect(tails.get(KEY)?.entries[0].text).toBe('agent\n');
     expect(tails.get(tailKey('dispatch', 'd-1'))?.entries[0].text).toBe('dispatch\n');
+  });
+
+  it('tracks replay cursors independently for mixed output streams', () => {
+    let tails = appendChunk(EMPTY_TAILS, chunk(8, 'stdout-8\n', { stream: 'stdout' }));
+    tails = appendChunk(tails, chunk(0, 'stderr-0\n', { stream: 'stderr' }));
+    tails = appendChunk(tails, chunk(2, 'transcript-2\n'));
+    expect(tails.get(KEY)?.entries.map((entry) => entry.text)).toEqual([
+      'stdout-8\n',
+      'stderr-0\n',
+      'transcript-2\n',
+    ]);
+    expect(tails.get(KEY)?.lastSeq).toEqual({ stdout: 8, stderr: 0, transcript: 2 });
   });
 
   it('caps retained entries at MAX_TAIL_ENTRIES (drops oldest)', () => {
@@ -116,13 +128,13 @@ describe('resetTailEpoch', () => {
     expect(tails.get(KEY)).toMatchObject({
       entries: [],
       buffer: [],
-      lastSeq: -1,
+      lastSeq: { stdout: -1, stderr: -1, transcript: -1 },
       truncated: false,
     });
 
     tails = appendChunk(tails, chunk(0, 'new process replay\n'));
     expect(tails.get(KEY)?.entries.map((entry) => entry.text)).toEqual(['new process replay\n']);
-    expect(tails.get(KEY)?.lastSeq).toBe(0);
+    expect(tails.get(KEY)?.lastSeq.transcript).toBe(0);
   });
 
   it('preserves pause state and is a same-reference no-op for an empty map', () => {

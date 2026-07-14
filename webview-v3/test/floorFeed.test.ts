@@ -6,6 +6,8 @@ import {
   EMPTY_FLOOR_FEED,
   floorFeedLabel,
   MAX_FLOOR_FEED_ENTRIES,
+  MAX_FLOOR_FEED_RENDERED,
+  visibleFloorFeedEntries,
 } from '../src/state/floorFeed';
 
 function chunk(overrides: Partial<OutputChunk> = {}): OutputChunk {
@@ -35,12 +37,27 @@ describe('floorFeedLabel', () => {
   });
 });
 
+describe('visibleFloorFeedEntries', () => {
+  it('windows long histories to the newest bounded set', () => {
+    const entries = Array.from({ length: MAX_FLOOR_FEED_RENDERED + 5 }, (_, index) => ({
+      key: String(index),
+      label: '[agent]',
+      text: String(index),
+      receivedAt: index,
+    }));
+    const visible = visibleFloorFeedEntries(entries);
+    expect(visible).toHaveLength(MAX_FLOOR_FEED_RENDERED);
+    expect(visible[0].text).toBe('5');
+    expect(visible.at(-1)?.text).toBe(String(entries.length - 1));
+  });
+});
+
 describe('appendFloorFeedEntry', () => {
   it('appends a labeled entry', () => {
     const next = appendFloorFeedEntry(EMPTY_FLOOR_FEED, chunk(), '[turffinder]', 1000);
     expect(next).toHaveLength(1);
     expect(next[0]).toEqual({
-      key: 'agent:2:0',
+      key: 'agent:2:transcript:0',
       label: '[turffinder]',
       text: 'hello\n',
       receivedAt: 1000,

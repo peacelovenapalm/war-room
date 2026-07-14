@@ -1,6 +1,10 @@
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 
-import { type ConnectionStatus, connectToServer } from '../src/net/connection';
+import {
+  type ConnectionStatus,
+  connectToServer,
+  shouldQueueWhileOffline,
+} from '../src/net/connection';
 
 /** Minimal WebSocket double — real browser WebSockets CAN fire a late
  * `onopen` after `.close()` is called while still CONNECTING (some
@@ -88,6 +92,33 @@ describe('connectToServer — disposed guard', () => {
     const socket = FakeWebSocket.instances[0];
     socket.onopen?.();
     expect(statuses).toEqual(['connecting', 'live']);
-    expect(socket.sent).toEqual([JSON.stringify({ type: 'webviewReady' })]);
+    expect(socket.sent).toEqual([
+      JSON.stringify({ type: 'webviewReady', client: 'webview-v3' }),
+    ]);
+  });
+
+  it('discards repeated offline diagnostics instead of bursting them on reconnect', () => {
+    const conn = connectToServer({ onMessage: () => {}, onStatus: () => {} });
+    conn.send({ type: 'requestDiagnostics' });
+    conn.send({ type: 'requestDiagnostics' });
+    conn.send({ type: 'requestDiagnostics' });
+
+    const socket = FakeWebSocket.instances[0];
+    socket.readyState = FakeWebSocket.OPEN;
+    socket.onopen?.();
+    expect(socket.sent).toEqual([
+      JSON.stringify({ type: 'webviewReady', client: 'webview-v3' }),
+    ]);
+  });
+
+  it('keeps durable commands queued while classifying transient reads as discardable', () => {
+    expect(shouldQueueWhileOffline({ type: 'requestDiagnostics' })).toBe(false);
+    expect(shouldQueueWhileOffline({ type: 'tailSubscribe', source: 'agent', id: '1' })).toBe(
+      false,
+    );
+    expect(shouldQueueWhileOffline({ type: 'tailUnsubscribe', source: 'agent', id: '1' })).toBe(
+      false,
+    );
+    expect(shouldQueueWhileOffline({ type: 'setSoundEnabled', enabled: true })).toBe(true);
   });
 });

@@ -215,8 +215,14 @@ describe('STOP ALL (real HTTP round trip)', () => {
     ws.close();
   });
 
-  it('broadcasts automationStopped on stop-all', async () => {
+  it('broadcasts revisioned stop and resume transitions and exposes the same latch snapshot', async () => {
     const config = await server.start({ embedded: false, store: new AgentStateStore() });
+    // Normalize the process-wide durable singleton in case a prior test left
+    // it engaged, then assert relative monotonic revisions.
+    await fetch(`http://127.0.0.1:${config.port}/api/automation/resume`, { method: 'POST' });
+    const initial = (await (
+      await fetch(`http://127.0.0.1:${config.port}/api/automation/stop-all-state`)
+    ).json()) as { engaged: boolean; revision: number };
     const ws = new WebSocket(`ws://127.0.0.1:${config.port}/ws`);
     await new Promise((resolve) => ws.addEventListener('open', resolve, { once: true }));
     const messages: Array<Record<string, unknown>> = [];
@@ -227,8 +233,25 @@ describe('STOP ALL (real HTTP round trip)', () => {
     await fetch(`http://127.0.0.1:${config.port}/api/automation/stop-all`, { method: 'POST' });
 
     await vi.waitFor(() => {
-      expect(messages.some((m) => m.type === 'automationStopped')).toBe(true);
+      expect(
+        messages.some(
+          (m) => m.type === 'automationStopped' && m.revision === initial.revision + 1,
+        ),
+      ).toBe(true);
     });
+
+    await fetch(`http://127.0.0.1:${config.port}/api/automation/resume`, { method: 'POST' });
+    await vi.waitFor(() => {
+      expect(
+        messages.some(
+          (m) => m.type === 'automationResumed' && m.revision === initial.revision + 2,
+        ),
+      ).toBe(true);
+    });
+    const latch = (await (
+      await fetch(`http://127.0.0.1:${config.port}/api/automation/stop-all-state`)
+    ).json()) as { engaged: boolean; revision: number };
+    expect(latch).toEqual({ engaged: false, revision: initial.revision + 2 });
     ws.close();
   });
 });

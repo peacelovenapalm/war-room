@@ -106,12 +106,16 @@ describe('claudeProvider', () => {
       }
     });
 
-    it('ignores UserPromptSubmit (no normalized kind yet)', () => {
+    it('normalizes UserPromptSubmit to a content-free progress marker', () => {
       const result = claudeProvider.normalizeHookEvent({
         hook_event_name: 'UserPromptSubmit',
         session_id: 'sess-1',
+        prompt: 'do not expose this text',
       });
-      expect(result).toBeNull();
+      expect(result).toEqual({
+        sessionId: 'sess-1',
+        event: { kind: 'progress', toolId: 'user-prompt', data: null },
+      });
     });
 
     it('normalizes SubagentStart with agent_type as toolName', () => {

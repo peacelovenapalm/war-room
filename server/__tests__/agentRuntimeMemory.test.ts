@@ -8,7 +8,7 @@ vi.mock('../src/memoryDistiller.js', () => ({
   distillFromSessionEnd: distillFromSessionEndMock,
 }));
 
-import { AgentRuntime } from '../src/agentRuntime.js';
+import { AgentRuntime, DISTILLED_SESSION_DEDUPE_CAP } from '../src/agentRuntime.js';
 import { AgentStateStore } from '../src/agentStateStore.js';
 import { claudeProvider } from '../src/providers/hook/claude/claude.js';
 import type { AgentState } from '../src/types.js';
@@ -46,6 +46,29 @@ beforeEach(() => {
 });
 
 describe('AgentRuntime V7/V8 session-end trigger', () => {
+  it('bounds completed-session dedupe history across repeated session reassignments', () => {
+    const store = new AgentStateStore();
+    const runtime = new AgentRuntime(store, claudeProvider);
+    const agent = makeAgent(false);
+    store.set(1, agent);
+    const distillAgent = (
+      runtime as unknown as {
+        distillAgent(agent: AgentState, distill: undefined, sessionId: string): void;
+      }
+    ).distillAgent.bind(runtime);
+
+    for (let i = 0; i <= DISTILLED_SESSION_DEDUPE_CAP; i++) {
+      distillAgent(agent, undefined, `completed-session-${i}`);
+    }
+
+    const retained = (runtime as unknown as { distilledSessionIds: ReadonlySet<string> })
+      .distilledSessionIds;
+    expect(retained.size).toBe(DISTILLED_SESSION_DEDUPE_CAP);
+    expect(retained.has('completed-session-0')).toBe(false);
+    expect(retained.has(`completed-session-${DISTILLED_SESSION_DEDUPE_CAP}`)).toBe(true);
+    runtime.dispose();
+  });
+
   it('manifest/stale removal distills before the agent disappears', () => {
     const store = new AgentStateStore();
     const runtime = new AgentRuntime(store, claudeProvider);

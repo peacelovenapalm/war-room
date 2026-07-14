@@ -431,6 +431,7 @@ describe('HookEventHandler', () => {
         const agent = createTestAgent({ id: 2, sessionId, projectDir: cwd });
         agents.set(2, agent);
         handler.registerAgent(sessionId, 2);
+        return true;
       },
     );
     handler.setLifecycleCallbacks({ onExternalSessionDetected });
@@ -929,6 +930,46 @@ describe('HookEventHandler', () => {
   });
 
   // ── Pending external session confirmation ────────────────────
+
+  it('UserPromptSubmit promotes a pending text-only session before any tool or Stop', () => {
+    const onExternalSessionDetected = vi.fn((sessionId: string) => {
+      const agent = createTestAgent({
+        id: 2,
+        sessionId,
+        projectDir: '/projects/test',
+      } as Partial<AgentState>);
+      agents.set(2, agent);
+      handler.registerAgent(sessionId, 2);
+      return true;
+    });
+    handler.setLifecycleCallbacks({ onExternalSessionDetected });
+
+    handler.handleEvent('claude', {
+      hook_event_name: 'SessionStart',
+      session_id: 'planning-sess',
+      source: 'startup',
+      transcript_path: '/projects/test/planning-sess.jsonl',
+      cwd: '/projects/test',
+    });
+    expect(onExternalSessionDetected).not.toHaveBeenCalled();
+
+    handler.handleEvent('claude', {
+      hook_event_name: 'UserPromptSubmit',
+      session_id: 'planning-sess',
+      prompt: 'sensitive planning text must not be forwarded',
+    });
+
+    expect(onExternalSessionDetected).toHaveBeenCalledWith(
+      'planning-sess',
+      '/projects/test/planning-sess.jsonl',
+      '/projects/test',
+      undefined,
+      'claude',
+      undefined,
+    );
+    expect(agents.get(2)?.sessionId).toBe('planning-sess');
+    expect(JSON.stringify(mockWebview.messages)).not.toContain('sensitive planning text');
+  });
 
   it('confirmation event creates pending external session and delivers event', () => {
     const onExternalSessionDetected = vi.fn();

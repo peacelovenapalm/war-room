@@ -123,11 +123,7 @@ describe('agent reducer (core generated types)', () => {
     expect(agents.get(2)?.toolPermission).toBe(false);
   });
 
-  it('RECONNECT MERGE: existingAgents preserves live channels for already-known agents', () => {
-    // Regression (panel finding, agentStore.ts:82): a WS reconnect resends
-    // existingAgents, and the server cannot re-fire agentToolPermission /
-    // agentStatus for a gate that is STILL pending — rebuilding from
-    // baseRecord silently un-flags a genuinely blocked agent forever.
+  it('RECONNECT EPOCH: existingAgents resets ephemeral fields but preserves cumulative tokens', () => {
     let agents = reduceAgents(EMPTY_AGENTS, EXISTING, NOW);
     agents = reduceAgents(agents, { type: 'agentToolPermission', id: 1 }, NOW);
     agents = reduceAgents(
@@ -147,17 +143,18 @@ describe('agent reducer (core generated types)', () => {
     );
 
     const reconnected = reduceAgents(agents, EXISTING, NOW + 60_000);
-    expect(reconnected.get(1)?.toolPermission).toBe(true);
-    expect(reconnected.get(2)?.awaitingInput).toBe(true);
-    expect(reconnected.get(1)?.poll?.state).toBe('failed');
-    expect(reconnected.get(1)?.poll?.since).toBe(NOW - 5_000);
+    expect(reconnected.get(1)?.toolPermission).toBe(false);
+    expect(reconnected.get(2)?.awaitingInput).toBe(false);
+    expect(reconnected.get(1)?.status).toBe('waiting');
+    expect(reconnected.get(1)?.statusAt).toBeUndefined();
+    expect(reconnected.get(1)?.poll).toBeUndefined();
     expect(reconnected.get(1)?.inputTokens).toBe(100);
     expect(reconnected.get(1)?.outputTokens).toBe(50);
     // Identity still comes fresh from the message (server truth).
     expect(reconnected.get(1)?.name).toBe('turffinder');
   });
 
-  it('RECONNECT MERGE: existingAgents still drops vanished ids and defaults new ones', () => {
+  it('RECONNECT EPOCH: existingAgents drops vanished ids and resets surviving ones', () => {
     let agents = reduceAgents(EMPTY_AGENTS, EXISTING, NOW);
     agents = reduceAgents(agents, { type: 'agentToolPermission', id: 2 }, NOW);
     const next = reduceAgents(
@@ -172,7 +169,7 @@ describe('agent reducer (core generated types)', () => {
       NOW + 1_000,
     );
     expect(next.has(1)).toBe(false);
-    expect(next.get(2)?.toolPermission).toBe(true);
+    expect(next.get(2)?.toolPermission).toBe(false);
     expect(next.get(3)?.toolPermission).toBe(false);
     expect(next.get(3)?.status).toBe('waiting');
   });

@@ -263,6 +263,13 @@ interface DispatchRecord {
   updatedAt: number;
 }
 
+/** updatedAt is also the client reconciliation revision, so lifecycle
+ * transitions must be strictly monotonic even when several happen within
+ * one Date.now() millisecond. */
+function nextDispatchUpdatedAt(record: Pick<DispatchRecord, 'updatedAt'>, now: number): number {
+  return Math.max(now, record.updatedAt + 1);
+}
+
 /** C3 born-managed wrapper — mirrors asyncapi's LaunchedViaValue enum. */
 export type LaunchedViaValue = 'wrapper' | 'call-modal';
 const LAUNCHED_VIA_VALUES: readonly LaunchedViaValue[] = ['wrapper', 'call-modal'];
@@ -338,6 +345,9 @@ export interface DispatchBroadcast {
   /** Send correlation echo (asyncapi DispatchUpdate.requestId) — present
    *  only when the originating client supplied one. */
   requestId?: string;
+  /** Server lifecycle revision used to reconcile WS updates with delayed
+   *  GET /api/dispatch/recent responses. */
+  updatedAt?: number;
 }
 
 /** What a runner receives on `POST /api/dispatch/poll` — the ONLY place the
@@ -807,7 +817,7 @@ export class DispatchStore {
     }
     record.status = 'ringing';
     record.reason = undefined;
-    record.updatedAt = now;
+    record.updatedAt = nextDispatchUpdatedAt(record, now);
     this.persist();
     this.audit('held-released', record);
     this.emit(record);
@@ -843,7 +853,7 @@ export class DispatchStore {
       }
       record.status = 'ringing';
       record.reason = undefined;
-      record.updatedAt = now;
+      record.updatedAt = nextDispatchUpdatedAt(record, now);
       this.audit('held-rollover-released', record);
       this.emit(record);
       count++;
@@ -1295,7 +1305,7 @@ export class DispatchStore {
       record.status = 'denied';
       record.reason = opts.reason;
     }
-    record.updatedAt = now;
+    record.updatedAt = nextDispatchUpdatedAt(record, now);
     this.persist();
     this.audit('decision', record);
     this.emit(record);
@@ -1377,7 +1387,7 @@ export class DispatchStore {
         record.resultTail = input.resultTail.slice(-DISPATCH_RESULT_TAIL_MAX_CHARS);
       }
     }
-    record.updatedAt = now;
+    record.updatedAt = nextDispatchUpdatedAt(record, now);
     this.persist();
     this.audit('status', record);
     this.emit(record);
@@ -1392,7 +1402,7 @@ export class DispatchStore {
     for (const record of records.values()) {
       if (record.status === 'ringing' && now - record.createdAt > ttlMs) {
         record.status = 'expired';
-        record.updatedAt = now;
+        record.updatedAt = nextDispatchUpdatedAt(record, now);
         this.audit('expired', record);
         this.emit(record);
         count++;
@@ -1527,6 +1537,7 @@ export class DispatchStore {
       chainStep: record.chainStep,
       timeoutSec: record.timeoutSec,
       requestId: record.requestId,
+      updatedAt: record.updatedAt,
     };
   }
 

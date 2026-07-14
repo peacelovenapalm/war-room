@@ -1,34 +1,18 @@
-import type { PointerEvent as ReactPointerEvent } from 'react';
-import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import type { PointerEvent as ReactPointerEvent, WheelEvent as ReactWheelEvent } from 'react';
+import { lazy, Suspense, useCallback, useEffect, useMemo, useRef, useState } from 'react';
 
-import type { ClientMessage } from '../../core/src/messages.js';
+import type { ClientMessage, OutputChunk, ServerMessage } from '../../core/src/messages.js';
 import { createBrowserLoaderDeps, createImageStore, createSpriteStore } from './assets/loader';
-import { AgentDrawer } from './components/AgentDrawer';
-import { AutomationPanel } from './components/AutomationPanel';
-import { BriefingPanel } from './components/BriefingPanel';
-import { CallModal, type CallModalPrefill } from './components/CallModal';
-import { type ChipFrame, ChipLayer } from './components/ChipLayer';
-import { ContractsPanel } from './components/ContractsPanel';
-import { DebugView, type DiagnosticsRow } from './components/DebugView';
+import type { CallModalPrefill } from './components/CallModal';
+import type { DiagnosticsRow } from './components/DebugView';
 import { DispatchTray } from './components/DispatchTray';
-import { DispatchVisitorChips } from './components/DispatchVisitorChips';
-import { DistrictsView } from './components/DistrictsView';
 import { FloorFeed } from './components/FloorFeed';
-import { GraphSearchPanel } from './components/GraphSearchPanel';
-import { HelpModal } from './components/HelpModal';
 import { HudStrip, type ViewMode } from './components/HudStrip';
-import { InboxPanel } from './components/InboxPanel';
-import { MorningPanel } from './components/MorningPanel';
-import { OpsReviewPanel } from './components/OpsReviewPanel';
 import { type DockPanelKind, PanelDock } from './components/PanelDock';
 import { PinDock } from './components/PinDock';
-import { PropHotspots } from './components/PropHotspots';
 import { RealSheet } from './components/RealSheet';
-import { SettingsModal } from './components/SettingsModal';
-import { ShiftPanel } from './components/ShiftPanel';
-import { SpeechBubbleLayer } from './components/SpeechBubbleLayer';
 import { TriageBoard } from './components/TriageBoard';
-import { STOP_ALL_EXTERNAL_RESUME_POLL_MS } from './constants';
+import { WorldOverlay } from './components/WorldOverlay';
 import {
   type CalmTransition,
   displayedWarmth,
@@ -43,11 +27,12 @@ import {
   gesturePointerMove,
   gesturePointerUp,
   type GestureState,
+  gestureWheelZoom,
 } from './engine/gesture';
 import type { HotspotKind } from './engine/hotspots';
 import { mapWorldBounds, tileToWorld } from './engine/iso';
 import { type PosterPlacement, renderWorld } from './engine/renderer';
-import { getCanvasResolution } from './engine/resolution';
+import { canvasBackingSize, getCanvasResolution, watchCanvasResolution } from './engine/resolution';
 import { createSoundscapeEngine } from './engine/soundscape';
 import { computeWalkers, type WalkerAgentInput } from './engine/walkers';
 import {
@@ -67,6 +52,7 @@ import { type ConnectionStatus, connectToServer, type ServerConnection } from '.
 import {
   clearTerminalDispatchEntries,
   detectSendFailures,
+  DISPATCH_SEND_TIMEOUT_MS,
   type DispatchActionValue,
   type DispatchEntry,
   type PendingSend,
@@ -76,6 +62,7 @@ import { TailManager } from './net/tailManager';
 import { type AckState, EMPTY_ACKS, requestAck, undoAck } from './state/ackUndo';
 import { classifyWalkerAgents } from './state/ambient';
 import {
+  reconcileDispatchSnapshot,
   reduceBudget,
   reduceChainRunReceivedAt,
   reduceChainRuns,
@@ -104,6 +91,11 @@ import { parseLaunchTarget } from './state/launch';
 import { panelFlightAnchor } from './state/panelFlight';
 import { type PanelGrowOrigin, PanelGrowOriginProvider } from './state/panelGrowOrigin';
 import { pinAgent, unpinAgent } from './state/pinDock';
+import {
+  type ReconnectReplay,
+  reconnectReplayDeadline,
+  reduceReconnectReplay,
+} from './state/reconnectReplay';
 import { reduceSettings, type SettingsSnapshot } from './state/settings';
 import { readSoundscapeMuted, writeSoundscapeMuted } from './state/soundscape';
 import {
@@ -114,13 +106,14 @@ import {
   dispatchStatusSnapshot,
   loudAgentIds,
   pruneSpeechBubbles,
+  SPEECH_BUBBLE_TTL_MS,
   type SpeechBubbleEvent,
 } from './state/speechBubbles';
 import {
-  pollSaysReleased,
-  reduceAutomationStopped,
-  stoppedFromLatch,
-  stoppedFromOrders,
+  INITIAL_AUTOMATION_LATCH,
+  latchSnapshotFromHttp,
+  reconcileAutomationLatch,
+  reduceAutomationLatch,
 } from './state/stopAll';
 import {
   appendChunk,
@@ -134,16 +127,65 @@ import {
   type TailMap,
 } from './state/tailStore';
 import {
-  detectToolNameChanges,
   EMPTY_TOOL_ACTIVITY,
+  reconcileToolNameChanges,
   reduceToolActivity,
   type ToolActivityMap,
   toolNameSnapshot,
 } from './state/toolActivity';
+import { POLL_STATE_TTL_MS } from './state/visualState';
+import { createWorldFrameStore } from './state/worldFrameStore';
 import { installTestHooksIfE2E } from './testHooks';
 
-/** Board/HUD age tick — visible aging without RAF churn (v1 convention). */
-const TICK_MS = 500;
+const AgentDrawer = lazy(() =>
+  import('./components/AgentDrawer').then((module) => ({ default: module.AgentDrawer })),
+);
+const AutomationPanel = lazy(() =>
+  import('./components/AutomationPanel').then((module) => ({
+    default: module.AutomationPanel,
+  })),
+);
+const BriefingPanel = lazy(() =>
+  import('./components/BriefingPanel').then((module) => ({ default: module.BriefingPanel })),
+);
+const CallModal = lazy(() =>
+  import('./components/CallModal').then((module) => ({ default: module.CallModal })),
+);
+const ContractsPanel = lazy(() =>
+  import('./components/ContractsPanel').then((module) => ({ default: module.ContractsPanel })),
+);
+const DebugView = lazy(() =>
+  import('./components/DebugView').then((module) => ({ default: module.DebugView })),
+);
+const DistrictsView = lazy(() =>
+  import('./components/DistrictsView').then((module) => ({ default: module.DistrictsView })),
+);
+const GraphSearchPanel = lazy(() =>
+  import('./components/GraphSearchPanel').then((module) => ({
+    default: module.GraphSearchPanel,
+  })),
+);
+const HelpModal = lazy(() =>
+  import('./components/HelpModal').then((module) => ({ default: module.HelpModal })),
+);
+const InboxPanel = lazy(() =>
+  import('./components/InboxPanel').then((module) => ({ default: module.InboxPanel })),
+);
+const MorningPanel = lazy(() =>
+  import('./components/MorningPanel').then((module) => ({ default: module.MorningPanel })),
+);
+const OpsReviewPanel = lazy(() =>
+  import('./components/OpsReviewPanel').then((module) => ({ default: module.OpsReviewPanel })),
+);
+const SettingsModal = lazy(() =>
+  import('./components/SettingsModal').then((module) => ({ default: module.SettingsModal })),
+);
+const ShiftPanel = lazy(() =>
+  import('./components/ShiftPanel').then((module) => ({ default: module.ShiftPanel })),
+);
+
+/** Canvas-only ambient animation cadence (20fps). */
+const AMBIENT_FRAME_MS = 50;
 /** How long the DOCK FULL rejection stays on screen. */
 const DOCK_NOTICE_MS = 3_000;
 
@@ -183,6 +225,13 @@ interface PanelFlightState {
   startTs: number;
 }
 
+interface CanvasRect {
+  left: number;
+  top: number;
+  width: number;
+  height: number;
+}
+
 /**
  * Stage-2 face: HUD strip + triage board + tail sheets + agent drawer, all
  * DOM layers over the canvas world (text is DOM ALWAYS; the canvas draws
@@ -194,6 +243,8 @@ export default function App() {
   const canvasRef = useRef<HTMLCanvasElement | null>(null);
   const renderCountRef = useRef(0);
   const lastResolutionRef = useRef(0);
+  const backingResizeCountRef = useRef(0);
+  const canvasRectRef = useRef<CanvasRect | null>(null);
   const lastCameraRef = useRef<CameraState | null>(null);
   const walkRef = useRef<WalkState>({ targetAgentId: null, from: null, startTs: 0 });
   const panelFlightRef = useRef<PanelFlightState | null>(null);
@@ -248,6 +299,7 @@ export default function App() {
   // createSpriteStore's "nothing fetched at construction" contract) —
   // real audio nodes only exist once the user actually unmutes.
   const [soundscapeEngine] = useState(() => createSoundscapeEngine());
+  const [worldFrameStore] = useState(createWorldFrameStore);
   const [soundscapeMuted, setSoundscapeMuted] = useState(() =>
     readSoundscapeMuted(typeof window === 'undefined' ? undefined : window.localStorage),
   );
@@ -266,23 +318,35 @@ export default function App() {
   // that already redraws (draw() itself stays a stable ref-reading
   // callback, matching every other piece of frame state here).
   const walkerInputsRef = useRef<WalkerAgentInput[]>([]);
+  const basePropsRef = useRef<WorldProp[]>(buildProps([]));
   // T6 item 1 (dispatch visitors) — same "ref recomputed on the redraw
   // effect, read fresh inside draw()" convention as walkerInputsRef.
   const dispatchVisitorsRef = useRef<DispatchVisitor[]>([]);
   const calmRef = useRef<CalmTransition>(INITIAL_CALM);
   // Source-of-truth refs for values reduced OUTSIDE render (WS callbacks +
-  // the age tick); the matching useState mirrors them for rendering.
+  // deadline timers); the matching useState mirrors them for rendering.
   const agentsRef = useRef<AgentMap>(EMPTY_AGENTS);
   // T1c (FACE-MERGE-PLAN.md) — tool/subagent activity, reduced in the WS
   // onMessage callback below alongside agentsRef (same ref-is-truth,
   // useState-mirrors-for-render split as every other WS-reduced value).
   const toolActivityRef = useRef<ToolActivityMap>(EMPTY_TOOL_ACTIVITY);
-  const prevToolNamesRef = useRef<Map<number, string | undefined>>(new Map());
+  const prevToolNamesRef = useRef<ReadonlyMap<number, string | undefined>>(new Map());
   const crisisRef = useRef<CrisisState>(EMPTY_CRISIS_STATE);
+  const reconnectReplayRef = useRef<ReconnectReplay | null>(null);
+  const reconnectReplayTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const acksRef = useRef<AckState>(EMPTY_ACKS);
   const dispatchEntriesRef = useRef<DispatchEntry[]>([]);
+  const dispatchWsRevisionRef = useRef(0);
+  const dispatchWsRevisionByIdRef = useRef<Map<string, number>>(new Map());
+  const dispatchHydrationRequestRef = useRef(0);
+  const dispatchHydratedOnMountRef = useRef(false);
   const pendingSendsRef = useRef<PendingSend[]>([]);
+  const pendingSendTimersRef = useRef<Set<ReturnType<typeof setTimeout>>>(new Set());
   const tailsRef = useRef<TailMap>(EMPTY_TAILS);
+  const tailFlushRafRef = useRef<number | null>(null);
+  const pendingFloorFeedChunksRef = useRef<{ message: OutputChunk; label: string; at: number }[]>(
+    [],
+  );
   /** Push-landing deep link (state/launch.ts): the agent id a notification
    *  wants auto-opened, cleared once the walk fires (or never set). */
   const launchTargetRef = useRef<number | null>(parseLaunchTarget(readLocationSearch()).agentId);
@@ -294,9 +358,13 @@ export default function App() {
     parseLaunchTarget(readLocationSearch()).panel,
   );
   const prevFloorFeedIdsRef = useRef<readonly number[]>([]);
+  const floorFeedVisibleRef = useRef(false);
 
   const [grayscale, setGrayscale] = useState(false);
   const [view, setView] = useState<ViewMode>('floor');
+  const [phoneLayout, setPhoneLayout] = useState(
+    () => typeof window !== 'undefined' && window.matchMedia('(max-width: 700px)').matches,
+  );
   const [connectionStatus, setConnectionStatus] = useState<ConnectionStatus>('connecting');
   const [agents, setAgents] = useState<AgentMap>(EMPTY_AGENTS);
   const [toolActivity, setToolActivity] = useState<ToolActivityMap>(EMPTY_TOOL_ACTIVITY);
@@ -309,11 +377,20 @@ export default function App() {
   const [dockNotice, setDockNotice] = useState<string | null>(null);
   const [drawerAgentId, setDrawerAgentId] = useState<number | null>(null);
   const [realKind, setRealKind] = useState<RealSheetKind | null>(null);
-  const [now, setNow] = useState(() => Date.now());
-  const [chipFrame, setChipFrame] = useState<ChipFrame | null>(null);
+  const [statusNow, setStatusNow] = useState(() => Date.now());
 
   // ── Stage-3 panel ports ──────────────────────────────────────────
   const [openPanel, setOpenPanel] = useState<DockPanelKind | null>(null);
+  // Deferred panels stay mounted after their first open, preserving the
+  // existing draft/form-state behavior while keeping every never-opened
+  // surface out of the critical entry chunk and render tree.
+  const [mountedPanels, setMountedPanels] = useState<ReadonlySet<DockPanelKind>>(() => new Set());
+  const rememberPanel = useCallback((kind: DockPanelKind) => {
+    setMountedPanels((previous) => {
+      if (previous.has(kind)) return previous;
+      return new Set([...previous, kind]);
+    });
+  }, []);
   // T6 item 4 — CAMERA-MOVE PANEL OPENS: components/Modal.tsx's grow
   // origin, `null` = no anchor / cancelled (plain open, matching every
   // panel's prior appearance exactly).
@@ -327,7 +404,8 @@ export default function App() {
   /** STOP ALL — ONE lifted source of truth for both StopAllControl mounts
    *  (HUD + AutomationPanel), hydrated from the server below and latched
    *  by the WS automationStopped broadcast (state/stopAll.ts). */
-  const [automationStopped, setAutomationStopped] = useState(false);
+  const [automationLatch, setAutomationLatch] = useState(INITIAL_AUTOMATION_LATCH);
+  const automationStopped = automationLatch.engaged;
   const [diagnostics, setDiagnostics] = useState<DiagnosticsRow[]>([]);
   const [callPrefill, setCallPrefill] = useState<CallModalPrefill | null>(null);
   const [viewingResult, setViewingResult] = useState<DispatchEntry | null>(null);
@@ -336,8 +414,12 @@ export default function App() {
   const [speechBubbles, setSpeechBubbles] = useState<readonly SpeechBubbleEvent[]>([]);
   const prevLoudAgentIdsRef = useRef<ReadonlySet<number>>(new Set());
   const prevDispatchStatusesRef = useRef<ReadonlyMap<string, DispatchEntry['status']>>(new Map());
+  const floorFeedVisible = phoneLayout && view === 'floor';
+  useEffect(() => {
+    floorFeedVisibleRef.current = floorFeedVisible;
+  }, [floorFeedVisible]);
 
-  const occupants = useMemo(() => toOccupants(agents, now), [agents, now]);
+  const occupants = useMemo(() => toOccupants(agents, statusNow), [agents, statusNow]);
   const occupantsRef = useRef(occupants);
   // T6 item 1 — render-time mirror of dispatchVisitorsRef for the DOM chip
   // layer (the canvas world reads the ref inside draw(); this memo is only
@@ -351,15 +433,21 @@ export default function App() {
     const container = containerRef.current;
     const canvas = canvasRef.current;
     if (!container || !canvas) return;
-    const rect = container.getBoundingClientRect();
+    const rect = canvasRectRef.current ?? container.getBoundingClientRect();
     const cssSize = { width: Math.max(1, rect.width), height: Math.max(1, rect.height) };
 
     // The ONE density read (engine/resolution.ts) sizes the backing store…
     const resolution = getCanvasResolution();
-    canvas.width = Math.round(cssSize.width * resolution);
-    canvas.height = Math.round(cssSize.height * resolution);
-    canvas.style.width = `${String(cssSize.width)}px`;
-    canvas.style.height = `${String(cssSize.height)}px`;
+    const backing = canvasBackingSize(cssSize, resolution);
+    if (canvas.width !== backing.width || canvas.height !== backing.height) {
+      canvas.width = backing.width;
+      canvas.height = backing.height;
+      backingResizeCountRef.current += 1;
+    }
+    const cssWidth = `${String(cssSize.width)}px`;
+    const cssHeight = `${String(cssSize.height)}px`;
+    if (canvas.style.width !== cssWidth) canvas.style.width = cssWidth;
+    if (canvas.style.height !== cssHeight) canvas.style.height = cssHeight;
 
     // …while the camera is pure fit-to-view: CSS size vs map size, no DPR.
     // ▸ DESK walks blend fit → focus with a bounded (≤2s) ease; both
@@ -376,9 +464,13 @@ export default function App() {
     const userCamera = userCameraRef.current
       ? clampPanToFit(userCameraRef.current, cssSize, bounds)
       : null;
-    const target = desk
+    const focused = desk
       ? focusCamera(cssSize, { worldX: desk.deskWorldX, worldY: desk.deskWorldY }, fit)
-      : (userCamera ?? fit);
+      : fit;
+    // Desk focus owns only the bounded walk itself. Once that animation is
+    // complete, a subsequent drag/zoom must become the rendered camera even
+    // while the focused drawer remains open.
+    const target = walk.from !== null ? focused : (userCamera ?? focused);
     let camera = target;
     if (walk.from !== null) {
       const t = walkProgress(walk.startTs, performance.now());
@@ -448,7 +540,7 @@ export default function App() {
       camera,
       cols: DEFAULT_COLS,
       rows: DEFAULT_ROWS,
-      props: [...buildProps(occupantsRef.current), ...walkerProps, ...visitorProps],
+      props: [...basePropsRef.current, ...walkerProps, ...visitorProps],
       warmth: displayedWarmth(calmRef.current, Date.now()),
       assets: { now: Date.now(), propStore, characterStore, imageStore },
       posters: POSTER_PLACEMENTS,
@@ -456,17 +548,8 @@ export default function App() {
     renderCountRef.current += 1;
     lastResolutionRef.current = resolution;
     lastCameraRef.current = camera;
-    setChipFrame((previous) =>
-      previous !== null &&
-      previous.camera.zoom === camera.zoom &&
-      previous.camera.offsetX === camera.offsetX &&
-      previous.camera.offsetY === camera.offsetY &&
-      previous.cssSize.width === cssSize.width &&
-      previous.cssSize.height === cssSize.height
-        ? previous
-        : { camera, cssSize },
-    );
-  }, [propStore, characterStore, imageStore]);
+    worldFrameStore.publish({ camera, cssSize });
+  }, [propStore, characterStore, imageStore, worldFrameStore]);
 
   /** Kick the RAF loop that advances an in-flight camera walk (▸ DESK or a
    *  T6 panel-open flight — either keeps this loop alive). */
@@ -511,7 +594,7 @@ export default function App() {
   /** Canvas-relative CSS-px point for a pointer event (world/camera math is
    *  CSS px throughout — never DPR). */
   const pointerPoint = useCallback((e: { clientX: number; clientY: number }) => {
-    const rect = containerRef.current?.getBoundingClientRect();
+    const rect = canvasRectRef.current;
     return { x: e.clientX - (rect?.left ?? 0), y: e.clientY - (rect?.top ?? 0) };
   }, []);
 
@@ -535,7 +618,7 @@ export default function App() {
       if (walkRef.current.from !== null) return;
       const container = containerRef.current;
       if (!container) return;
-      const rect = container.getBoundingClientRect();
+      const rect = canvasRectRef.current ?? container.getBoundingClientRect();
       const cssSize = { width: Math.max(1, rect.width), height: Math.max(1, rect.height) };
       const bounds = mapWorldBounds(DEFAULT_COLS, DEFAULT_ROWS, DEFAULT_MAX_ELEVATION);
       const camera = userCameraRef.current ?? lastCameraRef.current ?? fitToView(cssSize, bounds);
@@ -560,6 +643,22 @@ export default function App() {
     gestureRef.current = gesturePointerUp(gestureRef.current, e.pointerId);
   }, []);
 
+  const handleWheel = useCallback(
+    (e: ReactWheelEvent<HTMLCanvasElement>) => {
+      e.preventDefault();
+      if (walkRef.current.from !== null) return;
+      const container = containerRef.current;
+      if (!container) return;
+      const rect = canvasRectRef.current ?? container.getBoundingClientRect();
+      const cssSize = { width: Math.max(1, rect.width), height: Math.max(1, rect.height) };
+      const bounds = mapWorldBounds(DEFAULT_COLS, DEFAULT_ROWS, DEFAULT_MAX_ELEVATION);
+      const camera = userCameraRef.current ?? lastCameraRef.current ?? fitToView(cssSize, bounds);
+      userCameraRef.current = gestureWheelZoom(camera, pointerPoint(e), e.deltaY, cssSize, bounds);
+      scheduleGestureDraw();
+    },
+    [pointerPoint, scheduleGestureDraw],
+  );
+
   // Real-sprite loading (KICKOFF-v3.1 WS-A "wire real sprites in"): the
   // office geometry (floor/walls/desk/coffee/plant) is on screen from
   // frame 1 regardless of live connection, so request those names once on
@@ -567,8 +666,8 @@ export default function App() {
   // requests lazily from inside draw() only once it's actually needed.
   // Each store's onChange fires draw() again the moment its sheet lands,
   // so real art pops in as soon as it decodes instead of waiting for the
-  // next unrelated redraw (the 500ms age tick would eventually catch it,
-  // but this is snappier and costs nothing extra — request()/get() are
+  // next unrelated redraw. This is immediate and costs nothing extra —
+  // request()/get() are
   // idempotent no-ops once a sheet is loaded).
   useEffect(() => {
     propStore.request(STATIC_PROP_SPRITE_NAMES);
@@ -582,29 +681,45 @@ export default function App() {
     };
   }, [draw, propStore, characterStore, imageStore]);
 
-  // Redraw on container resize (covers first mount too).
+  // Cache geometry and redraw on container or display-density changes. The
+  // animation hot path reads this rect without forcing layout every frame.
   useEffect(() => {
     const container = containerRef.current;
     if (!container) return;
-    const observer = new ResizeObserver(() => {
+    const measure = () => {
+      const rect = container.getBoundingClientRect();
+      canvasRectRef.current = {
+        left: rect.left,
+        top: rect.top,
+        width: rect.width,
+        height: rect.height,
+      };
       draw();
+    };
+    const observer = new ResizeObserver(() => {
+      measure();
     });
     observer.observe(container);
-    draw();
+    const unwatchResolution = watchCanvasResolution(draw);
+    measure();
     return () => {
       observer.disconnect();
+      unwatchResolution();
       if (rafRef.current !== null) cancelAnimationFrame(rafRef.current);
       rafRef.current = null;
     };
   }, [draw]);
 
-  // Redraw when occupancy/agents/crisis change, AND on the 500ms age tick
-  // (`now`) so ambient walker motion + the calm-channel lerp actually
-  // advance between real-state changes (draw() itself stays a stable ref-
-  // reading callback for the ResizeObserver above).
+  // Refresh frame inputs on real state changes. A separate canvas-only
+  // cadence below advances animation without putting time in App state.
   useEffect(() => {
     occupantsRef.current = occupants;
-    walkerInputsRef.current = classifyWalkerAgents(occupiedDeskAnchors(occupants), agents, now);
+    basePropsRef.current = buildProps(occupants);
+    walkerInputsRef.current = classifyWalkerAgents(
+      occupiedDeskAnchors(occupants),
+      agents,
+      Date.now(),
+    );
     dispatchVisitorsRef.current = deriveDispatchVisitors(dispatchEntries);
     calmRef.current = updateCalmTransition(calmRef.current, openCrisisCount(crisis), Date.now());
 
@@ -655,25 +770,46 @@ export default function App() {
     });
 
     draw();
-  }, [draw, occupants, agents, crisis, now, dispatchEntries, soundscapeEngine]);
+  }, [draw, occupants, agents, crisis, dispatchEntries, soundscapeEngine]);
 
-  // TTL is applied at RENDER time off the existing `now` age tick (not a
-  // second effect+setState) — appendSpeechBubble already caps the
-  // underlying state at MAX_CONCURRENT_BUBBLES, so there's nothing to
-  // proactively garbage-collect, only what's currently worth SHOWING.
-  const visibleSpeechBubbles = useMemo(
-    () => pruneSpeechBubbles(speechBubbles, now),
-    [speechBubbles, now],
-  );
+  useEffect(() => {
+    if (connectionStatus !== 'live') return;
+    let frameId = 0;
+    let lastPaint = 0;
+    const step = (timestamp: number) => {
+      if (timestamp - lastPaint >= AMBIENT_FRAME_MS) {
+        lastPaint = timestamp;
+        draw();
+      }
+      frameId = requestAnimationFrame(step);
+    };
+    frameId = requestAnimationFrame(step);
+    return () => cancelAnimationFrame(frameId);
+  }, [connectionStatus, draw]);
 
-  /** Ack-state writes go through here so the tick's sweep sees them. */
+  useEffect(() => {
+    if (speechBubbles.length === 0) return;
+    const nextExpiry = Math.min(
+      ...speechBubbles.map((bubble) => bubble.createdAt + SPEECH_BUBBLE_TTL_MS),
+    );
+    const timer = setTimeout(
+      () => {
+        setSpeechBubbles((previous) => pruneSpeechBubbles(previous, Date.now()));
+      },
+      Math.max(0, nextExpiry - Date.now() + 1),
+    );
+    return () => clearTimeout(timer);
+  }, [speechBubbles]);
+  const visibleSpeechBubbles = speechBubbles;
+
+  /** Ack-state writes go through here so the deadline sweep sees them. */
   const applyAcks = useCallback((next: AckState) => {
     acksRef.current = next;
     setAcks(next);
   }, []);
 
   /** Crisis-state writes go through here — like agentsRef, the ref is the
-   *  source of truth (reduced in WS callbacks + the age tick, outside
+   *  source of truth (reduced in WS callbacks + deadline timers, outside
    *  render) and the useState mirrors it for rendering. sweepAcks needs to
    *  read the CURRENT crisis synchronously to match ack instances. */
   const applyCrisis = useCallback((next: CrisisState) => {
@@ -693,18 +829,84 @@ export default function App() {
     setTails(next);
   }, []);
 
+  /** WS output may arrive in bursts (including a 1024-chunk replay). Reduce
+   * refs immediately for dedupe/order, but publish at most once per frame so
+   * React never reconciles the whole app once per chunk. */
+  const scheduleTailFlush = useCallback(() => {
+    if (tailFlushRafRef.current !== null) return;
+    tailFlushRafRef.current = requestAnimationFrame(() => {
+      tailFlushRafRef.current = null;
+      setTails((previous) => (previous === tailsRef.current ? previous : tailsRef.current));
+      const pending = pendingFloorFeedChunksRef.current.splice(0);
+      if (pending.length > 0) {
+        setFloorFeed((previous) => {
+          let next = previous;
+          for (const { message, label, at } of pending) {
+            next = appendFloorFeedEntry(next, message, label, at);
+          }
+          return next;
+        });
+      }
+    });
+  }, []);
+
+  const finishReconnectReplay = useCallback(
+    (replay: ReconnectReplay) => {
+      if (reconnectReplayRef.current !== replay) return;
+      reconnectReplayRef.current = null;
+      reconnectReplayTimerRef.current = null;
+      const at = Date.now();
+      setStatusNow(at);
+      applyCrisis(reduceCrisisState(crisisRef.current, agentsRef.current, at));
+      setToolActivity(toolActivityRef.current);
+      prevToolNamesRef.current = toolNameSnapshot(toolActivityRef.current);
+    },
+    [applyCrisis],
+  );
+
+  const scheduleReconnectReplayFinish = useCallback(
+    (replay: ReconnectReplay) => {
+      if (reconnectReplayTimerRef.current !== null) clearTimeout(reconnectReplayTimerRef.current);
+      reconnectReplayTimerRef.current = setTimeout(
+        () => finishReconnectReplay(replay),
+        Math.max(0, reconnectReplayDeadline(replay) - Date.now()),
+      );
+    },
+    [finishReconnectReplay],
+  );
+
+  useEffect(
+    () => () => {
+      if (tailFlushRafRef.current !== null) cancelAnimationFrame(tailFlushRafRef.current);
+    },
+    [],
+  );
+
+  useEffect(() => {
+    const media = window.matchMedia('(max-width: 700px)');
+    const update = () => setPhoneLayout(media.matches);
+    update();
+    media.addEventListener('change', update);
+    return () => media.removeEventListener('change', update);
+  }, []);
+
   // Live server plane (core/ generated message types) + tail manager. The
-  // crisis state machine reduces HERE (and on the age tick below) — agents
+  // crisis state machine reduces HERE (and on freshness deadlines below) — agents
   // are reduced outside render, so the ref is the source of truth.
   useEffect(() => {
     const connection = connectToServer({
       onMessage: (message) => {
         const at = Date.now();
+        const reconnectReplay = reduceReconnectReplay(reconnectReplayRef.current, message, at);
+        reconnectReplayRef.current = reconnectReplay;
+        if (reconnectReplay !== null) scheduleReconnectReplayFinish(reconnectReplay);
         const nextAgents = reduceAgents(agentsRef.current, message, at);
         if (nextAgents !== agentsRef.current) {
           agentsRef.current = nextAgents;
           setAgents(nextAgents);
-          applyCrisis(reduceCrisisState(crisisRef.current, nextAgents, at));
+          setStatusNow(at);
+          if (reconnectReplay === null)
+            applyCrisis(reduceCrisisState(crisisRef.current, nextAgents, at));
         }
         // T1c — tool/subagent activity (state/toolActivity.ts), ported
         // from webview-ui's canvas rendering into ambient telemetry: a
@@ -714,9 +916,14 @@ export default function App() {
         const nextToolActivity = reduceToolActivity(toolActivityRef.current, message, at);
         if (nextToolActivity !== toolActivityRef.current) {
           toolActivityRef.current = nextToolActivity;
-          setToolActivity(nextToolActivity);
-          const toolChanges = detectToolNameChanges(prevToolNamesRef.current, nextToolActivity);
-          prevToolNamesRef.current = toolNameSnapshot(nextToolActivity);
+          const toolNameChanges = reconcileToolNameChanges(
+            prevToolNamesRef.current,
+            nextToolActivity,
+            reconnectReplay !== null,
+          );
+          prevToolNamesRef.current = toolNameChanges.names;
+          if (reconnectReplay === null) setToolActivity(nextToolActivity);
+          const toolChanges = toolNameChanges.changes;
           if (toolChanges.length > 0) {
             setSpeechBubbles((prev) => {
               let next = prev;
@@ -730,24 +937,25 @@ export default function App() {
               }
               return next;
             });
-            setFloorFeed((previous) => {
-              let next = previous;
-              for (const change of toolChanges) {
-                const label = floorFeedLabel(
-                  'agent',
-                  String(change.agentId),
-                  agentsRef.current.get(change.agentId)?.name,
-                );
-                next = appendFloorFeedLine(
-                  next,
-                  `tool:${String(change.agentId)}:${String(at)}`,
-                  label,
-                  `▸ ${change.toolName}`,
-                  at,
-                );
-              }
-              return next;
-            });
+            if (floorFeedVisibleRef.current)
+              setFloorFeed((previous) => {
+                let next = previous;
+                for (const change of toolChanges) {
+                  const label = floorFeedLabel(
+                    'agent',
+                    String(change.agentId),
+                    agentsRef.current.get(change.agentId)?.name,
+                  );
+                  next = appendFloorFeedLine(
+                    next,
+                    `tool:${String(change.agentId)}:${String(at)}`,
+                    label,
+                    `▸ ${change.toolName}`,
+                    at,
+                  );
+                }
+                return next;
+              });
           }
         }
         setEconomy((previous) => reduceEconomy(previous, message));
@@ -757,36 +965,42 @@ export default function App() {
             // LRU backstop over the stream MAP (panel finding,
             // tailStore.ts:103) — still-subscribed streams are protected;
             // the primary eviction is TailManager's onDropped below.
-            applyTails(
-              enforceStreamCap(
-                appended,
-                MAX_TAIL_STREAMS,
-                new Set(managerRef.current?.activeKeys() ?? []),
-              ),
+            tailsRef.current = enforceStreamCap(
+              appended,
+              MAX_TAIL_STREAMS,
+              new Set(managerRef.current?.activeKeys() ?? []),
             );
             // FLOOR FEED (phone-only, GAME-DESIGN-V3 §3.2 item 4) — a merged
             // agent-labeled log, fed only on a GENUINE new chunk (the same
             // dedupe tailStore just did, via the reference check above).
-            const label = floorFeedLabel(
-              message.source,
-              message.id,
-              agentsRef.current.get(Number(message.id))?.name,
-            );
-            setFloorFeed((previous) => appendFloorFeedEntry(previous, message, label, at));
+            if (floorFeedVisibleRef.current) {
+              pendingFloorFeedChunksRef.current.push({
+                message,
+                label: floorFeedLabel(
+                  message.source,
+                  message.id,
+                  agentsRef.current.get(Number(message.id))?.name,
+                ),
+                at,
+              });
+            }
+            scheduleTailFlush();
           }
         }
         // Stage-3 panel ports — same "verbatim mirror" reducer convention.
         setSettings((previous) => reduceSettings(previous, message));
         setBudget((previous) => reduceBudget(previous, message));
-        setAutomationStopped((previous) => reduceAutomationStopped(previous, message));
+        setAutomationLatch((previous) => reduceAutomationLatch(previous, message));
         if (message.type === 'dispatchUpdate') {
+          dispatchWsRevisionRef.current += 1;
+          dispatchWsRevisionByIdRef.current.set(message.id, dispatchWsRevisionRef.current);
           setDispatchEntries((previous) => {
             const next = reduceDispatchEntries(previous, message, at);
             dispatchEntriesRef.current = next;
             return next;
           });
         }
-        if (message.type === 'chainRunUpdate') {
+        if (message.type === 'chainRunUpdate' || message.type === 'chainRunSnapshot') {
           setChainRuns((previous) => reduceChainRuns(previous, message));
           setChainRunReceivedAt((previous) => reduceChainRunReceivedAt(previous, message, at));
         }
@@ -810,11 +1024,16 @@ export default function App() {
       applyTails(dropStream(tailsRef.current, key));
     });
     return () => {
+      if (reconnectReplayTimerRef.current !== null) {
+        clearTimeout(reconnectReplayTimerRef.current);
+        reconnectReplayTimerRef.current = null;
+      }
+      reconnectReplayRef.current = null;
       connectionRef.current = null;
       managerRef.current = null;
       connection.dispose();
     };
-  }, [applyCrisis, applyTails]);
+  }, [applyCrisis, applyTails, scheduleReconnectReplayFinish, scheduleTailFlush]);
 
   /** send() for panels that write to the real server (CALL modal, Settings
    *  toggles) — queued client-side until the WS is live (connection.ts's
@@ -823,35 +1042,63 @@ export default function App() {
     connectionRef.current?.send(message);
   }, []);
 
-  // STOP ALL hydration (panel finding, StopAllControl.tsx:12): a fresh page
-  // must reflect a halt issued earlier or from another client.
-  // stoppedByKillSwitch on any standing order is the server's persisted
-  // record of a halt awaiting RESUME. A fetch failure (or a chain-only halt
-  // — state/stopAll.ts header) hydrates not-stopped: showing STOP ALL when
-  // already stopped is a harmless idempotent re-halt, the safe direction.
-  //
-  // C9-1: the standing-orders check alone misses a STOP ALL that halted ZERO
-  // standing orders (chain-only halt) — that's exactly the gap the durable
-  // server latch (stopAllLatch.ts, GET /api/automation/stop-all-state) closes.
-  // Both fetches run independently; either one finding "stopped" wins (OR),
-  // so a fresh page load reflects the true server state regardless of which
-  // signal carries it.
+  // B3: hydrate terminal as well as active dispatches on mount and every
+  // live connection epoch. Server updatedAt prevents delayed HTTP rows from
+  // overwriting newer WS transitions; the local WS revision boundary keeps
+  // a newly-created live id from being pruned because it was absent when
+  // the HTTP snapshot was taken. A newer epoch aborts/invalidates the old
+  // request so responses cannot apply out of order across reconnects.
   useEffect(() => {
+    if (dispatchHydratedOnMountRef.current && connectionStatus !== 'live') return;
+    dispatchHydratedOnMountRef.current = true;
+    const requestId = ++dispatchHydrationRequestRef.current;
+    const wsRevisionAtStart = dispatchWsRevisionRef.current;
+    const controller = new AbortController();
     let cancelled = false;
-    void fetch('/api/standing-orders')
-      .then(async (res) => (res.ok ? ((await res.json()) as unknown) : []))
-      .then((orders) => {
-        if (cancelled || !Array.isArray(orders)) return;
-        if (stoppedFromOrders(orders as { stoppedByKillSwitch?: boolean }[])) {
-          setAutomationStopped(true);
+    void fetch('/api/dispatch/recent', { signal: controller.signal })
+      .then(async (res) => (res.ok ? ((await res.json()) as unknown) : null))
+      .then((body) => {
+        if (
+          cancelled ||
+          requestId !== dispatchHydrationRequestRef.current ||
+          !Array.isArray(body)
+        ) {
+          return;
         }
+        const snapshot = body.filter(
+          (row): row is Extract<ServerMessage, { type: 'dispatchUpdate' }> =>
+            typeof row === 'object' && row !== null && row.type === 'dispatchUpdate',
+        );
+        const preserveIds = new Set<string>();
+        for (const [id, revision] of dispatchWsRevisionByIdRef.current) {
+          if (revision > wsRevisionAtStart) preserveIds.add(id);
+        }
+        const at = Date.now();
+        setDispatchEntries((previous) => {
+          const next = reconcileDispatchSnapshot(previous, snapshot, preserveIds, at);
+          dispatchEntriesRef.current = next;
+          return next;
+        });
       })
       .catch(() => undefined);
+    return () => {
+      cancelled = true;
+      controller.abort();
+    };
+  }, [connectionStatus]);
+
+  // STOP ALL mount hydration reads the durable, revisioned server latch.
+  // The snapshot reconciles against WS transitions, so a delayed response
+  // cannot overwrite a newer stop/resume broadcast.
+  useEffect(() => {
+    let cancelled = false;
     void fetch('/api/automation/stop-all-state')
       .then(async (res) => (res.ok ? ((await res.json()) as unknown) : null))
       .then((body) => {
         if (cancelled) return;
-        if (stoppedFromLatch(body)) setAutomationStopped(true);
+        const snapshot = latchSnapshotFromHttp(body);
+        if (snapshot)
+          setAutomationLatch((previous) => reconcileAutomationLatch(previous, snapshot));
       })
       .catch(() => undefined);
     return () => {
@@ -859,81 +1106,64 @@ export default function App() {
     };
   }, []);
 
-  // M3 follow-up (beta re-verification): POST /api/automation/resume never
-  // broadcasts over WS — only the stop-all route does (server/src/
-  // httpServer.ts) — so a client showing the M3 ENGAGED banner has no push
-  // signal telling it another client already released automation. While
-  // `automationStopped` is true, poll the durable latch and clear locally
-  // on an explicit {engaged:false} (pollSaysReleased's own honesty rule: a
-  // failed or malformed poll changes nothing — never clear on absence of
-  // evidence). Stops polling the instant `automationStopped` goes false,
-  // whether from this clear, this client's own RESUME, or a real WS
-  // engage/resume broadcast. `inFlightRef` skips starting a new poll while
-  // one is still pending, so a slow response can never overlap a fresh one.
-  const stopAllPollInFlightRef = useRef(false);
+  // Crisis freshness and ACK expiry run at their actual next deadline,
+  // rather than polling the whole application twice a second.
   useEffect(() => {
-    if (!automationStopped) return;
-    let cancelled = false;
-    const poll = () => {
-      if (stopAllPollInFlightRef.current) return;
-      stopAllPollInFlightRef.current = true;
-      void fetch('/api/automation/stop-all-state')
-        .then(async (res) => (res.ok ? ((await res.json()) as unknown) : null))
-        .then((body) => {
-          if (cancelled) return;
-          if (pollSaysReleased(body)) setAutomationStopped(false);
-        })
-        .catch(() => undefined)
-        .finally(() => {
-          stopAllPollInFlightRef.current = false;
-        });
-    };
-    const timer = setInterval(poll, STOP_ALL_EXTERNAL_RESUME_POLL_MS);
-    return () => {
-      cancelled = true;
-      clearInterval(timer);
-    };
-  }, [automationStopped]);
+    const at = Date.now();
+    const deadlines = [
+      ...[...agents.values()].flatMap((record) =>
+        record.poll && !record.poll.stale && record.poll.receivedAt + POLL_STATE_TTL_MS + 1 > at
+          ? [record.poll.receivedAt + POLL_STATE_TTL_MS + 1]
+          : [],
+      ),
+      ...[...acks.values()].map((ack) => ack.undoUntil),
+    ];
+    if (deadlines.length === 0) return;
+    const nextDeadline = Math.min(...deadlines);
+    const timer = setTimeout(
+      () => {
+        const at = Date.now();
+        setStatusNow(at);
+        const reduced =
+          reconnectReplayRef.current === null
+            ? reduceCrisisState(crisisRef.current, agentsRef.current, at)
+            : crisisRef.current;
+        const swept = sweepAcks(reduced, acksRef.current, at);
+        if (swept.acks !== acksRef.current) applyAcks(swept.acks);
+        applyCrisis(swept.crisis);
+      },
+      Math.max(0, nextDeadline - Date.now()),
+    );
+    return () => clearTimeout(timer);
+  }, [acks, agents, applyAcks, applyCrisis]);
 
-  // Age tick — board ages, poll TTLs (fires go out when a poll expires),
-  // and lapsed ACK undo windows committing for real (instance-matched:
-  // sweepAcks never lets a stale ack sweep a NEW failure reusing its key,
-  // and drops acks whose debris was deleted — crisisStore.ts).
-  useEffect(() => {
-    const timer = setInterval(() => {
-      const at = Date.now();
-      setNow(at);
-      const reduced = reduceCrisisState(crisisRef.current, agentsRef.current, at);
-      const swept = sweepAcks(reduced, acksRef.current, at);
-      if (swept.acks !== acksRef.current) applyAcks(swept.acks);
-      applyCrisis(swept.crisis);
-      // dispatchRequest has no ack on the wire — a send with no matching
-      // dispatchUpdate within DISPATCH_SEND_TIMEOUT_MS is honestly reported
-      // as "not queued" rather than silently doing nothing.
-      if (pendingSendsRef.current.length > 0) {
-        const { stillPending, failed } = detectSendFailures(
-          pendingSendsRef.current,
-          dispatchEntriesRef.current,
-          at,
-        );
-        pendingSendsRef.current = stillPending;
-        if (failed.length > 0) {
-          setSendFailures((previous) => [
-            ...previous,
-            ...failed.map((f) => ({
-              id: f.id,
-              machine: f.machine,
-              action: f.action,
-              detectedAt: at,
-            })),
-          ]);
-        }
-      }
-    }, TICK_MS);
-    return () => {
-      clearInterval(timer);
-    };
-  }, [applyAcks, applyCrisis]);
+  const checkPendingSends = useCallback(() => {
+    const at = Date.now();
+    const { stillPending, failed } = detectSendFailures(
+      pendingSendsRef.current,
+      dispatchEntriesRef.current,
+      at,
+    );
+    pendingSendsRef.current = stillPending;
+    if (failed.length === 0) return;
+    setSendFailures((previous) => [
+      ...previous,
+      ...failed.map((failure) => ({
+        id: failure.id,
+        machine: failure.machine,
+        action: failure.action,
+        detectedAt: at,
+      })),
+    ]);
+  }, []);
+
+  useEffect(
+    () => () => {
+      for (const timer of pendingSendTimersRef.current) clearTimeout(timer);
+      pendingSendTimersRef.current.clear();
+    },
+    [],
+  );
 
   // DOCK FULL rejection is transient.
   useEffect(() => {
@@ -972,14 +1202,13 @@ export default function App() {
     prevPinsRef.current = pins;
   }, [pins]);
 
-  // FLOOR FEED subscribes to EVERY current agent's tail (not just the
-  // pinned/drawer-open ones) so the merged phone strip has real content
-  // regardless of what else is open — same refcounted diff pattern as the
-  // pin dock above.
+  // FLOOR FEED subscribes to every current agent only while its phone-floor
+  // surface is actually visible. Desktop and phone BOARD mode retain only
+  // drawer/pin subscriptions.
   useEffect(() => {
     const manager = managerRef.current;
     if (!manager) return;
-    const ids = [...agents.keys()];
+    const ids = floorFeedVisible ? [...agents.keys()] : [];
     const previous = prevFloorFeedIdsRef.current;
     for (const id of ids) {
       if (!previous.includes(id)) manager.acquire('agent', String(id));
@@ -988,7 +1217,7 @@ export default function App() {
       if (!ids.includes(id)) manager.release('agent', String(id));
     }
     prevFloorFeedIdsRef.current = ids;
-  }, [agents]);
+  }, [agents, floorFeedVisible]);
 
   // Push-landing deep link (state/launch.ts): once the target agent shows
   // up in the live roster, auto-open its drawer exactly once — the board
@@ -1007,6 +1236,7 @@ export default function App() {
       getRenderCount: () => renderCountRef.current,
       getAgentCount: () => occupantsRef.current.length,
       getResolution: () => lastResolutionRef.current,
+      getBackingResizeCount: () => backingResizeCountRef.current,
       getCameraState: () => lastCameraRef.current,
       getAssetStats: () => ({
         props: propStore.stats(),
@@ -1069,13 +1299,14 @@ export default function App() {
         target instanceof HTMLElement &&
         (target.tagName === 'INPUT' || target.tagName === 'TEXTAREA' || target.isContentEditable);
       if (typing) return;
+      rememberPanel('help');
       setOpenPanel('help');
     };
     window.addEventListener('keydown', onKey);
     return () => {
       window.removeEventListener('keydown', onKey);
     };
-  }, []);
+  }, [rememberPanel]);
 
   /** T6 item 4 — clears BOTH the JS-driven camera flight and the CSS grow
    *  origin. "Any input cancels": called from the global pointerdown/keydown
@@ -1110,6 +1341,7 @@ export default function App() {
       // render invisibly underneath, showing two active overlay layers
       // with two close buttons.
       setRealKind(null);
+      rememberPanel(kind);
       setOpenPanel(kind);
       const anchor = panelFlightAnchor(kind);
       const container = containerRef.current;
@@ -1134,7 +1366,7 @@ export default function App() {
       });
       ensureWalkLoop();
     },
-    [cancelPanelFlight, ensureWalkLoop],
+    [cancelPanelFlight, ensureWalkLoop, rememberPanel],
   );
 
   const handleOpenHotspot = useCallback(
@@ -1175,27 +1407,40 @@ export default function App() {
   const handleDispatchSend = useCallback(
     (machine: string, action: DispatchActionValue, requestId: string) => {
       // The pending id IS the wire requestId (CallModal generated it) — the
-      // tick's detectSendFailures matches the echoed dispatchUpdate on it.
+      // deadline check's detectSendFailures matches the echoed dispatchUpdate on it.
       pendingSendsRef.current = [
         ...pendingSendsRef.current,
         { id: requestId, machine, action, sentAt: Date.now() },
       ];
+      const timer = setTimeout(() => {
+        pendingSendTimersRef.current.delete(timer);
+        checkPendingSends();
+      }, DISPATCH_SEND_TIMEOUT_MS + 1);
+      pendingSendTimersRef.current.add(timer);
     },
-    [],
+    [checkPendingSends],
   );
 
-  const handleDispatchTodo = useCallback((prompt: string) => {
-    setCallPrefill({ prompt });
-    setOpenPanel('call');
-  }, []);
+  const handleDispatchTodo = useCallback(
+    (prompt: string) => {
+      setCallPrefill({ prompt });
+      rememberPanel('call');
+      setOpenPanel('call');
+    },
+    [rememberPanel],
+  );
 
-  const handleDispatchContract = useCallback((contract: { id: string; title: string }) => {
-    setCallPrefill({
-      prompt: `Contract ${contract.id}: ${contract.title}`,
-      contractId: contract.id,
-    });
-    setOpenPanel('call');
-  }, []);
+  const handleDispatchContract = useCallback(
+    (contract: { id: string; title: string }) => {
+      setCallPrefill({
+        prompt: `Contract ${contract.id}: ${contract.title}`,
+        contractId: contract.id,
+      });
+      rememberPanel('call');
+      setOpenPanel('call');
+    },
+    [rememberPanel],
+  );
 
   const handleToggleSound = useCallback(() => {
     setSettings((previous) => {
@@ -1279,17 +1524,22 @@ export default function App() {
     };
   }, [viewingResult, realKind, openPanel, drawerAgentId, closePanel, handleCloseDrawer]);
 
-  const tally = useMemo(() => tallyAgents(agents, now), [agents, now]);
+  const tally = useMemo(() => tallyAgents(agents, statusNow), [agents, statusNow]);
   const wings = useMemo(() => wingCounts(agents, crisis), [agents, crisis]);
   const openCrises = openCrisisCount(crisis);
   const realContent = useMemo(
-    () => (realKind === null ? null : buildRealSheet(realKind, { agents, crisis, economy }, now)),
-    [realKind, agents, crisis, economy, now],
+    () =>
+      realKind === null ? null : buildRealSheet(realKind, { agents, crisis, economy }, statusNow),
+    [realKind, agents, crisis, economy, statusNow],
   );
   const drawerTailKey = drawerAgentId !== null ? tailKey('agent', String(drawerAgentId)) : null;
 
   return (
-    <div className={grayscale ? 'app grayscale' : 'app'}>
+    <div
+      className={['app', grayscale ? 'grayscale' : null, openPanel !== null ? 'panel-open' : null]
+        .filter(Boolean)
+        .join(' ')}
+    >
       <HudStrip
         connectionStatus={connectionStatus}
         tally={tally}
@@ -1301,7 +1551,7 @@ export default function App() {
         soundscapeMuted={soundscapeMuted}
         onToggleSoundscape={handleToggleSoundscape}
         automationStopped={automationStopped}
-        onAutomationStoppedChange={setAutomationStopped}
+        automationLatchRevision={automationLatch.revision}
         onToggleGrayscale={() => {
           setGrayscale((value) => !value);
         }}
@@ -1328,34 +1578,22 @@ export default function App() {
             onPointerMove={handlePointerMove}
             onPointerUp={handlePointerUp}
             onPointerCancel={handlePointerUp}
+            onWheel={handleWheel}
           />
-          <ChipLayer
-            frame={chipFrame}
+          <WorldOverlay
+            store={worldFrameStore}
             occupants={occupants}
-            onChipClick={handleDesk}
-            alwaysShowLabels={settings?.alwaysShowLabels ?? true}
-          />
-          <DispatchVisitorChips frame={chipFrame} visitors={dispatchVisitors} />
-          <SpeechBubbleLayer
-            frame={chipFrame}
+            visitors={dispatchVisitors}
             bubbles={visibleSpeechBubbles}
-            occupants={occupants}
-            onTapAgent={handleDesk}
-          />
-          {/* Room-is-interface half of the desktop chrome model — desktop
-              only (CSS-hidden on phone, matching the pin dock's own
-              breakpoint: no free camera play there). */}
-          <PropHotspots
-            frame={chipFrame}
-            onOpen={handleOpenHotspot}
             alwaysShowLabels={settings?.alwaysShowLabels ?? true}
+            onDesk={handleDesk}
+            onOpenHotspot={handleOpenHotspot}
           />
         </div>
         <TriageBoard
           agents={agents}
           crisis={crisis}
           acks={acks}
-          now={now}
           onDesk={handleDesk}
           onAck={(key, since) => {
             applyAcks(requestAck(acksRef.current, key, since, Date.now()));
@@ -1373,31 +1611,31 @@ export default function App() {
             top: 0 and the HUD painted over the close button on desktop
             (found on real-device acceptance, 2026-07-10). */}
         {drawerAgentId !== null && drawerTailKey !== null && (
-          <AgentDrawer
-            key={drawerAgentId}
-            agentId={drawerAgentId}
-            agents={agents}
-            toolActivity={toolActivity}
-            crisis={crisis}
-            now={now}
-            tail={tails.get(drawerTailKey)}
-            pinned={pins.includes(drawerAgentId)}
-            onTogglePin={() => {
-              handleTogglePin(drawerAgentId);
-            }}
-            onTogglePause={() => {
-              handleTogglePause(drawerTailKey);
-            }}
-            onClose={handleCloseDrawer}
-            send={send}
-          />
+          <Suspense fallback={null}>
+            <AgentDrawer
+              key={drawerAgentId}
+              agentId={drawerAgentId}
+              agents={agents}
+              toolActivity={toolActivity}
+              crisis={crisis}
+              tail={tails.get(drawerTailKey)}
+              pinned={pins.includes(drawerAgentId)}
+              onTogglePin={() => {
+                handleTogglePin(drawerAgentId);
+              }}
+              onTogglePause={() => {
+                handleTogglePause(drawerTailKey);
+              }}
+              onClose={handleCloseDrawer}
+              send={send}
+            />
+          </Suspense>
         )}
       </div>
       <PinDock
         pins={pins}
         agents={agents}
         tails={tails}
-        now={now}
         notice={dockNotice}
         onUnpin={handleTogglePin}
         onPromote={handleDesk}
@@ -1435,73 +1673,100 @@ export default function App() {
           context) — only whichever panel is actually `isOpen` ever renders
           it, so this single provider is safe for all of them at once. */}
       <PanelGrowOriginProvider value={panelGrowOrigin}>
-        <HelpModal isOpen={openPanel === 'help'} onClose={closePanel} />
-        <SettingsModal
-          isOpen={openPanel === 'settings'}
-          onClose={closePanel}
-          settings={settings}
-          onToggleSound={handleToggleSound}
-          onToggleWatchAllSessions={handleToggleWatchAllSessions}
-          onToggleHooksEnabled={handleToggleHooksEnabled}
-          onToggleAlwaysShowLabels={handleToggleAlwaysShowLabels}
-        />
-        <DebugView
-          isOpen={openPanel === 'debug'}
-          onClose={closePanel}
-          agents={agents}
-          connectionStatus={connectionStatus}
-          crisis={crisis}
-          economy={economy}
-          diagnostics={diagnostics}
-          onRequestDiagnostics={handleRequestDiagnostics}
-        />
-        <CallModal
-          isOpen={openPanel === 'call'}
-          onClose={() => {
-            closePanel();
-            setCallPrefill(null);
-          }}
-          prefill={callPrefill}
-          send={send}
-          onSend={handleDispatchSend}
-          budget={budget}
-        />
-        <ShiftPanel isOpen={openPanel === 'shift'} onClose={closePanel} />
-        <BriefingPanel
-          isOpen={openPanel === 'briefing'}
-          onClose={closePanel}
-          onDispatchTodo={handleDispatchTodo}
-        />
-        <AutomationPanel
-          isOpen={openPanel === 'automation'}
-          onClose={closePanel}
-          chainRuns={chainRuns}
-          chainRunReceivedAt={chainRunReceivedAt}
-          now={now}
-          automationStopped={automationStopped}
-          onAutomationStoppedChange={setAutomationStopped}
-        />
-        <ContractsPanel
-          isOpen={openPanel === 'contracts'}
-          onClose={closePanel}
-          onDispatchContract={handleDispatchContract}
-        />
-        <OpsReviewPanel
-          isOpen={openPanel === 'ops'}
-          onClose={closePanel}
-          send={send}
-          onDispatchSend={handleDispatchSend}
-          dispatchEntries={dispatchEntries}
-          sendFailures={sendFailures}
-        />
-        <GraphSearchPanel isOpen={openPanel === 'graph-search'} onClose={closePanel} />
-        <DistrictsView isOpen={openPanel === 'districts'} onClose={closePanel} />
-        <InboxPanel isOpen={openPanel === 'inbox'} onClose={closePanel} />
-        <MorningPanel
-          isOpen={openPanel === 'morning'}
-          onClose={closePanel}
-          connectionStatus={connectionStatus}
-        />
+        <Suspense fallback={null}>
+          {mountedPanels.has('help') && (
+            <HelpModal isOpen={openPanel === 'help'} onClose={closePanel} />
+          )}
+          {mountedPanels.has('settings') && (
+            <SettingsModal
+              isOpen={openPanel === 'settings'}
+              onClose={closePanel}
+              settings={settings}
+              onToggleSound={handleToggleSound}
+              onToggleWatchAllSessions={handleToggleWatchAllSessions}
+              onToggleHooksEnabled={handleToggleHooksEnabled}
+              onToggleAlwaysShowLabels={handleToggleAlwaysShowLabels}
+            />
+          )}
+          {mountedPanels.has('debug') && (
+            <DebugView
+              isOpen={openPanel === 'debug'}
+              onClose={closePanel}
+              agents={agents}
+              connectionStatus={connectionStatus}
+              crisis={crisis}
+              economy={economy}
+              diagnostics={diagnostics}
+              onRequestDiagnostics={handleRequestDiagnostics}
+            />
+          )}
+          {mountedPanels.has('call') && (
+            <CallModal
+              isOpen={openPanel === 'call'}
+              onClose={() => {
+                closePanel();
+                setCallPrefill(null);
+              }}
+              prefill={callPrefill}
+              send={send}
+              onSend={handleDispatchSend}
+              budget={budget}
+            />
+          )}
+          {mountedPanels.has('shift') && (
+            <ShiftPanel isOpen={openPanel === 'shift'} onClose={closePanel} />
+          )}
+          {mountedPanels.has('briefing') && (
+            <BriefingPanel
+              isOpen={openPanel === 'briefing'}
+              onClose={closePanel}
+              onDispatchTodo={handleDispatchTodo}
+            />
+          )}
+          {mountedPanels.has('automation') && (
+            <AutomationPanel
+              isOpen={openPanel === 'automation'}
+              onClose={closePanel}
+              chainRuns={chainRuns}
+              chainRunReceivedAt={chainRunReceivedAt}
+              automationStopped={automationStopped}
+              automationLatchRevision={automationLatch.revision}
+            />
+          )}
+          {mountedPanels.has('contracts') && (
+            <ContractsPanel
+              isOpen={openPanel === 'contracts'}
+              onClose={closePanel}
+              onDispatchContract={handleDispatchContract}
+            />
+          )}
+          {mountedPanels.has('ops') && (
+            <OpsReviewPanel
+              isOpen={openPanel === 'ops'}
+              onClose={closePanel}
+              send={send}
+              onDispatchSend={handleDispatchSend}
+              dispatchEntries={dispatchEntries}
+              sendFailures={sendFailures}
+            />
+          )}
+          {mountedPanels.has('graph-search') && (
+            <GraphSearchPanel isOpen={openPanel === 'graph-search'} onClose={closePanel} />
+          )}
+          {mountedPanels.has('districts') && (
+            <DistrictsView isOpen={openPanel === 'districts'} onClose={closePanel} />
+          )}
+          {mountedPanels.has('inbox') && (
+            <InboxPanel isOpen={openPanel === 'inbox'} onClose={closePanel} />
+          )}
+          {mountedPanels.has('morning') && (
+            <MorningPanel
+              isOpen={openPanel === 'morning'}
+              onClose={closePanel}
+              connectionStatus={connectionStatus}
+            />
+          )}
+        </Suspense>
       </PanelGrowOriginProvider>
 
       {viewingResult && (

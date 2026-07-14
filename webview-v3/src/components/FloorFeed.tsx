@@ -1,6 +1,6 @@
 import { useEffect, useRef } from 'react';
 
-import type { FloorFeedEntry } from '../state/floorFeed';
+import { type FloorFeedEntry, visibleFloorFeedEntries } from '../state/floorFeed';
 
 /** Matches TailSheet's near-bottom band (same autoscroll grammar). */
 const NEAR_BOTTOM_PX = 40;
@@ -18,6 +18,7 @@ export interface FloorFeedProps {
 export function FloorFeed({ entries }: FloorFeedProps) {
   const logRef = useRef<HTMLDivElement | null>(null);
   const nearBottomRef = useRef(true);
+  const visibleEntries = visibleFloorFeedEntries(entries);
 
   useEffect(() => {
     const log = logRef.current;
@@ -38,10 +39,10 @@ export function FloorFeed({ entries }: FloorFeedProps) {
             log.scrollHeight - log.scrollTop - log.clientHeight <= NEAR_BOTTOM_PX;
         }}
       >
-        {entries.length === 0 ? (
+        {visibleEntries.length === 0 ? (
           <div className="floor-feed__empty">■ NO ACTIVITY YET</div>
         ) : (
-          entries.map((entry) => (
+          visibleEntries.map((entry) => (
             <div className="floor-feed__line" key={entry.key}>
               <span className="floor-feed__label">{entry.label}</span> {entry.text}
             </div>

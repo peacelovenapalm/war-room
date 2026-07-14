@@ -1,6 +1,10 @@
 import { describe, expect, it } from 'vitest';
 
-import { getCanvasResolution, MAX_CANVAS_RESOLUTION } from '../src/engine/resolution';
+import {
+  canvasBackingSize,
+  getCanvasResolution,
+  MAX_CANVAS_RESOLUTION,
+} from '../src/engine/resolution';
 
 describe('canvas resolution cap (MOBILE-FORENSICS constraint 2)', () => {
   it('caps at 2', () => {
@@ -22,5 +26,12 @@ describe('canvas resolution cap (MOBILE-FORENSICS constraint 2)', () => {
     expect(getCanvasResolution(Number.NaN)).toBe(1);
     // In this node test env there is no window: the default read is 1.
     expect(getCanvasResolution()).toBe(1);
+  });
+
+  it('derives stable integer backing dimensions from CSS size and resolution', () => {
+    const first = canvasBackingSize({ width: 390.25, height: 664.25 }, 2);
+    const repeated = canvasBackingSize({ width: 390.25, height: 664.25 }, 2);
+    expect(first).toEqual({ width: 781, height: 1329 });
+    expect(repeated).toEqual(first);
   });
 });

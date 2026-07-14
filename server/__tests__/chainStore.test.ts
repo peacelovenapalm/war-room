@@ -12,6 +12,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 import {
   CHAIN_MAX_STEPS,
+  CHAIN_RECONNECT_TERMINAL_LIMIT,
   chainMaxConcurrentRuns,
   chainMaxSteps,
   type ChainStepDef,
@@ -162,6 +163,26 @@ describe('ChainStore.createDef', () => {
 });
 
 describe('ChainStore run lifecycle', () => {
+  it('reconnect snapshot includes all active runs plus only the recent terminal tail', () => {
+    const s = new ChainStore(defsPath, runsPath, auditPath);
+    const defResult = s.createDef({ name: 'x', steps: [step('s1', 'a')] });
+    if (!defResult.ok) throw new Error('unreachable');
+    const active = s.createRun(defResult.def, 1);
+    for (let i = 0; i < CHAIN_RECONNECT_TERMINAL_LIMIT + 2; i++) {
+      const terminal = s.createRun(defResult.def, 10 + i * 2);
+      s.completeRun(terminal.id, 11 + i * 2);
+    }
+
+    const snapshot = s.getReconnectSnapshot(1_000);
+    expect(snapshot.updatedAt).toBe(1_000);
+    expect(snapshot.runs.filter((run) => run.status === 'running').map((run) => run.id)).toEqual([
+      active.id,
+    ]);
+    const terminals = snapshot.runs.filter((run) => run.status !== 'running');
+    expect(terminals).toHaveLength(CHAIN_RECONNECT_TERMINAL_LIMIT);
+    expect(Math.min(...terminals.map((run) => run.updatedAt))).toBe(15);
+  });
+
   it('createRun starts all steps pending at currentStep 0', () => {
     const s = new ChainStore(defsPath, runsPath, auditPath);
     const defResult = s.createDef({ name: 'x', steps: [step('s1', 'a'), step('s2', 'b')] });

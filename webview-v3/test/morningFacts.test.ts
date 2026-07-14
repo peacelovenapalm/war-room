@@ -7,8 +7,39 @@ import {
   isMorningJsonStale,
   MORNING_BOARD_STALE_WARN_SECONDS,
   MORNING_JSON_STALE_WARN_SECONDS,
+  MORNING_REFRESH_INTERVAL_MS,
+  type MorningRefreshScheduler,
   type MorningSurface,
+  startMorningRefreshLoop,
 } from '../src/net/morningFacts';
+
+describe('startMorningRefreshLoop', () => {
+  it('refreshes immediately and periodically without any panel-open gate', () => {
+    let callback: (() => void) | undefined;
+    let cleared: ReturnType<typeof setInterval> | undefined;
+    const intervalId = 123 as unknown as ReturnType<typeof setInterval>;
+    const scheduler: MorningRefreshScheduler = {
+      setInterval: (next, delayMs) => {
+        expect(delayMs).toBe(MORNING_REFRESH_INTERVAL_MS);
+        callback = next;
+        return intervalId;
+      },
+      clearInterval: (id) => {
+        cleared = id;
+      },
+    };
+    let refreshes = 0;
+    const stop = startMorningRefreshLoop(() => {
+      refreshes += 1;
+    }, scheduler);
+
+    expect(refreshes).toBe(1);
+    callback?.();
+    expect(refreshes).toBe(2);
+    stop();
+    expect(cleared).toBe(intervalId);
+  });
+});
 
 function makeSurface(overrides: Partial<MorningSurface> = {}): MorningSurface {
   return {

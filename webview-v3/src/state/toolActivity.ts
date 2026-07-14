@@ -126,6 +126,11 @@ export function reduceToolActivity(
   now = Date.now(),
 ): ToolActivityMap {
   switch (message.type) {
+    case 'existingAgents':
+      // Tool/subagent state is ephemeral telemetry. A reconnect begins a new
+      // epoch: discard anything whose clear/done frame may have been missed,
+      // then accept the active-tool replay that follows this roster snapshot.
+      return agents.size === 0 ? agents : EMPTY_TOOL_ACTIVITY;
     case 'agentToolStart': {
       const existing = agents.get(message.id) ?? EMPTY_AGENT_ACTIVITY;
       if (existing.active.some((t) => t.toolId === message.toolId)) return agents;
@@ -272,6 +277,29 @@ export function detectToolNameChanges(
     if (prevNames.get(agentId) !== name) out.push({ agentId, toolName: name });
   }
   return out;
+}
+
+export interface ToolNameChangeReconciliation {
+  changes: readonly { agentId: number; toolName: string }[];
+  names: ReadonlyMap<number, string | undefined>;
+}
+
+/**
+ * Reconnect replay is a snapshot, not a sequence of newly-started tools.
+ * While that transaction is open, preserve the pre-disconnect name baseline
+ * and suppress change events; the caller replaces the baseline with one
+ * final snapshot when the replay settles.
+ */
+export function reconcileToolNameChanges(
+  prevNames: ReadonlyMap<number, string | undefined>,
+  next: ToolActivityMap,
+  reconnectReplayInFlight: boolean,
+): ToolNameChangeReconciliation {
+  if (reconnectReplayInFlight) return { changes: [], names: prevNames };
+  return {
+    changes: detectToolNameChanges(prevNames, next),
+    names: toolNameSnapshot(next),
+  };
 }
 
 /** Current id→current-tool-name snapshot — callers carry this forward as

@@ -119,9 +119,11 @@ components:
         - $ref: '#/components/schemas/OfficeLayoutUpdated'
         # Command + Automation (v2 mechanic G3 — GAME-DESIGN.md §7)
         - $ref: '#/components/schemas/ChainRunUpdate'
+        - $ref: '#/components/schemas/ChainRunSnapshot'
         - $ref: '#/components/schemas/StandingOrderUpdate'
         - $ref: '#/components/schemas/BudgetUpdate'
         - $ref: '#/components/schemas/AutomationStopped'
+        - $ref: '#/components/schemas/AutomationResumed'
         # Living world (v2 mechanic G5 — GAME-DESIGN.md §6.3)
         - $ref: '#/components/schemas/WorldEventFired'
         # Living Studio substrate (v3 WS-C — KICKOFF-v3.1 §3)
@@ -719,6 +721,12 @@ components:
             Verbatim echo of DispatchRequest.requestId, present only when
             the originating client supplied one — the requesting client's
             send-failure detector matches on this exactly.
+        updatedAt:
+          type: integer
+          description: >-
+            Server epoch-ms timestamp of this lifecycle revision. Present on
+            live broadcasts and /api/dispatch/recent snapshots so clients can
+            reject a delayed HTTP row after a newer WebSocket transition.
 
     DispatchActionValue:
       description: >-
@@ -1180,6 +1188,25 @@ components:
         run:
           $ref: '#/components/schemas/ChainRun'
 
+    ChainRunSnapshot:
+      description: >-
+        Authoritative reconnect snapshot containing every active chain run
+        plus a bounded recent terminal tail. `updatedAt` is the server epoch
+        time at which the snapshot was captured; clients replace absent
+        active ids and reconcile included rows by each run's updatedAt.
+      type: object
+      additionalProperties: false
+      required: [type, runs, updatedAt]
+      properties:
+        type:
+          const: chainRunSnapshot
+        runs:
+          type: array
+          items:
+            $ref: '#/components/schemas/ChainRun'
+        updatedAt:
+          type: integer
+
     StandingOrderScheduleDaily:
       type: object
       additionalProperties: false
@@ -1334,7 +1361,7 @@ components:
         separate explicit action, never automatic.
       type: object
       additionalProperties: false
-      required: [type, haltedOrderIds, haltedRunIds]
+      required: [type, haltedOrderIds, haltedRunIds, revision]
       properties:
         type:
           const: automationStopped
@@ -1346,6 +1373,23 @@ components:
           type: array
           items:
             type: string
+        revision:
+          type: integer
+          description: Monotonically increasing durable latch revision.
+
+    AutomationResumed:
+      description: >-
+        The global STOP ALL latch was explicitly released. Carries the same
+        monotonic durable revision as AutomationStopped so clients can reject
+        stale HTTP hydration or delayed receipts.
+      type: object
+      additionalProperties: false
+      required: [type, revision]
+      properties:
+        type:
+          const: automationResumed
+        revision:
+          type: integer
 
     WorldEventFired:
       description: >-
@@ -2030,6 +2074,15 @@ components:
 
     # ── Client message variants ────────────────────────────────────
 
+    WebviewClientValue:
+      description: >-
+        Optional face identifier on webviewReady. An absent value is the
+        legacy webview for backward compatibility; webview-v3 identifies the
+        spritesheet-driven Living Studio face, which does not consume the
+        legacy inline sprite/catalog payload.
+      type: string
+      enum: [webview-v3]
+
     WebviewReady:
       description: Client signals it's ready to receive state.
       type: object
@@ -2038,6 +2091,8 @@ components:
       properties:
         type:
           const: webviewReady
+        client:
+          $ref: '#/components/schemas/WebviewClientValue'
 
     LaunchAgent:
       description: Launch a new Claude agent in a new terminal.

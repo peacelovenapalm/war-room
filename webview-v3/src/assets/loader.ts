@@ -65,9 +65,12 @@ export interface AssetStore<TResolution> {
    * chunks containing the named entries.
    */
   request(names: readonly string[]): void;
+  /** Explicitly retry terminal manifest/chunk failures. Ordinary render
+   * requests never retry, preventing failed assets from forming a loop. */
+  retryFailed(): void;
   /** Synchronous resolve with placeholder fallback — see module header. */
   get(name: string): TResolution;
-  /** Fires after the manifest or any chunk lands (or fails). */
+  /** Fires after the manifest or a chunk lands successfully. */
   onChange(listener: () => void): () => void;
   stats(): AssetStoreStats;
 }
@@ -96,6 +99,7 @@ export function createSpriteStore<TImage>(
   const spriteIndex = new Map<string, SpriteDef>();
   let sheetStates: ChunkState<TImage>[] = [];
   const pendingNames = new Set<string>();
+  const requestedNames = new Set<string>();
 
   function emit(): void {
     for (const listener of [...listeners]) listener();
@@ -105,7 +109,7 @@ export function createSpriteStore<TImage>(
     const state = sheetStates[index];
     const sheet = manifest?.sheets[index];
     if (!state || sheet === undefined) return;
-    if (state.status === 'loading' || state.status === 'loaded') return;
+    if (state.status !== 'unloaded') return;
     state.status = 'loading';
     deps
       .loadImage(resolveUrl(sheet, manifestUrl))
@@ -115,8 +119,7 @@ export function createSpriteStore<TImage>(
         emit();
       })
       .catch(() => {
-        state.status = 'failed'; // stays placeholder; a later request() may retry.
-        emit();
+        state.status = 'failed';
       });
   }
 
@@ -124,8 +127,6 @@ export function createSpriteStore<TImage>(
     for (const name of names) {
       const sprite = spriteIndex.get(name);
       if (!sprite) continue; // unknown sprite -> permanent placeholder
-      const state = sheetStates[sprite.sheet];
-      if (state?.status === 'failed') state.status = 'unloaded'; // allow retry
       loadSheet(sprite.sheet);
     }
   }
@@ -139,7 +140,6 @@ export function createSpriteStore<TImage>(
         const parsed = parseSpriteSheetManifest(raw);
         if (!parsed) {
           manifestState = 'failed';
-          emit();
           return;
         }
         manifest = parsed;
@@ -153,20 +153,32 @@ export function createSpriteStore<TImage>(
       })
       .catch(() => {
         manifestState = 'failed';
-        emit();
       });
   }
 
   return {
     request(names) {
       if (names.length === 0) return;
+      for (const name of names) requestedNames.add(name);
       if (manifestState === 'ready') {
         requestLoaded(names);
         return;
       }
       for (const name of names) pendingNames.add(name);
-      if (manifestState === 'failed') manifestState = 'idle'; // allow retry
       ensureManifest();
+    },
+    retryFailed() {
+      if (manifestState === 'failed') {
+        manifestState = 'idle';
+        for (const name of requestedNames) pendingNames.add(name);
+        ensureManifest();
+        return;
+      }
+      if (manifestState !== 'ready') return;
+      for (const state of sheetStates) {
+        if (state.status === 'failed') state.status = 'unloaded';
+      }
+      requestLoaded(requestedNames);
     },
     get(name) {
       const sprite = spriteIndex.get(name);
@@ -207,6 +219,7 @@ export function createImageStore<TImage>(
   const imageIndex = new Map<string, ImageAsset>();
   const chunkStates = new Map<string, ChunkState<TImage>>();
   const pendingNames = new Set<string>();
+  const requestedNames = new Set<string>();
 
   function emit(): void {
     for (const listener of [...listeners]) listener();
@@ -220,7 +233,7 @@ export function createImageStore<TImage>(
       state = { status: 'unloaded', image: null };
       chunkStates.set(name, state);
     }
-    if (state.status === 'loading' || state.status === 'loaded') return;
+    if (state.status !== 'unloaded') return;
     state.status = 'loading';
     deps
       .loadImage(resolveUrl(asset.path, manifestUrl))
@@ -231,14 +244,11 @@ export function createImageStore<TImage>(
       })
       .catch(() => {
         state.status = 'failed';
-        emit();
       });
   }
 
   function requestLoaded(names: Iterable<string>): void {
     for (const name of names) {
-      const state = chunkStates.get(name);
-      if (state?.status === 'failed') state.status = 'unloaded';
       loadOne(name);
     }
   }
@@ -252,7 +262,6 @@ export function createImageStore<TImage>(
         const parsed = parseImageManifest(raw);
         if (!parsed) {
           manifestState = 'failed';
-          emit();
           return;
         }
         for (const asset of parsed.images) imageIndex.set(asset.name, asset);
@@ -264,20 +273,32 @@ export function createImageStore<TImage>(
       })
       .catch(() => {
         manifestState = 'failed';
-        emit();
       });
   }
 
   return {
     request(names) {
       if (names.length === 0) return;
+      for (const name of names) requestedNames.add(name);
       if (manifestState === 'ready') {
         requestLoaded(names);
         return;
       }
       for (const name of names) pendingNames.add(name);
-      if (manifestState === 'failed') manifestState = 'idle'; // allow retry
       ensureManifest();
+    },
+    retryFailed() {
+      if (manifestState === 'failed') {
+        manifestState = 'idle';
+        for (const name of requestedNames) pendingNames.add(name);
+        ensureManifest();
+        return;
+      }
+      if (manifestState !== 'ready') return;
+      for (const state of chunkStates.values()) {
+        if (state.status === 'failed') state.status = 'unloaded';
+      }
+      requestLoaded(requestedNames);
     },
     get(name) {
       const asset = imageIndex.get(name);

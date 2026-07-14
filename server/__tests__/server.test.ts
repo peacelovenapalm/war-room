@@ -15,6 +15,7 @@ vi.mock('os', async () => {
 
 // Must import AFTER mock setup
 const { PixelAgentsServer } = await import('../src/server.js');
+const { dispatchStore } = await import('../src/dispatchStore.js');
 
 async function postHook(
   port: number,
@@ -169,6 +170,34 @@ describe('PixelAgentsServer', () => {
 
     expect(received).toHaveLength(1);
     expect(received[0].__pid).toBe(4242);
+  });
+
+  it('derives managed-launch provenance from the authenticated runner advertisement', async () => {
+    const config = await server.start();
+    const received: Array<Record<string, unknown>> = [];
+    server.onHookEvent((_providerId: string, event: Record<string, unknown>) => {
+      received.push(event);
+    });
+    dispatchStore.recordManagedSessions('MANAGED-TEST', [
+      { dispatchId: 'managed-1', tmuxSession: 'war-room-managed-1', panePid: 5150 },
+    ]);
+
+    await fetch(`http://127.0.0.1:${config.port}/api/hooks/claude`, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        Authorization: `Bearer ${config.token}`,
+        'X-Machine': 'MANAGED-TEST',
+        'X-Pid': '5150',
+      },
+      body: JSON.stringify({
+        session_id: 'managed-session',
+        hook_event_name: 'UserPromptSubmit',
+        __managedLaunch: false,
+      }),
+    });
+
+    expect(received[0].__managedLaunch).toBe(true);
   });
 
   // 5c. Invalid/absent X-Pid never sets __pid (honest "no telemetry" case)

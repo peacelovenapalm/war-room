@@ -1,12 +1,21 @@
+import { readFile } from 'node:fs/promises';
+import path from 'node:path';
+import { fileURLToPath } from 'node:url';
+
 import react from '@vitejs/plugin-react';
 import { defineConfig } from 'vite';
 import { VitePWA } from 'vite-plugin-pwa';
 
+import { retainStaticShellPrecacheEntries } from './pwaPrecache';
 import { COLOR_WORLD_BG } from './src/constants';
 
 /** v3 chrome background — matches index.html's theme-color meta and the
  *  CRT base tone in index.css. */
 const THEME_BG_COLOR = COLOR_WORLD_BG;
+const BUILD_OUT_DIR = path.resolve(
+  path.dirname(fileURLToPath(import.meta.url)),
+  '../dist/webview-v3',
+);
 
 /**
  * webview-v3 — the V3 "Living Studio" isometric face (KICKOFF-v3.1 WS-A).
@@ -74,6 +83,21 @@ export default defineConfig({
         runtimeCaching: [
           { urlPattern: /^\/api\//, method: 'GET', handler: 'NetworkOnly' },
           { urlPattern: /^\/api\//, method: 'POST', handler: 'NetworkOnly' },
+        ],
+        // Workbox's default glob includes every generated JS file. That
+        // silently defeats React.lazy(): all deferred panel chunks download
+        // during SW installation even when the operator never opens them.
+        // The generated HTML is Vite's authoritative static dependency list
+        // (entry script + modulepreloads), so retain those JS files for the
+        // offline shell and leave dynamic imports to their actual first use.
+        manifestTransforms: [
+          async (entries) => ({
+            manifest: retainStaticShellPrecacheEntries(
+              entries,
+              await readFile(path.join(BUILD_OUT_DIR, 'index.html'), 'utf8'),
+            ),
+            warnings: [],
+          }),
         ],
         // Never serve this face's index.html for API paths, the old face's
         // grace-period mount (/v1/), OR old /v3 URLs. /v3 MUST be here (P6

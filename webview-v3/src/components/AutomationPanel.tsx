@@ -1,5 +1,6 @@
 import { useEffect, useState } from 'react';
 
+import { useNow } from '../hooks/useNow';
 import {
   chainMaxSteps,
   chainRunChipLabel,
@@ -30,11 +31,10 @@ export interface AutomationPanelProps {
   onClose: () => void;
   chainRuns: ChainRunClient[];
   chainRunReceivedAt: Record<string, number>;
-  now: number;
   /** Lifted STOP ALL state — the SAME source the HUD instance renders
    *  (state/stopAll.ts), so the two controls can never disagree. */
   automationStopped: boolean;
-  onAutomationStoppedChange: (stopped: boolean) => void;
+  automationLatchRevision: number;
 }
 
 function emptyStep(): ChainStepDefInput {
@@ -497,15 +497,15 @@ export function AutomationPanel({
   onClose,
   chainRuns,
   chainRunReceivedAt,
-  now,
   automationStopped,
-  onAutomationStoppedChange,
+  automationLatchRevision,
 }: AutomationPanelProps) {
+  const now = useNow(isOpen);
   return (
     <Modal isOpen={isOpen} onClose={onClose} title="AUTOMATION" testId="automation-panel" wide>
       <div className="automation-panel">
         <div className="automation-panel__stopall">
-          <StopAllControl stopped={automationStopped} onStoppedChange={onAutomationStoppedChange} />
+          <StopAllControl stopped={automationStopped} latchRevision={automationLatchRevision} />
         </div>
         <ChainsSection
           isOpen={isOpen}

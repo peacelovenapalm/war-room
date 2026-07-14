@@ -221,8 +221,7 @@ export const DISPATCH_STATUS_CHIPS: Record<DispatchStatusValue, DispatchStatusSp
   'queued-budget': { glyph: '⏸', word: 'HELD' },
 };
 
-/** Mirrors core's DispatchUpdate broadcast, plus a client receipt timestamp
- *  (the broadcast plane carries no timestamp of its own). */
+/** Mirrors core's DispatchUpdate broadcast, plus a client receipt timestamp. */
 export interface DispatchEntry {
   id: string;
   action: DispatchActionValue;
@@ -242,6 +241,8 @@ export interface DispatchEntry {
    *  dispatchRequest — the send-failure detector's exact correlation key.
    *  Absent for server-originated dispatches (chains, standing orders). */
   requestId?: string;
+  /** Server lifecycle revision. Orders delayed HTTP snapshots against WS. */
+  updatedAt?: number;
   receivedAt: number;
 }
 
@@ -315,8 +316,15 @@ export function upsertDispatchEntry(
   update: Omit<DispatchEntry, 'receivedAt'>,
   now: number = Date.now(),
 ): DispatchEntry[] {
-  const next: DispatchEntry = { ...update, receivedAt: now };
   const idx = entries.findIndex((e) => e.id === update.id);
+  const existing = idx === -1 ? undefined : entries[idx];
+  if (
+    existing?.updatedAt !== undefined &&
+    (update.updatedAt === undefined || update.updatedAt < existing.updatedAt)
+  ) {
+    return entries;
+  }
+  const next: DispatchEntry = { ...update, receivedAt: now };
   if (idx === -1) return [...entries, next];
   const copy = [...entries];
   copy[idx] = next;

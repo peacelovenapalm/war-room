@@ -102,6 +102,17 @@ const REST_JSON: Record<string, unknown> = {
     degraded: false,
     degradedReasons: [],
     streak: { count: 3, lastBreachReason: null, lastBreachAt: null },
+    memory: {
+      graphAnswered: 0,
+      rederived: 0,
+      surfacesOpenedPerMorning: 0,
+      morningDate: '2026-07-10',
+      persistence: 'process',
+      writePathEnabled: false,
+      writeMode: 'staged',
+      cleanDayCount: 0,
+      promotionEligible: false,
+    },
   },
   // v4 T7 routine inbox tray — newest-first fixture across two routines.
   '/api/inbox': {
@@ -306,6 +317,7 @@ async function serveV3Dist(
   const receivedHttpPosts: { path: string }[] = [];
   const killRequestId = 'kill-req-1';
   const answerRequestId = 'answer-req-1';
+  let automationLatchRevision = 0;
   const server = http.createServer((req, res) => {
     const requestPath = decodeURIComponent((req.url ?? '/').split('?')[0]);
     const requestQuery = new URLSearchParams((req.url ?? '').split('?')[1] ?? '');
@@ -331,13 +343,36 @@ async function serveV3Dist(
         res.end(JSON.stringify({ ok: false, haltedOrders: 0, haltedRuns: 0 }));
         return;
       }
+      // B5 (server httpServer.ts:2003-2009): the shared `stopped` state is
+      // WS-broadcast-authoritative only — the HTTP response no longer
+      // drives it. Mirror that here or StopAllControl/AutomationPanel never
+      // see the transition.
+      automationLatchRevision += 1;
+      for (const client of wss.clients) {
+        client.send(
+          JSON.stringify({
+            type: 'automationStopped',
+            haltedOrderIds: [],
+            haltedRunIds: [],
+            revision: automationLatchRevision,
+          }),
+        );
+      }
       res.writeHead(200, { 'Content-Type': 'application/json' });
-      res.end(JSON.stringify({ ok: true, haltedOrders: 0, haltedRuns: 0 }));
+      res.end(
+        JSON.stringify({ ok: true, haltedOrders: 0, haltedRuns: 0, revision: automationLatchRevision }),
+      );
       return;
     }
     if (requestPath === '/api/automation/resume' && req.method === 'POST') {
+      automationLatchRevision += 1;
+      for (const client of wss.clients) {
+        client.send(JSON.stringify({ type: 'automationResumed', revision: automationLatchRevision }));
+      }
       res.writeHead(200, { 'Content-Type': 'application/json' });
-      res.end(JSON.stringify({ ok: true, resumedOrders: 0 }));
+      res.end(
+        JSON.stringify({ ok: true, resumedOrders: 0, revision: automationLatchRevision }),
+      );
       return;
     }
     // OPS REVIEW rung-2 proposals — the exact real endpoints being reused
@@ -539,6 +574,21 @@ async function serveV3Dist(
 }
 
 test.describe('stage-3 panel ports (desktop chrome model)', () => {
+  test('desktop does not subscribe to hidden all-agent floor-feed tails', async ({ browser }) => {
+    const host = await serveV3Dist();
+    const context = await browser.newContext({ viewport: VIEWPORT });
+    try {
+      const page = await context.newPage();
+      await page.goto(`${host.url}/`);
+      await expect(page.getByTestId('hud-connection')).toHaveText('● LIVE', { timeout: 20_000 });
+      await page.waitForTimeout(100);
+      expect(host.receivedMessages.some((message) => message.type === 'tailSubscribe')).toBe(false);
+    } finally {
+      await context.close();
+      await host.close();
+    }
+  });
+
   test('dock opens every panel; HELP/SETTINGS/DEBUG/SHIFT/BRIEFING/CONTRACTS/AUTOMATION render real content or an honest empty state', async ({
     browser,
   }) => {
@@ -794,6 +844,75 @@ test.describe('stage-3 panel ports (desktop chrome model)', () => {
 
       await close.click();
       await expect(page.getByTestId('agent-drawer')).toHaveCount(0);
+    } finally {
+      await context.close();
+      await host.close();
+    }
+  });
+
+  test('panel dock stays below an agent drawer but rises for one-click modal switching', async ({
+    browser,
+  }) => {
+    const host = await serveV3Dist();
+    const context = await browser.newContext({ viewport: VIEWPORT });
+    try {
+      const page = await context.newPage();
+      await page.goto(`${host.url}/?agentId=1`);
+      await expect(page.getByTestId('agent-drawer')).toBeVisible({ timeout: 20_000 });
+      await expect(page.locator('.panel-dock')).toHaveCSS('z-index', '15');
+
+      await page.getByTestId('drawer-close').click();
+      await page.getByTestId('dock-briefing').click();
+      await expect(page.getByTestId('briefing-panel')).toBeVisible();
+      await expect(page.locator('.panel-dock')).toHaveCSS('z-index', '47');
+      await page.getByTestId('dock-settings').click();
+      await expect(page.getByTestId('settings-modal')).toBeVisible();
+      await expect(page.getByTestId('briefing-panel')).toHaveCount(0);
+    } finally {
+      await context.close();
+      await host.close();
+    }
+  });
+
+  test('completed desk focus yields the rendered camera to a canvas drag', async ({ browser }) => {
+    const host = await serveV3Dist();
+    const context = await browser.newContext({ viewport: VIEWPORT });
+    try {
+      const page = await context.newPage();
+      // getCameraState()/getBackingResizeCount() below only exist once
+      // testHooks.ts's installTestHooksIfE2E() runs, which is gated on
+      // window.__PIXEL_AGENTS_E2E — set this before any app code runs
+      // (matches dpr.spec.ts's setup) or the hooks stay undefined forever.
+      await page.addInitScript(() => {
+        (window as unknown as { __PIXEL_AGENTS_E2E?: boolean }).__PIXEL_AGENTS_E2E = true;
+      });
+      await page.goto(`${host.url}/?agentId=1`);
+      await expect(page.getByTestId('agent-drawer')).toBeVisible({ timeout: 20_000 });
+
+      // Wait for the bounded desk walk to finish, then capture the camera
+      // that was actually used by renderWorld rather than an intermediate
+      // gesture ref.
+      await page.waitForTimeout(2_100);
+      const before = await page.evaluate(() => window.__warRoomV3TestHooks?.getCameraState());
+      const backingResizesBefore = await page.evaluate(() =>
+        window.__warRoomV3TestHooks?.getBackingResizeCount(),
+      );
+      expect(before).not.toBeNull();
+
+      const canvas = page.getByTestId('iso-canvas');
+      const box = await canvas.boundingBox();
+      expect(box).not.toBeNull();
+      await page.mouse.move(box!.x + box!.width / 2, box!.y + box!.height / 2);
+      await page.mouse.down();
+      await page.mouse.move(box!.x + box!.width / 2 + 30, box!.y + box!.height / 2 - 16);
+      await page.mouse.up();
+
+      await expect
+        .poll(async () => await page.evaluate(() => window.__warRoomV3TestHooks?.getCameraState()))
+        .not.toEqual(before);
+      expect(await page.evaluate(() => window.__warRoomV3TestHooks?.getBackingResizeCount())).toBe(
+        backingResizesBefore,
+      );
     } finally {
       await context.close();
       await host.close();
@@ -1841,6 +1960,17 @@ test.describe('stage-3 panel ports (desktop chrome model)', () => {
         degraded: false,
         degradedReasons: [],
         streak: { count: 5, lastBreachReason: null, lastBreachAt: null },
+        memory: {
+          graphAnswered: 0,
+          rederived: 0,
+          surfacesOpenedPerMorning: 0,
+          morningDate: '2026-07-10',
+          persistence: 'process',
+          writePathEnabled: false,
+          writeMode: 'staged',
+          cleanDayCount: 0,
+          promotionEligible: false,
+        },
       },
     });
     const context = await browser.newContext({ viewport: VIEWPORT });
@@ -1894,6 +2024,17 @@ test.describe('stage-3 panel ports (desktop chrome model)', () => {
           count: 0,
           lastBreachReason: 'morning.json unavailable',
           lastBreachAt: '2026-07-10T06:00:00Z',
+        },
+        memory: {
+          graphAnswered: 0,
+          rederived: 0,
+          surfacesOpenedPerMorning: 0,
+          morningDate: '2026-07-10',
+          persistence: 'process',
+          writePathEnabled: false,
+          writeMode: 'staged',
+          cleanDayCount: 0,
+          promotionEligible: false,
         },
       },
     });

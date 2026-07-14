@@ -61,6 +61,7 @@ import { addRoom, buyFurniture, expandOffice, getOfficeLayout, sell } from './of
 import type { RoomType } from './officeLayoutTypes.js';
 import { RoomType as RoomTypeValues } from './officeLayoutTypes.js';
 import { getOpsReview, opsReviewSummary } from './opsAdvisor.js';
+import { appendOutputChunkInBoundedParts } from './outputChunkAppender.js';
 import { outputRingStore, outputStreamKey, parseOutputStreamKey } from './outputRingStore.js';
 import { perfectOpsDay } from './perfectOpsDay.js';
 import { applyPollStates, parsePollBody, startPollStateSweep } from './pollStateHandler.js';
@@ -83,8 +84,12 @@ import { standingOrderStore } from './standingOrderStore.js';
 import { stopAllLatch } from './stopAllLatch.js';
 import { STUDIO_CONTRACT_SWEEP_INTERVAL_MS, studioContractIngest } from './studioContractIngest.js';
 import { studioContractStore } from './studioContractStore.js';
-import { renderTranscriptLine } from './transcriptOutputTap.js';
-import { applyTokenUsage, isRecentEnoughForShiftSpend } from './transcriptParser.js';
+import { renderTranscriptRecord } from './transcriptOutputTap.js';
+import {
+  applyTokenUsageBatch,
+  isRecentEnoughForShiftSpend,
+  type TokenUsageDelta,
+} from './transcriptParser.js';
 import type { AgentState } from './types.js';
 import { v3StoreEnabled } from './v3Flags.js';
 import { getWiringSnapshot } from './wiringProvider.js';
@@ -129,6 +134,36 @@ export interface HttpServerHandle {
 
 const startTime = Date.now();
 
+const ONE_YEAR_SECONDS = 365 * 24 * 60 * 60;
+const ONE_HOUR_SECONDS = 60 * 60;
+const HASHED_BUILD_ASSET_RE = /(?:^|[/\\])[^/\\]+-[A-Za-z0-9_-]{8,}\.(?:css|js)$/;
+const staticResponses = new WeakSet<object>();
+
+/** Cache policy for standalone static files. Vite's content-hashed JS/CSS
+ * is safe for immutable caching; stable-name sprites can skip repeat
+ * requests briefly but must pick up deploys; HTML/SW/manifest files always
+ * revalidate so a new build can take control immediately. `filePath` may
+ * name a selected .br/.gz sibling when preCompressed is active. */
+function setStaticCacheHeader(
+  response: { setHeader(name: string, value: string): void },
+  filePath: string,
+): void {
+  staticResponses.add(response);
+  const sourcePath = filePath.replace(/\.(?:br|gz)$/, '');
+  if (HASHED_BUILD_ASSET_RE.test(sourcePath)) {
+    response.setHeader('Cache-Control', `public, max-age=${String(ONE_YEAR_SECONDS)}, immutable`);
+    return;
+  }
+  if (
+    /\.(?:html|webmanifest)$/.test(sourcePath) ||
+    /[/\\](?:registerSW|sw)\.js$/.test(sourcePath)
+  ) {
+    response.setHeader('Cache-Control', 'public, max-age=0, must-revalidate');
+    return;
+  }
+  response.setHeader('Cache-Control', `public, max-age=${String(ONE_HOUR_SECONDS)}`);
+}
+
 /**
  * Create a Fastify server with hook endpoint, health check, and WebSocket support.
  *
@@ -143,6 +178,24 @@ export async function createHttpServer(options: HttpServerOptions): Promise<Http
 
   await app.register(fastifyCors, { origin: true });
   await app.register(fastifyWebsocket);
+  app.addHook('onSend', (_request, reply, payload, done) => {
+    if (staticResponses.has(reply.raw)) {
+      const vary = reply.getHeader('Vary');
+      const varyValues = Array.isArray(vary) ? vary.join(', ') : String(vary ?? '');
+      if (
+        !varyValues
+          .toLowerCase()
+          .split(/\s*,\s*/)
+          .includes('accept-encoding')
+      ) {
+        reply.header(
+          'Vary',
+          varyValues === '' ? 'Accept-Encoding' : `${varyValues}, Accept-Encoding`,
+        );
+      }
+    }
+    done(null, payload);
+  });
 
   // Static SPA serving (standalone mode only).
   // Face-merge cutover (FACE-MERGE-PLAN Tier 3): the v3 "Living Studio"
@@ -156,6 +209,9 @@ export async function createHttpServer(options: HttpServerOptions): Promise<Http
     await app.register(fastifyStatic, {
       root: options.staticDir,
       prefix: '/',
+      cacheControl: false,
+      preCompressed: true,
+      setHeaders: setStaticCacheHeader,
     });
     const staticDirLegacy = options.staticDirLegacy;
     if (staticDirLegacy) {
@@ -163,6 +219,9 @@ export async function createHttpServer(options: HttpServerOptions): Promise<Http
         root: staticDirLegacy,
         prefix: '/v1/',
         decorateReply: false,
+        cacheControl: false,
+        preCompressed: true,
+        setHeaders: setStaticCacheHeader,
       });
     }
     app.setNotFoundHandler((req, reply) => {
@@ -733,6 +792,7 @@ function registerHookRoute(app: FastifyInstance, options: HttpServerOptions): vo
       // Source metadata is injected only from an authenticated header. Never
       // trust a caller-supplied __source body field for fallback dedupe.
       delete event.__source;
+      delete event.__managedLaunch;
       if (request.headers[HOOK_SOURCE_HEADER] === COWORKER_ADAPTER_HOOK_SOURCE) {
         event.__source = COWORKER_ADAPTER_HOOK_SOURCE;
       }
@@ -764,6 +824,16 @@ function registerHookRoute(app: FastifyInstance, options: HttpServerOptions): vo
       const pid = sanitizeHookPid(request.headers['x-pid']);
       if (pid !== undefined) {
         event.__pid = pid;
+        const launchMachine = machine ?? options.machineLabel;
+        if (
+          launchMachine &&
+          dispatchStore.getManagedFor(launchMachine).some((session) => session.panePid === pid)
+        ) {
+          // Authenticated provenance for a War Room-managed launch. This is
+          // derived server-side from the live runner advertisement, never
+          // trusted from the request body.
+          event.__managedLaunch = true;
+        }
       }
 
       if (event.session_id && event.hook_event_name) {
@@ -901,7 +971,7 @@ function parseAgentOutputBody(body: unknown): AgentOutputBody | null {
  * X-Machine header can't resolve anything either, so it is the same kind
  * of 2xx deny, not a 400.
  *
- * Each resolved line is rendered through renderTranscriptLine — the ONE
+ * Each resolved line is rendered through renderTranscriptRecord — the ONE
  * rendering implementation, shared with the local tap (transcriptOutputTap.ts)
  * — and appended into the SAME ring shape ({source:'agent', id, stream:
  * 'transcript'}) the local tap uses, so the existing tailSubscribe/WS
@@ -945,16 +1015,16 @@ function registerAgentOutputRoute(app: FastifyInstance, options: HttpServerOptio
         return;
       }
       const { id: agentId, agent } = resolved;
+      const renderedChunks: string[] = [];
+      const usageDeltas: TokenUsageDelta[] = [];
       for (const line of parsed.lines) {
-        const rendered = renderTranscriptLine(line);
-        if (rendered !== undefined) {
-          outputRingStore.append('agent', String(agentId), 'transcript', `${rendered}\n`);
-        }
-        // Token usage: best-effort, never route-fatal — a malformed line
-        // already fell out of renderTranscriptLine above; usage extraction
-        // gets its own try so one bad line can't drop the rest of the batch.
+        // Parse once for both compact rendering and usage extraction. A
+        // malformed line is telemetry-only and never drops the rest of the
+        // tailer's already-coalesced POST batch.
         try {
           const record = JSON.parse(line) as Record<string, unknown>;
+          const rendered = renderTranscriptRecord(record);
+          if (rendered !== undefined) renderedChunks.push(`${rendered}\n`);
           // Match the local tap: only assistant records carry billable
           // usage. A non-assistant record with a usage-shaped field is not
           // real usage telemetry.
@@ -970,18 +1040,25 @@ function registerAgentOutputRoute(app: FastifyInstance, options: HttpServerOptio
             // carries its own `timestamp` regardless of machine, so the
             // SAME cutoff check applies here — see
             // isRecentEnoughForShiftSpend's doc.
-            applyTokenUsage(
-              agentId,
-              agent,
-              usage,
-              options.store,
-              isRecentEnoughForShiftSpend(record),
-            );
+            usageDeltas.push({ usage, countForShift: isRecentEnoughForShiftSpend(record) });
           }
         } catch {
-          // Swallow: telemetry only, matches renderTranscriptLine/tapTranscriptLine's posture.
+          // Swallow: telemetry only, matches the local transcript tap's posture.
         }
       }
+      // The producer already batches for up to 1s / 64KiB / 200 lines.
+      // Preserve that batching on the WS side: output chunks have no
+      // line-boundary contract, and the client immediately replaces every
+      // intermediate cumulative token total with the final one.
+      if (renderedChunks.length > 0) {
+        appendOutputChunkInBoundedParts(
+          'agent',
+          String(agentId),
+          'transcript',
+          renderedChunks.join(''),
+        );
+      }
+      applyTokenUsageBatch(agentId, agent, usageDeltas, options.store);
       reply.send({ ok: true });
     },
   );
@@ -1989,17 +2066,23 @@ function registerAutomationStopAllRoutes(app: FastifyInstance, options: HttpServ
     // fresh webview (or a server restart) hydrates "stopped" even when this
     // STOP ALL halted ONLY chain runs and left zero durable order flags (the
     // limitation stopAll.ts's header called out). Idempotent.
-    stopAllLatch.engage();
+    const latch = stopAllLatch.engage();
     options.store.broadcast({
       type: 'automationStopped',
       haltedOrderIds: haltedOrders.map((o) => o.id),
       haltedRunIds: haltedRuns.map((r) => r.id),
+      revision: latch.revision,
     });
     notifyBigMoment(
       'stop-all',
       `STOP ALL engaged: ${haltedOrders.length} standing order(s), ${haltedRuns.length} chain run(s) halted.`,
     );
-    reply.send({ ok: true, haltedOrders: haltedOrders.length, haltedRuns: haltedRuns.length });
+    reply.send({
+      ok: true,
+      haltedOrders: haltedOrders.length,
+      haltedRuns: haltedRuns.length,
+      revision: latch.revision,
+    });
   });
 
   app.post('/api/automation/resume', async (_request, reply) => {
@@ -2008,8 +2091,9 @@ function registerAutomationStopAllRoutes(app: FastifyInstance, options: HttpServ
     // exactly: restores the auto-executor + HELD-rollover release.
     autoExecutorStore.resumeAll();
     // C9-1: clear the durable latch in the SAME resume transaction.
-    stopAllLatch.release();
-    reply.send({ ok: true, resumedOrders: resumedOrders.length });
+    const latch = stopAllLatch.release();
+    options.store.broadcast({ type: 'automationResumed', revision: latch.revision });
+    reply.send({ ok: true, resumedOrders: resumedOrders.length, revision: latch.revision });
   });
 
   // C9-1: GET /api/automation/stop-all-state — mount-time hydration source for
@@ -2017,7 +2101,7 @@ function registerAutomationStopAllRoutes(app: FastifyInstance, options: HttpServ
   // the other player-facing GETs; reads the durable latch so a page reload
   // (or a fresh server after a restart) never silently shows "not stopped".
   app.get('/api/automation/stop-all-state', async (_request, reply) => {
-    reply.send({ engaged: stopAllLatch.isEngaged() });
+    reply.send(stopAllLatch.getSnapshot());
   });
 }
 
@@ -2230,6 +2314,10 @@ function registerWebSocketRoute(
     const unsubscribeChainRuns = chainStore.onRunUpdate((run) => {
       safeSend(socket, { type: 'chainRunUpdate', run });
     });
+    const chainRunSnapshot = chainStore.getReconnectSnapshot();
+    safeSend(socket, { type: 'chainRunSnapshot', ...chainRunSnapshot });
+    // Compatibility replay for clients predating chainRunSnapshot. V3
+    // treats these as same-revision no-op replacements after the snapshot.
     for (const run of chainStore.getActiveRuns()) {
       safeSend(socket, { type: 'chainRunUpdate', run });
     }
@@ -2247,6 +2335,21 @@ function registerWebSocketRoute(
       safeSend(socket, { type: 'budgetUpdate', ...snapshot });
     });
     safeSend(socket, { type: 'budgetUpdate', ...budgetStore.getSnapshot() });
+
+    // Revisioned STOP ALL latch snapshot. This is the same transition shape
+    // used live, so reconnect cannot miss a stop or resume while offline.
+    const automationLatch = stopAllLatch.getSnapshot();
+    safeSend(
+      socket,
+      automationLatch.engaged
+        ? {
+            type: 'automationStopped',
+            haltedOrderIds: [],
+            haltedRunIds: [],
+            revision: automationLatch.revision,
+          }
+        : { type: 'automationResumed', revision: automationLatch.revision },
+    );
 
     // ── v3 Living Studio planes (WS-C stage 1 — KICKOFF-v3.1 §3) ──────
     // Same pure-forwarding rationale as the planes above, with one twist:

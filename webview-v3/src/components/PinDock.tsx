@@ -1,3 +1,4 @@
+import { useNow } from '../hooks/useNow';
 import type { AgentMap } from '../net/agentStore';
 import type { TailMap } from '../state/tailStore';
 import { tailKey } from '../state/tailStore';
@@ -7,7 +8,6 @@ export interface PinDockProps {
   pins: readonly number[];
   agents: AgentMap;
   tails: TailMap;
-  now: number;
   /** Transient rejection line ("⚠ DOCK FULL — unpin one first"). */
   notice: string | null;
   onUnpin: (agentId: number) => void;
@@ -23,7 +23,8 @@ const PREVIEW_ENTRIES = 2;
  * Exactly 3 slots (state/pinDock.ts); the rejection notice renders here so
  * "the dock is full" is said where the dock lives.
  */
-export function PinDock({ pins, agents, tails, now, notice, onUnpin, onPromote }: PinDockProps) {
+export function PinDock({ pins, agents, tails, notice, onUnpin, onPromote }: PinDockProps) {
+  const now = useNow(pins.length > 0);
   if (pins.length === 0 && notice === null) return null;
   return (
     <footer className="pin-dock" data-testid="pin-dock">
@@ -68,7 +69,10 @@ export function PinDock({ pins, agents, tails, now, notice, onUnpin, onPromote }
                   <span className="tail-sheet__empty">■ NO OUTPUT YET</span>
                 ) : (
                   preview.map((entry) => (
-                    <span key={entry.seq} className="tail-sheet__chunk">
+                    <span
+                      key={`${entry.stream}:${String(entry.seq)}`}
+                      className="tail-sheet__chunk"
+                    >
                       {entry.text}
                     </span>
                   ))

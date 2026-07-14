@@ -15,7 +15,8 @@ type WsSend = (message: Record<string, unknown>) => void;
 /** Async hook toggle side effect (install/uninstall + script copy). Provided by cli.ts. */
 export type SetHooksEnabledSideEffect = (enabled: boolean) => Promise<void> | void;
 
-/** Cached assets loaded at server startup. Sent to each WebSocket client on webviewReady. */
+/** Cached legacy-face assets loaded at server startup. V3 loads its own
+ * spritesheets over HTTP and never consumes these inline pixel arrays. */
 export interface AssetCache {
   characters: LoadedCharacterSprites | null;
   pets: LoadedPetSprites | null;
@@ -77,7 +78,7 @@ export function handleClientMessage(
 
   switch (msg.type) {
     case 'webviewReady':
-      handleWebviewReady(send, ctx);
+      handleWebviewReady(send, ctx, msg.client === 'webview-v3');
       break;
 
     case 'saveLayout':
@@ -255,7 +256,7 @@ export function handleClientMessage(
   }
 }
 
-function handleWebviewReady(send: WsSend, ctx: ClientMessageContext): void {
+function handleWebviewReady(send: WsSend, ctx: ClientMessageContext, isV3: boolean): void {
   const { store, runtime, cache } = ctx;
   const adapter = store.getAdapter();
 
@@ -266,8 +267,10 @@ function handleWebviewReady(send: WsSend, ctx: ClientMessageContext): void {
     subagentToolNames: hookProviderCapabilities.subagentToolNames,
   });
 
-  // 2. Assets (from server cache, loaded at startup via pngjs)
-  if (cache) {
+  // 2. Legacy-face assets (from server cache, loaded at startup via pngjs).
+  // V3 owns a lazy HTTP spritesheet loader and ignores all six of these
+  // frames, so do not put ~842 KiB of dead JSON on every V3 connection.
+  if (!isV3 && cache) {
     if (cache.characters) {
       send({ type: 'characterSpritesLoaded', characters: cache.characters.characters });
     }
@@ -293,9 +296,12 @@ function handleWebviewReady(send: WsSend, ctx: ClientMessageContext): void {
     }
   }
 
-  // 3. Layout (saved file, or bundled default)
-  const savedLayout = readLayoutFromFile();
-  send({ type: 'layoutLoaded', layout: savedLayout ?? cache?.defaultLayout ?? null });
+  // 3. The legacy editable office owns this layout format. V3's authored
+  // world is independent and does not handle layoutLoaded.
+  if (!isV3) {
+    const savedLayout = readLayoutFromFile();
+    send({ type: 'layoutLoaded', layout: savedLayout ?? cache?.defaultLayout ?? null });
+  }
 
   // 4. Settings (from adapter, with sensible defaults when adapter is absent)
   const cfg = readConfig();
@@ -381,39 +387,59 @@ function handleWebviewReady(send: WsSend, ctx: ClientMessageContext): void {
     managed,
   });
 
-  // 7. Replay live poll states (M4) so a page refresh keeps NEEDS INPUT badges
-  // instead of waiting up to a full poller tick for the next broadcast.
+  // 7. Replay EVERY poll state, including explicit clears. A reconnect is a
+  // new telemetry epoch, so omitted defaults would leave a client unable to
+  // distinguish "still blocked" from "the clear happened while offline".
   // `ageMs` re-anchors crisis aging so a refresh doesn't reset fires to smoke.
   for (const [id, agent] of store) {
-    if (agent.pollState) {
-      send({
-        type: 'agentPollState',
-        id,
-        state: agent.pollState.state,
-        waitingFor: agent.pollState.waitingFor,
-        ageMs: Date.now() - agent.pollState.since,
-      });
-    }
+    send({
+      type: 'agentPollState',
+      id,
+      state: agent.pollState?.state,
+      waitingFor: agent.pollState?.waitingFor,
+      ageMs: agent.pollState ? Date.now() - agent.pollState.since : undefined,
+    });
   }
 
-  // 8. Replay hook-plane crisis state (M4 extended to the OTHER two
-  // NEEDS_INPUT inputs — tool permission + awaitingInput). A fresh client
-  // builds every record with the conservative defaults (waiting, no
-  // permission), and for a gate that is STILL pending no NEW
-  // agentToolPermission/agentStatus event will ever fire again — without
-  // this replay a real NEEDS INPUT silently vanishes across any refresh or
-  // reconnect. Only deviations from the client's defaults are sent.
+  // 8. Replay hook-plane state with explicit default/clear values, followed
+  // by cumulative tokens and current tool activity. The existingAgents frame
+  // resets ephemeral client state first, so this is an authoritative epoch
+  // snapshot rather than an upsert-only replay.
   for (const [id, agent] of store) {
-    if (!agent.isWaiting || agent.awaitingInput) {
+    send({
+      type: 'agentStatus',
+      id,
+      status: agent.isWaiting ? 'waiting' : 'active',
+      awaitingInput: agent.awaitingInput ?? false,
+    });
+    send({ type: agent.permissionSent ? 'agentToolPermission' : 'agentToolPermissionClear', id });
+    send({
+      type: 'agentTokenUsage',
+      id,
+      inputTokens: agent.inputTokens,
+      outputTokens: agent.outputTokens,
+    });
+    for (const toolId of agent.activeToolIds) {
       send({
-        type: 'agentStatus',
+        type: 'agentToolStart',
         id,
-        status: agent.isWaiting ? 'waiting' : 'active',
-        awaitingInput: agent.awaitingInput ?? false,
+        toolId,
+        status: agent.activeToolStatuses.get(toolId) ?? agent.activeToolNames.get(toolId) ?? '',
+        toolName: agent.activeToolNames.get(toolId),
+        runInBackground: agent.backgroundAgentToolIds.has(toolId),
       });
-    }
-    if (agent.permissionSent) {
-      send({ type: 'agentToolPermission', id });
+      const subToolIds = agent.activeSubagentToolIds.get(toolId);
+      const subToolNames = agent.activeSubagentToolNames.get(toolId);
+      for (const subToolId of subToolIds ?? []) {
+        const toolName = subToolNames?.get(subToolId) ?? '';
+        send({
+          type: 'subagentToolStart',
+          id,
+          parentToolId: toolId,
+          toolId: subToolId,
+          status: toolName ? `Subtask: ${toolName}` : 'Subtask',
+        });
+      }
     }
   }
 }

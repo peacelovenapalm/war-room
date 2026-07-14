@@ -7,7 +7,7 @@
     "predev": "node scripts/sync-assets.mjs",
     "dev": "vite",
     "prebuild": "node scripts/sync-assets.mjs",
-    "build": "tsc -b && vite build",
+    "build": "tsc -b && vite build && node scripts/precompress.mjs",
     "sync-assets": "node scripts/sync-assets.mjs",
     "lint": "eslint .",
     "preview": "vite preview",

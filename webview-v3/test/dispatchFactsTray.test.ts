@@ -101,6 +101,20 @@ describe('upsertDispatchEntry / pruneDispatchEntries / dismissDispatchEntry', ()
     expect(second[0]).toMatchObject({ status: 'answered', receivedAt: 200 });
   });
 
+  it('rejects a delayed server revision instead of moving lifecycle state backwards', () => {
+    const current = upsertDispatchEntry(
+      [],
+      { id: 'a', action: 'dispatch', status: 'exited', machine: 'M', updatedAt: 20 },
+      200,
+    );
+    const stale = upsertDispatchEntry(
+      current,
+      { id: 'a', action: 'dispatch', status: 'answered', machine: 'M', updatedAt: 10 },
+      300,
+    );
+    expect(stale).toBe(current);
+  });
+
   it('T6: pruneDispatchEntries no longer drops anything by age — every status survives', () => {
     const entries = [
       entry({ id: 'a', status: 'exited', receivedAt: 0 }),

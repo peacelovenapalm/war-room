@@ -1,5 +1,6 @@
 import { useState } from 'react';
 
+import { useNow } from '../hooks/useNow';
 import type { AgentMap } from '../net/agentStore';
 import { agentIdentity } from '../net/agentStore';
 import type { AckState } from '../state/ackUndo';
@@ -14,7 +15,6 @@ export interface TriageBoardProps {
   agents: AgentMap;
   crisis: CrisisState;
   acks: AckState;
-  now: number;
   /** ▸ DESK — walks the camera to the desk and opens the drawer. */
   onDesk: (agentId: number) => void;
   /** `since` names the debris INSTANCE being acked (ackUndo.ts keying). */
@@ -49,16 +49,9 @@ function causeFor(agents: AgentMap, agentId: number, now: number): string | unde
  * Colorblind hard rule: every signal is SHAPE + TEXT; the board reads
  * fully in grayscale. All touch targets ≥44px on phone (index.css).
  */
-export function TriageBoard({
-  agents,
-  crisis,
-  acks,
-  now,
-  onDesk,
-  onAck,
-  onUndoAck,
-}: TriageBoardProps) {
+export function TriageBoard({ agents, crisis, acks, onDesk, onAck, onUndoAck }: TriageBoardProps) {
   const [noticeKeys, setNoticeKeys] = useState<ReadonlySet<string>>(new Set());
+  const now = useNow();
 
   const fires: CrisisViewInput[] = [...crisis.fires.entries()].map(([agentId, fire]) => {
     const record = agents.get(agentId);

@@ -11,6 +11,7 @@ import {
   reduceCrisisState,
   sweepAcks,
 } from '../src/state/crisisStore';
+import { reconnectReplayDeadline, reduceReconnectReplay } from '../src/state/reconnectReplay';
 
 const NOW = 20_000_000;
 
@@ -34,6 +35,12 @@ function roster(...messages: ServerMessage[]): AgentMap {
 }
 
 describe('reduceCrisisState', () => {
+  it('returns the same state when a reduction changes no crisis data', () => {
+    const agents = roster();
+    const first = reduceCrisisState(EMPTY_CRISIS_STATE, agents, NOW);
+    expect(reduceCrisisState(first, agents, NOW + 1_000)).toBe(first);
+  });
+
   it('starts a fire for a needs-input agent, server-anchored via the poll', () => {
     const agents = roster({
       type: 'agentPollState',
@@ -96,36 +103,55 @@ describe('reduceCrisisState', () => {
     expect(afterRecovery.debris.has(debrisKey(2, 'stopped'))).toBe(false);
   });
 
-  it('RECONNECT: debris age survives the existingAgents → agentPollState replay order', () => {
-    // Regression (panel finding, crisisStore.ts:93): on reconnect the client
-    // reduces `existingAgents` FIRST (which used to wipe poll → WAITING →
-    // phantom "recovery" deletes the debris), then the server's M4
-    // `agentPollState` replay lands (fresh transition edge → brand-new
-    // debris with since=now). The crate's true failure age must survive.
+  it('RECONNECT: healthy agent replay before failed agent preserves the failure-age anchor', () => {
+    // Regression: A is failed with old debris and B is healthy. The server
+    // resets both via existingAgents, then B's poll replay lands before A's.
+    // Reducing that partial roster invents an A recovery, deletes its debris,
+    // and A's later replay respawns it at reconnect time.
     const T0 = NOW;
     const failed = roster({ type: 'agentPollState', id: 1, state: 'failed', ageMs: 0 });
     const seeded = reduceCrisisState(EMPTY_CRISIS_STATE, roster(), T0 - 1_000);
     const withDebris = reduceCrisisState(seeded, failed, T0);
     expect(withDebris.debris.get(debrisKey(1, 'failed'))?.since).toBe(T0);
 
-    // T0+30s (inside the poll TTL — the dip under test is the wipe+replay
-    // race, not poll staleness): WS reconnects. Step 1 — existingAgents.
+    // T0+30s (inside the poll TTL): reconnect snapshot begins.
     const T1 = T0 + 30_000;
+    let replay = reduceReconnectReplay(null, EXISTING, T1)!;
     const reconnected = reduceAgents(failed, EXISTING, T1);
-    const afterExisting = reduceCrisisState(withDebris, reconnected, T1);
-    expect(afterExisting.debris.has(debrisKey(1, 'failed'))).toBe(true); // no phantom recovery
+    let crisis = withDebris;
+    expect(crisis.debris.get(debrisKey(1, 'failed'))?.since).toBe(T0);
 
-    // Step 2 — the server's agentPollState replay (ageMs re-anchors).
-    const replayed = reduceAgents(
-      reconnected,
-      { type: 'agentPollState', id: 1, state: 'failed', ageMs: T1 - RECEIPT_AT },
-      T1,
+    // B's healthy replay arrives first. This is the ordering-dependent hole:
+    // an eager crisis tick would erase A's real debris right here.
+    const healthyB: ServerMessage = {
+      type: 'agentPollState',
+      id: 2,
+      state: 'working',
+      ageMs: 0,
+    };
+    replay = reduceReconnectReplay(replay, healthyB, T1 + 1)!;
+    let replayedAgents = reduceAgents(reconnected, healthyB, T1 + 1);
+    expect(reduceCrisisState(crisis, replayedAgents, T1 + 1).debris.has(debrisKey(1, 'failed'))).toBe(
+      false,
     );
-    const afterReplay = reduceCrisisState(afterExisting, replayed, T1);
-    const record = afterReplay.debris.get(debrisKey(1, 'failed'));
+    expect(crisis.debris.get(debrisKey(1, 'failed'))?.since).toBe(T0);
+
+    // A's own failed replay arrives later. Crisis is still frozen until the
+    // shared replay transaction settles.
+    const failedA: ServerMessage = {
+      type: 'agentPollState',
+      id: 1,
+      state: 'failed',
+      ageMs: T1 - RECEIPT_AT,
+    };
+    replay = reduceReconnectReplay(replay, failedA, T1 + 2)!;
+    replayedAgents = reduceAgents(replayedAgents, failedA, T1 + 2);
+    expect(crisis.debris.get(debrisKey(1, 'failed'))?.since).toBe(T0);
+
+    expect(reconnectReplayDeadline(replay)).toBeGreaterThan(T1 + 2);
+    crisis = reduceCrisisState(crisis, replayedAgents, reconnectReplayDeadline(replay));
+    const record = crisis.debris.get(debrisKey(1, 'failed'));
     expect(record).toBeDefined();
-    // The ORIGINAL spawn anchor, not a reset-to-now: the crate that sat for
-    // 5 minutes must not read as brand new after a reconnect.
     expect(record?.since).toBe(T0);
   });
 

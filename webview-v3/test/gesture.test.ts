@@ -10,6 +10,7 @@ import {
   gesturePointerMove,
   gesturePointerUp,
   type GestureState,
+  gestureWheelZoom,
 } from '../src/engine/gesture';
 import { mapWorldBounds } from '../src/engine/iso';
 
@@ -22,6 +23,16 @@ describe('pinch/pan gesture reducer', () => {
       'utf8',
     );
     expect(source.includes('devicePixelRatio')).toBe(false);
+  });
+
+  it('one pointer pans from the default fully-visible fit camera', () => {
+    const bounds = mapWorldBounds(14, 10);
+    const fit = fitToView(PHONE, bounds);
+    const gesture = gesturePointerDown(EMPTY_GESTURE, { id: 1, x: 100, y: 100 });
+    const result = gesturePointerMove(gesture, { id: 1, x: 124, y: 88 }, fit, PHONE, bounds);
+
+    expect(result.camera?.offsetX).toBeCloseTo(fit.offsetX + 24, 6);
+    expect(result.camera?.offsetY).toBeCloseTo(fit.offsetY - 12, 6);
   });
 
   it('one pointer pans by the raw drag delta (clamped)', () => {
@@ -48,6 +59,23 @@ describe('pinch/pan gesture reducer', () => {
     expect(result.camera!.zoom).toBe(zoomedIn.zoom);
     gesture = result.state;
     expect(gesture.pointers.size).toBe(1);
+  });
+
+  it('desktop wheel zoom is cursor-anchored and respects interactive bounds', () => {
+    const bounds = mapWorldBounds(14, 10);
+    const fit = fitToView(PHONE, bounds);
+    const anchor = { x: PHONE.width / 2, y: PHONE.height / 2 };
+    const worldBefore = canvasToWorld(fit, anchor.x, anchor.y);
+    const zoomed = gestureWheelZoom(fit, anchor, -120, PHONE, bounds);
+    const worldAfter = canvasToWorld(zoomed, anchor.x, anchor.y);
+
+    expect(zoomed.zoom).toBeGreaterThan(fit.zoom);
+    expect(worldAfter.x).toBeCloseTo(worldBefore.x, 6);
+    expect(worldAfter.y).toBeCloseTo(worldBefore.y, 6);
+
+    const floor = interactiveZoomBounds(PHONE, bounds).min;
+    const zoomedOut = gestureWheelZoom(zoomed, anchor, 100_000, PHONE, bounds);
+    expect(zoomedOut.zoom).toBeCloseTo(floor, 6);
   });
 
   it('an untracked pointer id produces no camera change', () => {

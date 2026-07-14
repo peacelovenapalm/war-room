@@ -7,8 +7,8 @@ import {
   isAllCalm,
   isBoardStale,
   isMorningJsonStale,
-  MORNING_REFRESH_INTERVAL_MS,
   type MorningSurface,
+  startMorningRefreshLoop,
 } from '../net/morningFacts';
 import { clearAppBadge, setAppBadgeCount } from '../state/appBadge';
 import {
@@ -67,7 +67,6 @@ export function MorningPanel({ isOpen, onClose, connectionStatus }: MorningPanel
   }
 
   useEffect(() => {
-    if (!isOpen) return;
     let cancelled = false;
     const load = async () => {
       const data = await fetchMorningSurface();
@@ -79,13 +78,12 @@ export function MorningPanel({ isOpen, onClose, connectionStatus }: MorningPanel
         setError(true);
       }
     };
-    void load();
-    const interval = setInterval(() => void load(), MORNING_REFRESH_INTERVAL_MS);
+    const stop = startMorningRefreshLoop(load);
     return () => {
       cancelled = true;
-      clearInterval(interval);
+      stop();
     };
-  }, [isOpen]);
+  }, []);
 
   // V6-2: badge mirrors the live needsYouCount whenever it's known,
   // regardless of whether the panel itself is open (the badge is a

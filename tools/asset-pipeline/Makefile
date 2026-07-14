@@ -7,6 +7,7 @@
 #   make pack-chars     pack characters -> characters.*.sheet.png
 #   make preview PROP=desk_monitor           fast single-prop loop
 #   make preview-chars SPRITE=worker_teal.walk   fast single-sprite loop
+#   make repack-stage    losslessly apply current grouping to staged atlases
 #   make validate        schema-validate every staged manifest (npm run validate)
 #   make screenshots      DPR-1 + DPR-3 viewer.html captures -> .planning/v3/screenshots/assets/
 #   make qa               validate + screenshots
@@ -19,7 +20,7 @@ OUT     := out
 STAGE   := ../../webview-v3-assets
 SAMPLES ?= 96
 
-.PHONY: all render pack render-chars pack-chars preview preview-chars validate screenshots qa clean
+.PHONY: all render pack render-chars pack-chars repack-stage preview preview-chars validate screenshots qa clean
 
 all: render pack render-chars pack-chars
 
@@ -34,6 +35,10 @@ render-chars:
 
 pack-chars:
 	$(PY) pack.py --raw $(OUT)/raw-chars --stage $(STAGE) --name characters
+
+repack-stage:
+	$(PY) repack_stage.py --stage $(STAGE) --name props
+	$(PY) repack_stage.py --stage $(STAGE) --name characters
 
 preview:
 	@test -n "$(PROP)" || (echo "usage: make preview PROP=<name>"; exit 1)

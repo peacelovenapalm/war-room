@@ -79,7 +79,7 @@ export function TailSheet({ state, onTogglePause, onTogglePin, pinned }: TailShe
         ) : (
           state?.entries.map((entry) => (
             <span
-              key={entry.seq}
+              key={`${entry.stream}:${String(entry.seq)}`}
               className={
                 entry.stream === 'stderr'
                   ? 'tail-sheet__chunk tail-sheet__chunk--stderr'

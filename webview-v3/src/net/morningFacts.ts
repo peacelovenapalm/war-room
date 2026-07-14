@@ -78,6 +78,28 @@ export interface MorningSurface {
 
 export const MORNING_REFRESH_INTERVAL_MS = 60_000;
 
+export interface MorningRefreshScheduler {
+  setInterval(callback: () => void, delayMs: number): ReturnType<typeof setInterval>;
+  clearInterval(id: ReturnType<typeof setInterval>): void;
+}
+
+const DEFAULT_MORNING_REFRESH_SCHEDULER: MorningRefreshScheduler = {
+  setInterval: (callback, delayMs) => setInterval(callback, delayMs),
+  clearInterval: (id) => clearInterval(id),
+};
+
+/** Start the app-lifetime MORNING refresh loop. Deliberately has no panel
+ * open-state input: the PWA unread badge must stay live before MORNING is
+ * first opened and after it closes. */
+export function startMorningRefreshLoop(
+  refresh: () => void | Promise<void>,
+  scheduler: MorningRefreshScheduler = DEFAULT_MORNING_REFRESH_SCHEDULER,
+): () => void {
+  void refresh();
+  const interval = scheduler.setInterval(() => void refresh(), MORNING_REFRESH_INTERVAL_MS);
+  return () => scheduler.clearInterval(interval);
+}
+
 /** Latency bars (V6-3 "seconds fine, minutes not") — board/overnight
  *  sections are derived live server-side, so this bar is generous headroom
  *  for a slow poll/render, not a real staleness signal in normal operation. */

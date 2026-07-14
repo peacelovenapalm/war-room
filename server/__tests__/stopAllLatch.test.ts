@@ -45,6 +45,15 @@ describe('StopAllLatch durability (C9-1)', () => {
     expect(new StopAllLatch(latchPath).isEngaged()).toBe(false);
   });
 
+  it('increments a durable monotonic revision only on real transitions', () => {
+    const latch = new StopAllLatch(latchPath);
+    expect(latch.getSnapshot()).toEqual({ engaged: false, revision: 0 });
+    expect(latch.engage()).toEqual({ engaged: true, revision: 1 });
+    expect(latch.engage()).toEqual({ engaged: true, revision: 1 });
+    expect(latch.release()).toEqual({ engaged: false, revision: 2 });
+    expect(new StopAllLatch(latchPath).getSnapshot()).toEqual({ engaged: false, revision: 2 });
+  });
+
   it('engage is idempotent — a corrupt file reads as not-engaged (safe default)', () => {
     fs.writeFileSync(latchPath, 'not json{', 'utf8');
     expect(new StopAllLatch(latchPath).isEngaged()).toBe(false);
