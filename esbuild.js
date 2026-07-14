@@ -59,6 +59,14 @@ function buildHooks() {
       ])
       .filter(([, entry]) => fs.existsSync(entry)),
   );
+  // Standalone SessionEnd distill CLI (server/src/tools/warRoomDistill.ts) --
+  // shared by the runbook's forwarder (~/.war-room/hook.sh) for machines that
+  // don't run the bundled per-provider hook script above. See
+  // .planning/runbooks/macbook-hooks-install.sh for the consumer.
+  const distillCliEntry = path.join(__dirname, 'server', 'src', 'tools', 'warRoomDistill.ts');
+  if (fs.existsSync(distillCliEntry)) {
+    entries['war-room-distill'] = distillCliEntry;
+  }
   if (Object.keys(entries).length === 0) return;
   const outdir = path.join(__dirname, 'dist', 'hooks');
   if (fs.existsSync(outdir)) fs.rmSync(outdir, { recursive: true });
