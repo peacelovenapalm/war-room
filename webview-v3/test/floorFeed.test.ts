@@ -5,9 +5,9 @@ import {
   appendFloorFeedEntry,
   EMPTY_FLOOR_FEED,
   floorFeedLabel,
+  MAX_FLOOR_FEED_ENTRIES,
   MAX_FLOOR_FEED_RENDERED,
   visibleFloorFeedEntries,
-  MAX_FLOOR_FEED_ENTRIES,
 } from '../src/state/floorFeed';
 
 function chunk(overrides: Partial<OutputChunk> = {}): OutputChunk {
@@ -57,7 +57,7 @@ describe('appendFloorFeedEntry', () => {
     const next = appendFloorFeedEntry(EMPTY_FLOOR_FEED, chunk(), '[turffinder]', 1000);
     expect(next).toHaveLength(1);
     expect(next[0]).toEqual({
-      key: 'agent:2:0',
+      key: 'agent:2:transcript:0',
       label: '[turffinder]',
       text: 'hello\n',
       receivedAt: 1000,

@@ -17,7 +17,7 @@ export const MAX_FLOOR_FEED_ENTRIES = 300;
 export const MAX_FLOOR_FEED_RENDERED = 120;
 
 export interface FloorFeedEntry {
-  /** `${source}:${id}:${seq}` — stable React key, also the dedupe identity. */
+  /** `${source}:${id}:${stream}:${seq}` — stable cross-stream React key. */
   key: string;
   /** "[turffinder]" style prefix — verbatim agent identity, never invented. */
   label: string;
@@ -50,7 +50,7 @@ export function appendFloorFeedEntry(
   label: string,
   now: number,
 ): readonly FloorFeedEntry[] {
-  const key = `${chunk.source}:${chunk.id}:${String(chunk.seq)}`;
+  const key = `${chunk.source}:${chunk.id}:${chunk.stream}:${String(chunk.seq)}`;
   const next = [...entries, { key, label, text: chunk.chunk, receivedAt: now }];
   return next.length > MAX_FLOOR_FEED_ENTRIES
     ? next.slice(next.length - MAX_FLOOR_FEED_ENTRIES)

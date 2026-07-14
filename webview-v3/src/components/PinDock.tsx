@@ -69,7 +69,10 @@ export function PinDock({ pins, agents, tails, notice, onUnpin, onPromote }: Pin
                   <span className="tail-sheet__empty">■ NO OUTPUT YET</span>
                 ) : (
                   preview.map((entry) => (
-                    <span key={entry.seq} className="tail-sheet__chunk">
+                    <span
+                      key={`${entry.stream}:${String(entry.seq)}`}
+                      className="tail-sheet__chunk"
+                    >
                       {entry.text}
                     </span>
                   ))
