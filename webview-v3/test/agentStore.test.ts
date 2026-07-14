@@ -177,6 +177,38 @@ describe('agent reducer (core generated types)', () => {
     expect(next.get(3)?.status).toBe('waiting');
   });
 
+  it('RECONNECT MERGE: reused numeric ids reset live state when sessionId changes', () => {
+    let agents = reduceAgents(EMPTY_AGENTS, EXISTING, NOW);
+    agents = reduceAgents(agents, { type: 'agentToolPermission', id: 1 }, NOW);
+    agents = reduceAgents(
+      agents,
+      { type: 'agentStatus', id: 1, status: 'active', awaitingInput: true },
+      NOW,
+    );
+    agents = reduceAgents(
+      agents,
+      { type: 'agentPollState', id: 1, state: 'blocked', ageMs: 5_000 },
+      NOW,
+    );
+
+    const restarted = reduceAgents(
+      agents,
+      { ...EXISTING, sessionIds: { '1': 'replacement-session' } },
+      NOW + 60_000,
+    );
+
+    expect(restarted.get(1)).toMatchObject({
+      id: 1,
+      sessionId: 'replacement-session',
+      status: 'waiting',
+      awaitingInput: false,
+      toolPermission: false,
+      inputTokens: 0,
+      outputTokens: 0,
+    });
+    expect(restarted.get(1)?.poll).toBeUndefined();
+  });
+
   it('returns the SAME reference for irrelevant or unknown-id messages', () => {
     const agents = reduceAgents(EMPTY_AGENTS, EXISTING, NOW);
     expect(reduceAgents(agents, { type: 'agentSelected', id: 1 }, NOW)).toBe(agents);
