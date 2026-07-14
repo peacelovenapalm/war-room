@@ -815,6 +815,30 @@ test.describe('stage-3 panel ports (desktop chrome model)', () => {
     }
   });
 
+  test('panel dock stays below an agent drawer but rises for one-click modal switching', async ({
+    browser,
+  }) => {
+    const host = await serveV3Dist();
+    const context = await browser.newContext({ viewport: VIEWPORT });
+    try {
+      const page = await context.newPage();
+      await page.goto(`${host.url}/?agentId=1`);
+      await expect(page.getByTestId('agent-drawer')).toBeVisible({ timeout: 20_000 });
+      await expect(page.locator('.panel-dock')).toHaveCSS('z-index', '15');
+
+      await page.getByTestId('drawer-close').click();
+      await page.getByTestId('dock-briefing').click();
+      await expect(page.getByTestId('briefing-panel')).toBeVisible();
+      await expect(page.locator('.panel-dock')).toHaveCSS('z-index', '47');
+      await page.getByTestId('dock-settings').click();
+      await expect(page.getByTestId('settings-modal')).toBeVisible();
+      await expect(page.getByTestId('briefing-panel')).toHaveCount(0);
+    } finally {
+      await context.close();
+      await host.close();
+    }
+  });
+
   test('completed desk focus yields the rendered camera to a canvas drag', async ({ browser }) => {
     const host = await serveV3Dist();
     const context = await browser.newContext({ viewport: VIEWPORT });

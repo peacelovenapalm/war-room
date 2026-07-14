@@ -1264,13 +1264,12 @@ body,
   display: flex;
   flex-direction: column;
   gap: 2px;
-  /* Above .modal-backdrop (45): the dock is the "always available, switch
-     panels directly" affordance, but a full-viewport backdrop sitting on
-     top of it silently ate the first click whenever a panel was already
-     open — closing the old panel instead of opening the new one (panel
-     finding: "switching panels takes two clicks"). Still below the HUD
-     (60) and the real-sheet (65), matching their own "always reachable"
-     precedent. */
+  z-index: 15;
+}
+
+/* The dock rises above a modal backdrop only while a modal exists, keeping
+   one-click panel switching without painting/clicking over the agent drawer. */
+.app:has(.modal-backdrop) > .panel-dock {
   z-index: 47;
 }
 
