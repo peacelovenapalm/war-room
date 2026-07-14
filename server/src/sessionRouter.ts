@@ -16,6 +16,8 @@ export interface PendingExternalSession {
   pid?: number;
   /** True for native hooks; false for rollout-adapter fallback events. */
   hookDelivered?: boolean;
+  /** Authenticated hook matched a live War Room-managed launch. */
+  managedLaunch?: boolean;
 }
 
 /** An event waiting to be dispatched once its agent registers. */

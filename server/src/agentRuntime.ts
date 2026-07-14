@@ -101,7 +101,15 @@ export class AgentRuntime {
 
     // Wire hook lifecycle callbacks to shared agent operations
     this.hookEventHandler.setLifecycleCallbacks({
-      onExternalSessionDetected: (sessionId, transcriptPath, cwd, machine, providerId, pid) => {
+      onExternalSessionDetected: (
+        sessionId,
+        transcriptPath,
+        cwd,
+        machine,
+        providerId,
+        pid,
+        managedLaunch,
+      ) => {
         const projectDir = transcriptPath ? path.dirname(transcriptPath) : cwd;
         // Remote sessions (machine label set) bypass the tracked-dir gate: their
         // cwd is a path on ANOTHER machine, never a local tracked project dir,
@@ -113,12 +121,13 @@ export class AgentRuntime {
         if (
           !machine &&
           !isCoworker &&
+          !managedLaunch &&
           !isTrackedProjectDir(projectDir) &&
           !this.watchAllSessions.current
         ) {
-          return;
+          return false;
         }
-        adoptExternalSessionFromHook(
+        return adoptExternalSessionFromHook(
           sessionId,
           // Only providers with a transcript parser may enter the in-process
           // file-watching lane. Codex rollout coverage is owned by the external

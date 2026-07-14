@@ -56,7 +56,8 @@ interface SessionLifecycleCallbacks {
     machine?: string,
     providerId?: string,
     pid?: number,
-  ) => void;
+    managedLaunch?: boolean,
+  ) => boolean;
   /** Called when /clear is detected via hooks (SessionEnd reason=clear + SessionStart source=clear). */
   onSessionClear?: (
     agentId: number,
@@ -147,20 +148,33 @@ export class HookEventHandler {
     this.lifecycleCallbacks = callbacks;
   }
 
-  private promotePendingSession(pending: PendingExternalSession): void {
-    this.lifecycleCallbacks.onExternalSessionDetected?.(
-      pending.sessionId,
-      pending.transcriptPath,
-      pending.cwd,
-      pending.machine,
-      pending.providerId,
-      pending.pid,
-    );
+  private promotePendingSession(pending: PendingExternalSession): boolean {
+    const callback = this.lifecycleCallbacks.onExternalSessionDetected;
+    const adopted = pending.managedLaunch
+      ? callback?.(
+          pending.sessionId,
+          pending.transcriptPath,
+          pending.cwd,
+          pending.machine,
+          pending.providerId,
+          pending.pid,
+          true,
+        )
+      : callback?.(
+          pending.sessionId,
+          pending.transcriptPath,
+          pending.cwd,
+          pending.machine,
+          pending.providerId,
+          pending.pid,
+        );
+    const adoptedId = this.sessionRouter.resolve(pending.sessionId);
+    const adoptedAgent = adoptedId === undefined ? undefined : this.agents.get(adoptedId);
+    if (adopted !== true && !adoptedAgent) return false;
     if (pending.hookDelivered === false) {
-      const adoptedId = this.sessionRouter.resolve(pending.sessionId);
-      const adoptedAgent = adoptedId === undefined ? undefined : this.agents.get(adoptedId);
       if (adoptedAgent) adoptedAgent.hookDelivered = false;
     }
+    return true;
   }
 
   /**
@@ -225,6 +239,7 @@ export class HookEventHandler {
     // it flows through the same authenticated route regardless of machine.
     // Drives the agent-drawer FOCUS button (mechanic #6b).
     const pid = typeof event.__pid === 'number' ? event.__pid : undefined;
+    const managedLaunch = event.__managedLaunch === true;
     // CI / e2e diagnostic: see agentStateStore.ts debugLogBroadcast comment.
     if (process.env['PIXEL_AGENTS_DEBUG_LOG']) {
       try {
@@ -341,6 +356,7 @@ export class HookEventHandler {
           providerId,
           pid,
           hookDelivered: !fromCoworkerAdapter,
+          managedLaunch,
         });
         // Claude keeps its transient-session filter: SessionStart alone is not
         // enough to create an agent. Codex has no equivalent noisy extension
@@ -394,19 +410,21 @@ export class HookEventHandler {
         providerId,
         pid,
         hookDelivered: !fromCoworkerAdapter,
+        managedLaunch,
       });
     }
 
     // If a confirmation event arrives for a pending external session, create the agent first
     const pending = this.sessionRouter.confirmPending(event.session_id);
     if (pending) {
-      if (debug)
+      const adopted = this.promotePendingSession(pending);
+      if (debug) {
         console.log(
-          `[Pixel Agents] Hook: ${eventName} confirmed external session ${event.session_id.slice(0, 8)}..., creating agent`,
+          `[Pixel Agents] Hook: ${eventName} confirmed external session ${event.session_id.slice(0, 8)}... ${adopted ? 'created agent' : 'adoption rejected'}`,
         );
-      this.promotePendingSession(pending);
-      // Re-process this event now that the agent exists
-      this.handleEvent(providerId, event);
+      }
+      // Re-process only after the callback actually registered an agent.
+      if (adopted) this.handleEvent(providerId, event);
       return;
     }
 

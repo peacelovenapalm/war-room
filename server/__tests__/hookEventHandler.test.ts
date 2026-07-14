@@ -431,6 +431,7 @@ describe('HookEventHandler', () => {
         const agent = createTestAgent({ id: 2, sessionId, projectDir: cwd });
         agents.set(2, agent);
         handler.registerAgent(sessionId, 2);
+        return true;
       },
     );
     handler.setLifecycleCallbacks({ onExternalSessionDetected });
@@ -939,6 +940,7 @@ describe('HookEventHandler', () => {
       } as Partial<AgentState>);
       agents.set(2, agent);
       handler.registerAgent(sessionId, 2);
+      return true;
     });
     handler.setLifecycleCallbacks({ onExternalSessionDetected });
 

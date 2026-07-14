@@ -733,6 +733,7 @@ function registerHookRoute(app: FastifyInstance, options: HttpServerOptions): vo
       // Source metadata is injected only from an authenticated header. Never
       // trust a caller-supplied __source body field for fallback dedupe.
       delete event.__source;
+      delete event.__managedLaunch;
       if (request.headers[HOOK_SOURCE_HEADER] === COWORKER_ADAPTER_HOOK_SOURCE) {
         event.__source = COWORKER_ADAPTER_HOOK_SOURCE;
       }
@@ -764,6 +765,16 @@ function registerHookRoute(app: FastifyInstance, options: HttpServerOptions): vo
       const pid = sanitizeHookPid(request.headers['x-pid']);
       if (pid !== undefined) {
         event.__pid = pid;
+        const launchMachine = machine ?? options.machineLabel;
+        if (
+          launchMachine &&
+          dispatchStore.getManagedFor(launchMachine).some((session) => session.panePid === pid)
+        ) {
+          // Authenticated provenance for a War Room-managed launch. This is
+          // derived server-side from the live runner advertisement, never
+          // trusted from the request body.
+          event.__managedLaunch = true;
+        }
       }
 
       if (event.session_id && event.hook_event_name) {

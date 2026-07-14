@@ -822,17 +822,17 @@ export function adoptExternalSessionFromHook(
   machine?: string,
   providerId?: string,
   pid?: number,
-): void {
+): boolean {
   if (transcriptPath) {
     // File-based provider (Claude, Codex): adopt with JSONL file watching
     // Guard: don't adopt if file is already tracked by an agent
     for (const agent of agents.values()) {
-      if (agent.jsonlFile === transcriptPath) return;
+      if (agent.jsonlFile === transcriptPath) return false;
     }
     // Don't check knownJsonlFiles here -- hooks confirmed this is a real session,
     // and seeded files at startup are in knownJsonlFiles but may become active later.
-    if (dismissalTracker!.isDismissed(transcriptPath)) return;
-    if (dismissalTracker!.isPermanentlyDismissed(transcriptPath)) return;
+    if (dismissalTracker!.isDismissed(transcriptPath)) return false;
+    if (dismissalTracker!.isPermanentlyDismissed(transcriptPath)) return false;
 
     knownJsonlFiles.add(transcriptPath);
     const projectDir = path.dirname(transcriptPath);
@@ -865,6 +865,7 @@ export function adoptExternalSessionFromHook(
       if (pid !== undefined) adoptedAgent.pid = pid;
       onAgentCreated?.(adoptedAgent);
     }
+    return adoptedAgent !== undefined;
   } else {
     // Hooks-only provider (OpenCode, Copilot): no transcript file, all state from hooks
     const id = nextAgentIdRef.current++;
@@ -907,6 +908,7 @@ export function adoptExternalSessionFromHook(
       );
     }
     onAgentCreated?.(agent);
+    return true;
   }
 }
 
