@@ -102,6 +102,17 @@ const REST_JSON: Record<string, unknown> = {
     degraded: false,
     degradedReasons: [],
     streak: { count: 3, lastBreachReason: null, lastBreachAt: null },
+    memory: {
+      graphAnswered: 0,
+      rederived: 0,
+      surfacesOpenedPerMorning: 0,
+      morningDate: '2026-07-10',
+      persistence: 'process',
+      writePathEnabled: false,
+      writeMode: 'staged',
+      cleanDayCount: 0,
+      promotionEligible: false,
+    },
   },
   // v4 T7 routine inbox tray — newest-first fixture across two routines.
   '/api/inbox': {
@@ -306,6 +317,7 @@ async function serveV3Dist(
   const receivedHttpPosts: { path: string }[] = [];
   const killRequestId = 'kill-req-1';
   const answerRequestId = 'answer-req-1';
+  let automationLatchRevision = 0;
   const server = http.createServer((req, res) => {
     const requestPath = decodeURIComponent((req.url ?? '/').split('?')[0]);
     const requestQuery = new URLSearchParams((req.url ?? '').split('?')[1] ?? '');
@@ -331,13 +343,36 @@ async function serveV3Dist(
         res.end(JSON.stringify({ ok: false, haltedOrders: 0, haltedRuns: 0 }));
         return;
       }
+      // B5 (server httpServer.ts:2003-2009): the shared `stopped` state is
+      // WS-broadcast-authoritative only — the HTTP response no longer
+      // drives it. Mirror that here or StopAllControl/AutomationPanel never
+      // see the transition.
+      automationLatchRevision += 1;
+      for (const client of wss.clients) {
+        client.send(
+          JSON.stringify({
+            type: 'automationStopped',
+            haltedOrderIds: [],
+            haltedRunIds: [],
+            revision: automationLatchRevision,
+          }),
+        );
+      }
       res.writeHead(200, { 'Content-Type': 'application/json' });
-      res.end(JSON.stringify({ ok: true, haltedOrders: 0, haltedRuns: 0 }));
+      res.end(
+        JSON.stringify({ ok: true, haltedOrders: 0, haltedRuns: 0, revision: automationLatchRevision }),
+      );
       return;
     }
     if (requestPath === '/api/automation/resume' && req.method === 'POST') {
+      automationLatchRevision += 1;
+      for (const client of wss.clients) {
+        client.send(JSON.stringify({ type: 'automationResumed', revision: automationLatchRevision }));
+      }
       res.writeHead(200, { 'Content-Type': 'application/json' });
-      res.end(JSON.stringify({ ok: true, resumedOrders: 0 }));
+      res.end(
+        JSON.stringify({ ok: true, resumedOrders: 0, revision: automationLatchRevision }),
+      );
       return;
     }
     // OPS REVIEW rung-2 proposals — the exact real endpoints being reused
@@ -1925,6 +1960,17 @@ test.describe('stage-3 panel ports (desktop chrome model)', () => {
         degraded: false,
         degradedReasons: [],
         streak: { count: 5, lastBreachReason: null, lastBreachAt: null },
+        memory: {
+          graphAnswered: 0,
+          rederived: 0,
+          surfacesOpenedPerMorning: 0,
+          morningDate: '2026-07-10',
+          persistence: 'process',
+          writePathEnabled: false,
+          writeMode: 'staged',
+          cleanDayCount: 0,
+          promotionEligible: false,
+        },
       },
     });
     const context = await browser.newContext({ viewport: VIEWPORT });
@@ -1978,6 +2024,17 @@ test.describe('stage-3 panel ports (desktop chrome model)', () => {
           count: 0,
           lastBreachReason: 'morning.json unavailable',
           lastBreachAt: '2026-07-10T06:00:00Z',
+        },
+        memory: {
+          graphAnswered: 0,
+          rederived: 0,
+          surfacesOpenedPerMorning: 0,
+          morningDate: '2026-07-10',
+          persistence: 'process',
+          writePathEnabled: false,
+          writeMode: 'staged',
+          cleanDayCount: 0,
+          promotionEligible: false,
         },
       },
     });
