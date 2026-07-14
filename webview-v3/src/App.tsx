@@ -128,6 +128,7 @@ import {
   EMPTY_TAILS,
   enforceStreamCap,
   MAX_TAIL_STREAMS,
+  resetTailEpoch,
   setPaused,
   tailKey,
   type TailMap,
@@ -796,6 +797,7 @@ export default function App() {
       onStatus: (status) => {
         connectionStatusRef.current = status;
         setConnectionStatus(status);
+        if (status === 'offline') applyTails(resetTailEpoch(tailsRef.current));
         managerRef.current?.handleStatus(status);
       },
     });

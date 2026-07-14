@@ -119,6 +119,26 @@ export function dropStream(tails: TailMap, key: string): TailMap {
   return next;
 }
 
+/** A reconnect may land on a restarted server whose in-memory seq counters
+ *  begin at zero. Clear the prior connection's seq space and content so the
+ *  subscribe replay can repopulate each retained stream without treating
+ *  new-process chunks as duplicates. Preserve the user's pause choice. */
+export function resetTailEpoch(tails: TailMap): TailMap {
+  if (tails.size === 0) return tails;
+  const next = new Map<string, TailStreamState>();
+  for (const [key, state] of tails) {
+    next.set(key, {
+      ...state,
+      entries: [],
+      lastSeq: -1,
+      truncated: false,
+      buffer: [],
+      touchedAt: 0,
+    });
+  }
+  return next;
+}
+
 /**
  * LRU backstop across streams (see MAX_TAIL_STREAMS): while over `cap`,
  * evict the least-recently-touched stream NOT in `protectedKeys` (live

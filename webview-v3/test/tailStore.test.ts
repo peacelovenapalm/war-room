@@ -9,6 +9,7 @@ import {
   MAX_TAIL_ENTRIES,
   MAX_TAIL_STREAMS,
   pausedCount,
+  resetTailEpoch,
   setPaused,
   tailKey,
   type TailMap,
@@ -105,6 +106,31 @@ describe('dropStream', () => {
     const dropped = dropStream(tails, KEY);
     expect(dropped.has(KEY)).toBe(false);
     expect(dropStream(dropped, KEY)).toBe(dropped);
+  });
+});
+
+describe('resetTailEpoch', () => {
+  it('clears the old seq space so reconnect replay repopulates from zero', () => {
+    let tails = appendChunk(EMPTY_TAILS, chunk(42, 'old process\n'));
+    tails = resetTailEpoch(tails);
+    expect(tails.get(KEY)).toMatchObject({
+      entries: [],
+      buffer: [],
+      lastSeq: -1,
+      truncated: false,
+    });
+
+    tails = appendChunk(tails, chunk(0, 'new process replay\n'));
+    expect(tails.get(KEY)?.entries.map((entry) => entry.text)).toEqual(['new process replay\n']);
+    expect(tails.get(KEY)?.lastSeq).toBe(0);
+  });
+
+  it('preserves pause state and is a same-reference no-op for an empty map', () => {
+    let tails = appendChunk(EMPTY_TAILS, chunk(4, 'old process\n'));
+    tails = setPaused(tails, KEY, true);
+    const reset = resetTailEpoch(tails);
+    expect(reset.get(KEY)?.paused).toBe(true);
+    expect(resetTailEpoch(EMPTY_TAILS)).toBe(EMPTY_TAILS);
   });
 });
 
