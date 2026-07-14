@@ -15,26 +15,28 @@ make all          # render (Blender 4.2 headless, ~10 min CPU) + pack + stage
 Outputs land in `webview-v3-assets/`:
 
 - `props.structure.sheet.png` — floors + walls atlas (1x)
-- `props.furniture.sheet.png` — furniture/prop atlas (1x)
+- `props.furniture_core.sheet.png` — first-paint furniture atlas (1x)
+- `props.furniture_extra.sheet.png` — deferred furniture/prop atlas (1x)
 - `props.manifest.json` — frame geometry for both sheets (schema below)
-- `characters.staff_a.sheet.png` — teal + rust outfits × 4 animations
-- `characters.staff_b.sheet.png` — slate + moss outfits × 4 animations
+- `characters.staff_<outfit>.sheet.png` — one outfit × 4 animations per sheet
 - `characters.pets.sheet.png` — cat sprites atlas
 - `characters.manifest.json` — same schema, animated (frame arrays + fps)
 
-Sheets are split into deterministic groups so each PNG stays under the
-~1MB budget and regeneration diffs stay local to one sheet.
+Sheets are split into deterministic, demand-aligned groups so each PNG
+stays under the ~1MB budget, regeneration diffs stay local, and a minimal
+fleet never downloads unrelated furniture or staff outfits.
 
 ## Layout
 
-| File                           | Role                                                                                                                                                                                             |
-| ------------------------------ | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
-| `blender/rig.py`               | scene setup: 2:1 dimetric ortho camera (X 60°, Z 45° — cos 60° = 0.5 gives the exact 2:1 diamond), warm-key three-point night-office light rig, Cycles + transparent film + alpha shadow catcher |
-| `blender/props.py`             | 16 parametric prop builders (pure bpy primitives + bevel/solidify), shared warm palette                                                                                                          |
-| `blender/render_props.py`      | `-b -P` entry: each prop at 4 rotations (N/E/S/W as the camera sees them) → alpha PNGs + `meta.json`                                                                                             |
-| `blender/characters.py`        | parametric low-poly person (joint-empty direct posing, no armature — deterministic headless) in 4 palette outfits × 4 animations, plus the cat; rendered through the SAME rig                    |
-| `blender/render_characters.py` | `-b -P` entry: each sprite pose-frame × 4 rotations → alpha PNGs + `meta.json` (frame LISTS + fps)                                                                                               |
-| `pack.py`                      | union-trim across rotations (and animation frames), exact 2x→1x LANCZOS downscale, soft-shadow alpha quantization (~25% smaller PNGs, invisible), shelf-pack, manifest + validation gate         |
+| File                           | Role                                                                                                                                                                                                    |
+| ------------------------------ | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `blender/rig.py`               | scene setup: 2:1 dimetric ortho camera (X 60°, Z 45° — cos 60° = 0.5 gives the exact 2:1 diamond), warm-key three-point night-office light rig, Cycles + transparent film + alpha shadow catcher        |
+| `blender/props.py`             | 16 parametric prop builders (pure bpy primitives + bevel/solidify), shared warm palette                                                                                                                 |
+| `blender/render_props.py`      | `-b -P` entry: each prop at 4 rotations (N/E/S/W as the camera sees them) → alpha PNGs + `meta.json`                                                                                                    |
+| `blender/characters.py`        | parametric low-poly person (joint-empty direct posing, no armature — deterministic headless) in 4 palette outfits × 4 animations, plus the cat; rendered through the SAME rig                           |
+| `blender/render_characters.py` | `-b -P` entry: each sprite pose-frame × 4 rotations → alpha PNGs + `meta.json` (frame LISTS + fps)                                                                                                      |
+| `pack.py`                      | union-trim across rotations (and animation frames), exact 2x→1x LANCZOS downscale, soft-shadow alpha quantization (~25% smaller PNGs, invisible), demand-aligned shelf-pack, manifest + validation gate |
+| `repack_stage.py`              | losslessly applies the current grouping policy to staged sheets without rerendering; preserves every frame pixel and runs the same validation gate                                                      |
 
 ## Contract
 
@@ -54,7 +56,7 @@ Sheets are split into deterministic groups so each PNG stays under the
 ```jsonc
 {
   "version": 1,
-  "sheets": ["props.furniture.sheet.png", "props.structure.sheet.png"],
+  "sheets": ["props.furniture_core.sheet.png", "props.furniture_extra.sheet.png", "props.structure.sheet.png"],
   "sheetSizes": [[w, h], [w, h]],
   "tilePx": 128,
   "renderScale": 2,
@@ -133,11 +135,10 @@ enforces this — see below).
 | `worker_mint`     | short | bald            | tan         |
 | `worker_violet`   | broad | long (ponytail) | light       |
 
-Packed into 6 new sheet groups (`characters.staff_c.sheet.png` through
-`staff_h`, 2 outfits each — same ~700KB/pair budget as the original
-`staff_a`/`staff_b`). `webview-v3/src/engine/world.ts`'s `WORKER_OUTFITS`
-lists all 16 suffixes so agents/dispatch-visitors actually draw the new
-variants once this lands.
+Packed into one sheet per outfit (`characters.staff_<outfit>.sheet.png`,
+about 350KB each). `webview-v3/src/engine/world.ts`'s `WORKER_OUTFITS` lists
+all 16 suffixes so agents/dispatch-visitors draw only the variants that are
+actually present.
 
 ## Iterating on look
 

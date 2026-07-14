@@ -30,8 +30,9 @@ the frame-relative anchor stay uniform across the whole sprite — walk
 frames never jitter against the tile.
 
 Sprites are packed into deterministic atlas GROUPS (structure /
-furniture / staff / pets) so each PNG stays under the ~1MB budget and
-regeneration diffs stay local to one sheet.
+first-paint furniture / deferred furniture / one outfit per staff sheet /
+pets) so each PNG stays under the ~1MB budget, regeneration diffs stay
+local, and the manifest loader never fetches unrelated outfits or props.
 """
 
 import argparse
@@ -64,24 +65,35 @@ def compress_alpha(im):
     clean.putalpha(a)
     return clean
 
-# deterministic atlas grouping — keeps each PNG under the ~1MB budget
+# Deterministic atlas grouping. The default world needs every structure
+# sprite but only four furniture sprites, so keep that first-paint set out
+# of the deferred editor/future furniture chunk.
 GROUPS = {
     "structure": ("floor_tile", "floor_tile_b", "floor_tile_c",
                   "wall_straight", "wall_corner", "wall_window"),
+    "furniture_core": ("coffee_station", "desk_monitor", "office_chair",
+                       "plant"),
 }
-# staff split into outfit pairs — one full-quality staff atlas lands
-# ~1.4MB, over the ~1MB-per-PNG budget. C2 diversity pass (v5 KICKOFF
-# §C2) adds 12 more identities in the same pairs-per-sheet scheme.
+# One outfit per staff sheet: a minimal fleet should not pay for an outfit
+# it does not render. Each sheet remains far below the ~1MB cap.
 PREFIX_GROUPS = (("cat", "pets"),
-                 ("worker_teal", "staff_a"), ("worker_rust", "staff_a"),
-                 ("worker_slate", "staff_b"), ("worker_moss", "staff_b"),
-                 ("worker_amber", "staff_c"), ("worker_coral", "staff_c"),
-                 ("worker_indigo", "staff_d"), ("worker_sage", "staff_d"),
-                 ("worker_plum", "staff_e"), ("worker_ochre", "staff_e"),
-                 ("worker_charcoal", "staff_f"), ("worker_rose", "staff_f"),
-                 ("worker_navy", "staff_g"), ("worker_clay", "staff_g"),
-                 ("worker_mint", "staff_h"), ("worker_violet", "staff_h"))
-DEFAULT_GROUP = "furniture"
+                 ("worker_teal", "staff_teal"),
+                 ("worker_rust", "staff_rust"),
+                 ("worker_slate", "staff_slate"),
+                 ("worker_moss", "staff_moss"),
+                 ("worker_amber", "staff_amber"),
+                 ("worker_coral", "staff_coral"),
+                 ("worker_indigo", "staff_indigo"),
+                 ("worker_sage", "staff_sage"),
+                 ("worker_plum", "staff_plum"),
+                 ("worker_ochre", "staff_ochre"),
+                 ("worker_charcoal", "staff_charcoal"),
+                 ("worker_rose", "staff_rose"),
+                 ("worker_navy", "staff_navy"),
+                 ("worker_clay", "staff_clay"),
+                 ("worker_mint", "staff_mint"),
+                 ("worker_violet", "staff_violet"))
+DEFAULT_GROUP = "furniture_extra"
 
 
 def group_of(prop):
