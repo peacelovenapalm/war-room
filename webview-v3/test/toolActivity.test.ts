@@ -225,6 +225,24 @@ describe('reduceToolActivity — unrelated messages', () => {
   });
 });
 
+describe('reduceToolActivity — reconnect epoch', () => {
+  it('clears stale agent and subagent activity on existingAgents before replay', () => {
+    let agents: ToolActivityMap = EMPTY_TOOL_ACTIVITY;
+    agents = reduceToolActivity(agents, start({ toolName: 'Task' }), 1000);
+    agents = reduceToolActivity(agents, subStart(), 1100);
+
+    const next = reduceToolActivity(agents, {
+      type: 'existingAgents',
+      agents: [1],
+      agentMeta: {},
+      folderNames: { '1': 'war-room' },
+      externalAgents: {},
+    });
+
+    expect(next).toBe(EMPTY_TOOL_ACTIVITY);
+  });
+});
+
 describe('reduceToolActivity — agentClosed pruning (P6 review #5)', () => {
   it('drops the closed agent so the outer map never grows unbounded', () => {
     let agents: ToolActivityMap = EMPTY_TOOL_ACTIVITY;

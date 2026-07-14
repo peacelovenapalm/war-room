@@ -91,18 +91,12 @@ export function agentIdentity(record: Pick<AgentRecord, 'id' | 'machine' | 'name
 export function reduceAgents(agents: AgentMap, message: ServerMessage, now = Date.now()): AgentMap {
   switch (message.type) {
     case 'existingAgents': {
-      // RECONNECT MERGE: identity fields come fresh from the message (server
-      // truth), but live channels (status/awaitingInput/toolPermission/poll/
-      // tokens) are PRESERVED only when both id and sessionId still match. A
-      // reconnect resends existingAgents, and the server cannot re-fire agentToolPermission or
-      // agentStatus for a gate that is STILL pending — resetting to
-      // baseRecord would silently un-flag a genuinely blocked agent (and the
-      // poll wipe made FAILED agents dip to WAITING for one tick, corrupting
-      // debris ages via a phantom "recovery"). Ids absent from the message
-      // are dropped; genuinely new ids get the conservative defaults. The
-      // server additionally replays deviating hook-plane state on
-      // webviewReady (clientMessageHandler.ts) for the fresh-page case,
-      // where there is no prior record to merge from.
+      // A reconnect starts a NEW telemetry epoch. Identity comes fresh from
+      // the authoritative roster, ephemeral channels return to conservative
+      // defaults, and the server then explicitly replays every current poll,
+      // status, permission, token, and tool value. Preserve only cumulative
+      // token totals when the stable session identity still matches so the
+      // brief snapshot/replay window never makes spend move backwards.
       const next = new Map<number, AgentRecord>();
       for (const id of message.agents) {
         const key = String(id);
@@ -110,7 +104,7 @@ export function reduceAgents(agents: AgentMap, message: ServerMessage, now = Dat
         const existing = agents.get(id);
         const prior = existing?.sessionId === sessionId ? existing : undefined;
         next.set(id, {
-          ...(prior ?? baseRecord(id, fallbackName(id))),
+          ...baseRecord(id, fallbackName(id)),
           name: message.folderNames[key] ?? fallbackName(id),
           machine: message.machines?.[key],
           provider: message.providers?.[key],
@@ -118,6 +112,8 @@ export function reduceAgents(agents: AgentMap, message: ServerMessage, now = Dat
           cwd: message.cwds?.[key],
           pid: message.pids?.[key],
           managed: message.managed?.[key] ?? false,
+          inputTokens: prior?.inputTokens ?? 0,
+          outputTokens: prior?.outputTokens ?? 0,
         });
       }
       return next;

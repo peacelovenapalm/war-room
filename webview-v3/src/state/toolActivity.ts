@@ -126,6 +126,11 @@ export function reduceToolActivity(
   now = Date.now(),
 ): ToolActivityMap {
   switch (message.type) {
+    case 'existingAgents':
+      // Tool/subagent state is ephemeral telemetry. A reconnect begins a new
+      // epoch: discard anything whose clear/done frame may have been missed,
+      // then accept the active-tool replay that follows this roster snapshot.
+      return agents.size === 0 ? agents : EMPTY_TOOL_ACTIVITY;
     case 'agentToolStart': {
       const existing = agents.get(message.id) ?? EMPTY_AGENT_ACTIVITY;
       if (existing.active.some((t) => t.toolId === message.toolId)) return agents;
