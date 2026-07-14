@@ -278,6 +278,7 @@ export default function App() {
   // that already redraws (draw() itself stays a stable ref-reading
   // callback, matching every other piece of frame state here).
   const walkerInputsRef = useRef<WalkerAgentInput[]>([]);
+  const basePropsRef = useRef<WorldProp[]>(buildProps([]));
   // T6 item 1 (dispatch visitors) — same "ref recomputed on the redraw
   // effect, read fresh inside draw()" convention as walkerInputsRef.
   const dispatchVisitorsRef = useRef<DispatchVisitor[]>([]);
@@ -482,7 +483,7 @@ export default function App() {
       camera,
       cols: DEFAULT_COLS,
       rows: DEFAULT_ROWS,
-      props: [...buildProps(occupantsRef.current), ...walkerProps, ...visitorProps],
+      props: [...basePropsRef.current, ...walkerProps, ...visitorProps],
       warmth: displayedWarmth(calmRef.current, Date.now()),
       assets: { now: Date.now(), propStore, characterStore, imageStore },
       posters: POSTER_PLACEMENTS,
@@ -656,6 +657,7 @@ export default function App() {
   // cadence below advances animation without putting time in App state.
   useEffect(() => {
     occupantsRef.current = occupants;
+    basePropsRef.current = buildProps(occupants);
     walkerInputsRef.current = classifyWalkerAgents(
       occupiedDeskAnchors(occupants),
       agents,
