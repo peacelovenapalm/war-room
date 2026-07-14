@@ -60,14 +60,46 @@ export function applyTokenUsage(
   agents: AgentStateStore,
   countForShift: boolean,
 ): void {
-  if (typeof usage.input_tokens === 'number') {
-    agent.inputTokens += usage.input_tokens;
+  applyTokenUsageBatch(agentId, agent, [{ usage, countForShift }], agents);
+}
+
+export interface TokenUsageDelta {
+  usage: { input_tokens?: number; output_tokens?: number };
+  countForShift: boolean;
+}
+
+/**
+ * Apply a coalesced batch of assistant usage records and broadcast only the
+ * final cumulative totals. Local JSONL parsing normally supplies one record;
+ * the remote tailer deliberately POSTs up to 200 records at once, where
+ * broadcasting every intermediate total creates wire traffic the client
+ * immediately overwrites.
+ */
+export function applyTokenUsageBatch(
+  agentId: number,
+  agent: AgentState,
+  deltas: readonly TokenUsageDelta[],
+  agents: AgentStateStore,
+): void {
+  if (deltas.length === 0) return;
+  let shiftInputTokens = 0;
+  let shiftOutputTokens = 0;
+  let hasShiftUsage = false;
+  for (const { usage, countForShift } of deltas) {
+    if (typeof usage.input_tokens === 'number') {
+      agent.inputTokens += usage.input_tokens;
+    }
+    if (typeof usage.output_tokens === 'number') {
+      agent.outputTokens += usage.output_tokens;
+    }
+    if (countForShift) {
+      hasShiftUsage = true;
+      shiftInputTokens += usage.input_tokens ?? 0;
+      shiftOutputTokens += usage.output_tokens ?? 0;
+    }
   }
-  if (typeof usage.output_tokens === 'number') {
-    agent.outputTokens += usage.output_tokens;
-  }
-  if (countForShift) {
-    shiftStats.recordTokens(usage.input_tokens ?? 0, usage.output_tokens ?? 0);
+  if (hasShiftUsage) {
+    shiftStats.recordTokens(shiftInputTokens, shiftOutputTokens);
   }
   agents.broadcast({
     type: 'agentTokenUsage',

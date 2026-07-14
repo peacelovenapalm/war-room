@@ -83,8 +83,12 @@ import { standingOrderStore } from './standingOrderStore.js';
 import { stopAllLatch } from './stopAllLatch.js';
 import { STUDIO_CONTRACT_SWEEP_INTERVAL_MS, studioContractIngest } from './studioContractIngest.js';
 import { studioContractStore } from './studioContractStore.js';
-import { renderTranscriptLine } from './transcriptOutputTap.js';
-import { applyTokenUsage, isRecentEnoughForShiftSpend } from './transcriptParser.js';
+import { renderTranscriptRecord } from './transcriptOutputTap.js';
+import {
+  applyTokenUsageBatch,
+  isRecentEnoughForShiftSpend,
+  type TokenUsageDelta,
+} from './transcriptParser.js';
 import type { AgentState } from './types.js';
 import { v3StoreEnabled } from './v3Flags.js';
 import { getWiringSnapshot } from './wiringProvider.js';
@@ -966,7 +970,7 @@ function parseAgentOutputBody(body: unknown): AgentOutputBody | null {
  * X-Machine header can't resolve anything either, so it is the same kind
  * of 2xx deny, not a 400.
  *
- * Each resolved line is rendered through renderTranscriptLine — the ONE
+ * Each resolved line is rendered through renderTranscriptRecord — the ONE
  * rendering implementation, shared with the local tap (transcriptOutputTap.ts)
  * — and appended into the SAME ring shape ({source:'agent', id, stream:
  * 'transcript'}) the local tap uses, so the existing tailSubscribe/WS
@@ -1010,16 +1014,16 @@ function registerAgentOutputRoute(app: FastifyInstance, options: HttpServerOptio
         return;
       }
       const { id: agentId, agent } = resolved;
+      const renderedChunks: string[] = [];
+      const usageDeltas: TokenUsageDelta[] = [];
       for (const line of parsed.lines) {
-        const rendered = renderTranscriptLine(line);
-        if (rendered !== undefined) {
-          outputRingStore.append('agent', String(agentId), 'transcript', `${rendered}\n`);
-        }
-        // Token usage: best-effort, never route-fatal — a malformed line
-        // already fell out of renderTranscriptLine above; usage extraction
-        // gets its own try so one bad line can't drop the rest of the batch.
+        // Parse once for both compact rendering and usage extraction. A
+        // malformed line is telemetry-only and never drops the rest of the
+        // tailer's already-coalesced POST batch.
         try {
           const record = JSON.parse(line) as Record<string, unknown>;
+          const rendered = renderTranscriptRecord(record);
+          if (rendered !== undefined) renderedChunks.push(`${rendered}\n`);
           // Match the local tap: only assistant records carry billable
           // usage. A non-assistant record with a usage-shaped field is not
           // real usage telemetry.
@@ -1035,18 +1039,20 @@ function registerAgentOutputRoute(app: FastifyInstance, options: HttpServerOptio
             // carries its own `timestamp` regardless of machine, so the
             // SAME cutoff check applies here — see
             // isRecentEnoughForShiftSpend's doc.
-            applyTokenUsage(
-              agentId,
-              agent,
-              usage,
-              options.store,
-              isRecentEnoughForShiftSpend(record),
-            );
+            usageDeltas.push({ usage, countForShift: isRecentEnoughForShiftSpend(record) });
           }
         } catch {
-          // Swallow: telemetry only, matches renderTranscriptLine/tapTranscriptLine's posture.
+          // Swallow: telemetry only, matches the local transcript tap's posture.
         }
       }
+      // The producer already batches for up to 1s / 64KiB / 200 lines.
+      // Preserve that batching on the WS side: output chunks have no
+      // line-boundary contract, and the client immediately replaces every
+      // intermediate cumulative token total with the final one.
+      if (renderedChunks.length > 0) {
+        outputRingStore.append('agent', String(agentId), 'transcript', renderedChunks.join(''));
+      }
+      applyTokenUsageBatch(agentId, agent, usageDeltas, options.store);
       reply.send({ ok: true });
     },
   );
