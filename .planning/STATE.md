@@ -1902,3 +1902,30 @@ Authoritative ledger: `.planning/v8/SPRINT-STATE.md`. Handoff:
   V12–V15 DESIGN docs; all Act III code hard-gated on Act II exit
   evidence. Greg sign-offs pending: v12 identity, v13 cloud trust tier.
 - HEAD `4e53726` = origin. Parking lot in the handoff §4.
+
+## POSITION — 2026-07-14 (live-bugs codex panel: 4 reported bugs fixed, NOT merged)
+
+Handoff: `SESSION-HANDOFF-2026-07-14-live-bugs.md`.
+
+- Greg reported 4 live bugs via screenshot (broken drawer overlay,
+  unusable perf/staggering, dead camera pan, a launched agent that
+  disappeared). Ran a 5-lens parallel codex `gpt-5.6-sol high`
+  read-only review, then a codex fix-lane in an isolated worktree
+  (`lane/live-bugs-fix` @ `/Users/greg/code/war-room-wt/live-bugs-fix`,
+  based on `war-room/v3` @ `3115ecf`). Fix-lane process was killed
+  mid-run (cause unknown) but left a clean worktree with 13 atomic
+  commits; personally verified + fixed 2 more issues e2e caught that
+  unit tests missed (WebKit `:has()` invalidation gap on the drawer
+  z-index fix; a missing `addInitScript` in the fix-lane's own new
+  test) — **15 commits total**, all gates green, `e2e/v3` run twice
+  with only pre-existing/unrelated failures remaining.
+- All 4 reported bugs fixed + live-verified via real WebKit browser
+  interaction. **NOT merged, NOT pushed** — held for Greg's review
+  per the established codex-fix-lane precedent.
+- 6 bonus correctness findings (Group B2-B7: WS-reconnect stale
+  state, dispatch/recent hydration, chain-run stuck-running,
+  resume/stop-all race, MORNING badge, DebugView unbounded queue)
+  found but not fixed — parked, detail in the fix-lane brief
+  (session-scratch path, see handoff §4).
+- Root `CLAUDE.md` confirmed stale re: `webview-v3` (the actual live
+  UI) — not documented there at all. Not fixed this session.
