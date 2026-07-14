@@ -132,8 +132,8 @@
       "name": "placard_wing_a",
       "path": "imagegen/posters/placard_wing_a.png",
       "size": [
-        384,
-        256
+        1536,
+        1024
       ],
       "purpose": "WING A wayfinding placard \u2014 wall prop art; letter + arrow shape carry the signal"
     },
@@ -159,8 +159,8 @@
       "name": "board_logo",
       "path": "imagegen/posters/board_logo.png",
       "size": [
-        1536,
-        1024
+        384,
+        256
       ],
       "purpose": "Studio logo lobby board \u2014 wall prop art; the WAR ROOM wordmark"
     },
