@@ -12,7 +12,7 @@ export interface StopAllControlProps {
    *  server + latched by the WS `automationStopped` broadcast), so the HUD
    *  and AutomationPanel instances can never disagree. */
   stopped: boolean;
-  onStoppedChange: (stopped: boolean) => void;
+  latchRevision: number;
 }
 
 /**
@@ -26,11 +26,13 @@ export interface StopAllControlProps {
  * dispatch stays available throughout; this targets autonomy, not the
  * human. Resuming is a SEPARATE explicit action with its own confirm.
  */
-export function StopAllControl({ stopped, onStoppedChange }: StopAllControlProps) {
+export function StopAllControl({ stopped, latchRevision }: StopAllControlProps) {
   const [stopping, setStopping] = useState(false);
   const [confirmResume, setConfirmResume] = useState(false);
   const [message, setMessage] = useState<string | null>(null);
   const [failed, setFailed] = useState(false);
+  const latestRevisionRef = useRef(latchRevision);
+  const receiptRevisionRef = useRef<number | null>(null);
   // M3 (beta finding): `stopped` is WS-authoritative and can change for
   // reasons OTHER than this instance's own fetch (another client engaged
   // it, or the HUD/AutomationPanel sibling instance's call resolved first —
@@ -41,14 +43,21 @@ export function StopAllControl({ stopped, onStoppedChange }: StopAllControlProps
   // a stale "Resumed 0 order(s)." tooltip survived an external engage).
   const expectedRef = useRef<boolean>(stopped);
   useEffect(() => {
+    latestRevisionRef.current = latchRevision;
+    if (receiptRevisionRef.current !== null && latchRevision > receiptRevisionRef.current) {
+      receiptRevisionRef.current = null;
+      setMessage(null);
+      setFailed(false);
+    }
     if (!isExternalStopTransition(expectedRef.current, stopped)) return;
     expectedRef.current = stopped;
     setMessage(null);
     setFailed(false);
     setConfirmResume(false);
-  }, [stopped]);
+  }, [latchRevision, stopped]);
 
   const handleStopAll = () => {
+    const requestRevision = latestRevisionRef.current;
     setStopping(true);
     setFailed(false);
     void fetch('/api/automation/stop-all', { method: 'POST' })
@@ -56,12 +65,14 @@ export function StopAllControl({ stopped, onStoppedChange }: StopAllControlProps
       .catch(() => ({ ok: false as const }))
       .then((result) => {
         if (result.ok) {
+          if (result.revision < latestRevisionRef.current) return;
           expectedRef.current = true;
-          onStoppedChange(true);
+          receiptRevisionRef.current = result.revision;
           setMessage(
             `Halted ${String(result.haltedOrders)} order(s), ${String(result.haltedRuns)} run(s).`,
           );
         } else {
+          if (requestRevision !== latestRevisionRef.current) return;
           // Honest failure: automation may STILL be running — say so loudly
           // instead of flipping to RESUME on an unconfirmed halt.
           setFailed(true);
@@ -78,17 +89,20 @@ export function StopAllControl({ stopped, onStoppedChange }: StopAllControlProps
       setConfirmResume(true);
       return;
     }
+    const requestRevision = latestRevisionRef.current;
     void fetch('/api/automation/resume', { method: 'POST' })
       .then(async (res) => interpretResumeResponse(res.ok, (await res.json()) as unknown))
       .catch(() => ({ ok: false as const }))
       .then((result) => {
         setConfirmResume(false);
         if (result.ok) {
+          if (result.revision < latestRevisionRef.current) return;
           expectedRef.current = false;
-          onStoppedChange(false);
+          receiptRevisionRef.current = result.revision;
           setFailed(false);
           setMessage(`Resumed ${String(result.resumedOrders)} order(s).`);
         } else {
+          if (requestRevision !== latestRevisionRef.current) return;
           setFailed(true);
           setMessage('✗ RESUME FAILED — orders are still halted. Retry.');
         }

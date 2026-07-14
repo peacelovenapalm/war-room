@@ -11,22 +11,26 @@
  *  - interpret*Response: success ONLY when the transport says 2xx AND the
  *    body says ok:true. Anything else is a failure the UI must render as
  *    an explicit ✗ FAILED state (shape + label, colorblind hard rule).
- *  - stoppedFromOrders: mount-time hydration from GET /api/standing-orders
- *    (`stoppedByKillSwitch` is the server's persisted record of a halt
- *    awaiting RESUME). Limitation, honestly noted: a STOP ALL that halted
- *    only chain runs (zero enabled orders) leaves no durable order flag —
- *    hydration then reads not-stopped, and pressing STOP ALL again is a
- *    harmless idempotent re-halt (the safe default direction).
- *  - reduceAutomationStopped: the WS `automationStopped` broadcast latches
- *    every open webview to stopped, so all instances agree the moment ANY
- *    operator hits the switch.
+ *  - latchSnapshotFromHttp/reconcileAutomationLatch: mount hydration that
+ *    cannot outrank a newer server revision.
+ *  - reduceAutomationLatch: stop AND resume broadcasts are the sole shared
+ *    transition authority; POST responses stay local receipts only.
  */
 
 import type { ServerMessage } from '../../../core/src/messages.js';
 
-export type StopAllResult = { ok: true; haltedOrders: number; haltedRuns: number } | { ok: false };
+export type StopAllResult =
+  | { ok: true; haltedOrders: number; haltedRuns: number; revision: number }
+  | { ok: false };
 
-export type ResumeResult = { ok: true; resumedOrders: number } | { ok: false };
+export type ResumeResult = { ok: true; resumedOrders: number; revision: number } | { ok: false };
+
+export interface AutomationLatchState {
+  engaged: boolean;
+  revision: number;
+}
+
+export const INITIAL_AUTOMATION_LATCH: AutomationLatchState = { engaged: false, revision: 0 };
 
 function bodyOk(body: unknown): body is Record<string, unknown> {
   return typeof body === 'object' && body !== null && (body as { ok?: unknown }).ok === true;
@@ -39,13 +43,18 @@ function count(value: unknown): number {
 /** POST /api/automation/stop-all — success needs res.ok AND body.ok. */
 export function interpretStopAllResponse(httpOk: boolean, body: unknown): StopAllResult {
   if (!httpOk || !bodyOk(body)) return { ok: false };
-  return { ok: true, haltedOrders: count(body.haltedOrders), haltedRuns: count(body.haltedRuns) };
+  return {
+    ok: true,
+    haltedOrders: count(body.haltedOrders),
+    haltedRuns: count(body.haltedRuns),
+    revision: count(body.revision),
+  };
 }
 
 /** POST /api/automation/resume — same rule. */
 export function interpretResumeResponse(httpOk: boolean, body: unknown): ResumeResult {
   if (!httpOk || !bodyOk(body)) return { ok: false };
-  return { ok: true, resumedOrders: count(body.resumedOrders) };
+  return { ok: true, resumedOrders: count(body.resumedOrders), revision: count(body.revision) };
 }
 
 /** Server-derived stop state: any order halted by the kill switch is still
@@ -60,47 +69,35 @@ export function stoppedFromOrders(orders: Array<{ stoppedByKillSwitch?: boolean 
  *  zero standing orders still sets the latch, so a fresh mount reads stopped.
  *  Anything but an explicit `engaged: true` is NOT stopped (a missing/garbled
  *  body must never fabricate a halt). */
-export function stoppedFromLatch(body: unknown): boolean {
-  return (
-    typeof body === 'object' && body !== null && (body as { engaged?: unknown }).engaged === true
-  );
+export function latchSnapshotFromHttp(body: unknown): AutomationLatchState | null {
+  if (typeof body !== 'object' || body === null) return null;
+  const candidate = body as { engaged?: unknown; revision?: unknown };
+  if (typeof candidate.engaged !== 'boolean' || typeof candidate.revision !== 'number') return null;
+  return { engaged: candidate.engaged, revision: candidate.revision };
 }
 
-/** WS reducer: `automationStopped` latches stopped for every client. */
-export function reduceAutomationStopped(prev: boolean, message: ServerMessage): boolean {
-  if (message.type === 'automationStopped') return true;
-  return prev;
+/** Server broadcasts are the sole transition authority. Older revisions
+ * are ignored so delayed hydration can never clobber a newer push. */
+export function reduceAutomationLatch(
+  prev: AutomationLatchState,
+  message: ServerMessage,
+): AutomationLatchState {
+  if (message.type !== 'automationStopped' && message.type !== 'automationResumed') return prev;
+  const revision = message.revision;
+  if (revision < prev.revision) return prev;
+  return { engaged: message.type === 'automationStopped', revision };
 }
 
-/** M3 (beta finding): a client-local receipt/confirm-arm ("Resumed 0
- *  order(s).") must never survive a `stopped` transition that DIDN'T come
- *  from this instance's own fetch — otherwise it can sit there
- *  contradicting the live WS-authoritative state (the reported case: a
- *  stale "Resumed…" tooltip survived another client's external engage).
- *  `expected` is the value this instance's own last successful call asked
- *  for (or the initial `stopped` prop, before any call); `actual` is the
- *  current `stopped` prop. They diverge only when something OTHER than
- *  this instance moved the state. */
+export function reconcileAutomationLatch(
+  prev: AutomationLatchState,
+  snapshot: AutomationLatchState,
+): AutomationLatchState {
+  if (snapshot.revision < prev.revision) return prev;
+  return snapshot;
+}
+
+/** Retained for receipt cleanup tests/components: a shared transition is
+ * external when it differs from the request's expected engaged value. */
 export function isExternalStopTransition(expected: boolean, actual: boolean): boolean {
   return expected !== actual;
-}
-
-/** M3 follow-up (post-fix visual re-verification): an EXTERNAL resume —
- *  another client's POST /api/automation/resume — releases the durable
- *  latch server-side but never broadcasts (only the stop-all route emits
- *  `automationStopped`; see httpServer.ts). Left alone, `stopped` latches
- *  true forever once WS-set, and the loud M3 ENGAGED banner becomes a
- *  standing false alarm — the same multi-client dishonesty class M3
- *  targets, inverted. App.tsx polls GET /api/automation/stop-all-state
- *  while `stopped` is true and calls this to decide whether to clear it.
- *
- *  Deliberately asymmetric with stoppedFromLatch: this only returns true
- *  on an EXPLICIT `engaged: false` — a malformed body, an error response
- *  turned into `null`, or any other shape changes nothing. A standing
- *  false ENGAGED banner is the safe failure direction; incorrectly
- *  clearing a real halt is not. */
-export function pollSaysReleased(body: unknown): boolean {
-  return (
-    typeof body === 'object' && body !== null && (body as { engaged?: unknown }).engaged === false
-  );
 }

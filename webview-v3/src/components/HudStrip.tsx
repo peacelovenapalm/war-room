@@ -31,7 +31,7 @@ export interface HudStripProps {
   /** Lifted STOP ALL state — shared with AutomationPanel's instance so the
    *  two can never disagree (state/stopAll.ts). */
   automationStopped: boolean;
-  onAutomationStoppedChange: (stopped: boolean) => void;
+  automationLatchRevision: number;
   onToggleGrayscale: () => void;
   onToggleView: () => void;
   /** One-tap-real (hard rule 5): every chip decomposes into verbatim telemetry. */
@@ -59,7 +59,7 @@ export function HudStrip({
   soundscapeMuted,
   onToggleSoundscape,
   automationStopped,
-  onAutomationStoppedChange,
+  automationLatchRevision,
   onToggleGrayscale,
   onToggleView,
   onOpenReal,
@@ -161,7 +161,7 @@ export function HudStrip({
           open. AutomationPanel repeats the SAME control for convenience
           while that panel is open; both render the ONE lifted stop state
           and hit the one real server endpoint. */}
-      <StopAllControl stopped={automationStopped} onStoppedChange={onAutomationStoppedChange} />
+      <StopAllControl stopped={automationStopped} latchRevision={automationLatchRevision} />
       <button type="button" data-testid="hud-open-call" onClick={onOpenCall}>
         ☎ CALL
       </button>

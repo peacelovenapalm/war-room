@@ -123,6 +123,7 @@ components:
         - $ref: '#/components/schemas/StandingOrderUpdate'
         - $ref: '#/components/schemas/BudgetUpdate'
         - $ref: '#/components/schemas/AutomationStopped'
+        - $ref: '#/components/schemas/AutomationResumed'
         # Living world (v2 mechanic G5 — GAME-DESIGN.md §6.3)
         - $ref: '#/components/schemas/WorldEventFired'
         # Living Studio substrate (v3 WS-C — KICKOFF-v3.1 §3)
@@ -1360,7 +1361,7 @@ components:
         separate explicit action, never automatic.
       type: object
       additionalProperties: false
-      required: [type, haltedOrderIds, haltedRunIds]
+      required: [type, haltedOrderIds, haltedRunIds, revision]
       properties:
         type:
           const: automationStopped
@@ -1372,6 +1373,23 @@ components:
           type: array
           items:
             type: string
+        revision:
+          type: integer
+          description: Monotonically increasing durable latch revision.
+
+    AutomationResumed:
+      description: >-
+        The global STOP ALL latch was explicitly released. Carries the same
+        monotonic durable revision as AutomationStopped so clients can reject
+        stale HTTP hydration or delayed receipts.
+      type: object
+      additionalProperties: false
+      required: [type, revision]
+      properties:
+        type:
+          const: automationResumed
+        revision:
+          type: integer
 
     WorldEventFired:
       description: >-

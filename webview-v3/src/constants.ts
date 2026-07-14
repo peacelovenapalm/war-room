@@ -89,10 +89,3 @@ export const DISTRICT_PLAQUE_STAGGER_PX = 18;
 /** V7 SEARCH memory lane: debounce and one-tap attribution acknowledgement. */
 export const GRAPH_SEARCH_DEBOUNCE_MS = 300;
 export const MEMORY_ATTRIBUTION_FEEDBACK_MS = 2_000;
-/** M3 follow-up: POST /api/automation/resume never broadcasts over WS
- *  (only the stop-all route does — server/src/httpServer.ts), so a client
- *  showing the ENGAGED banner has no push signal telling it the automation
- *  was released by someone else. While `automationStopped` is true, App.tsx
- *  polls the durable latch (GET /api/automation/stop-all-state) at this
- *  interval and clears locally on an explicit {engaged:false}. */
-export const STOP_ALL_EXTERNAL_RESUME_POLL_MS = 5_000;

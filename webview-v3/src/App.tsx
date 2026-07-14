@@ -25,7 +25,6 @@ import { SettingsModal } from './components/SettingsModal';
 import { ShiftPanel } from './components/ShiftPanel';
 import { TriageBoard } from './components/TriageBoard';
 import { WorldOverlay } from './components/WorldOverlay';
-import { STOP_ALL_EXTERNAL_RESUME_POLL_MS } from './constants';
 import {
   type CalmTransition,
   displayedWarmth,
@@ -118,10 +117,10 @@ import {
   type SpeechBubbleEvent,
 } from './state/speechBubbles';
 import {
-  pollSaysReleased,
-  reduceAutomationStopped,
-  stoppedFromLatch,
-  stoppedFromOrders,
+  INITIAL_AUTOMATION_LATCH,
+  latchSnapshotFromHttp,
+  reconcileAutomationLatch,
+  reduceAutomationLatch,
 } from './state/stopAll';
 import {
   appendChunk,
@@ -353,7 +352,8 @@ export default function App() {
   /** STOP ALL — ONE lifted source of truth for both StopAllControl mounts
    *  (HUD + AutomationPanel), hydrated from the server below and latched
    *  by the WS automationStopped broadcast (state/stopAll.ts). */
-  const [automationStopped, setAutomationStopped] = useState(false);
+  const [automationLatch, setAutomationLatch] = useState(INITIAL_AUTOMATION_LATCH);
+  const automationStopped = automationLatch.engaged;
   const [diagnostics, setDiagnostics] = useState<DiagnosticsRow[]>([]);
   const [callPrefill, setCallPrefill] = useState<CallModalPrefill | null>(null);
   const [viewingResult, setViewingResult] = useState<DispatchEntry | null>(null);
@@ -904,7 +904,7 @@ export default function App() {
         // Stage-3 panel ports — same "verbatim mirror" reducer convention.
         setSettings((previous) => reduceSettings(previous, message));
         setBudget((previous) => reduceBudget(previous, message));
-        setAutomationStopped((previous) => reduceAutomationStopped(previous, message));
+        setAutomationLatch((previous) => reduceAutomationLatch(previous, message));
         if (message.type === 'dispatchUpdate') {
           dispatchWsRevisionRef.current += 1;
           dispatchWsRevisionByIdRef.current.set(message.id, dispatchWsRevisionRef.current);
@@ -996,77 +996,23 @@ export default function App() {
     };
   }, [connectionStatus]);
 
-  // STOP ALL hydration (panel finding, StopAllControl.tsx:12): a fresh page
-  // must reflect a halt issued earlier or from another client.
-  // stoppedByKillSwitch on any standing order is the server's persisted
-  // record of a halt awaiting RESUME. A fetch failure (or a chain-only halt
-  // — state/stopAll.ts header) hydrates not-stopped: showing STOP ALL when
-  // already stopped is a harmless idempotent re-halt, the safe direction.
-  //
-  // C9-1: the standing-orders check alone misses a STOP ALL that halted ZERO
-  // standing orders (chain-only halt) — that's exactly the gap the durable
-  // server latch (stopAllLatch.ts, GET /api/automation/stop-all-state) closes.
-  // Both fetches run independently; either one finding "stopped" wins (OR),
-  // so a fresh page load reflects the true server state regardless of which
-  // signal carries it.
+  // STOP ALL mount hydration reads the durable, revisioned server latch.
+  // The snapshot reconciles against WS transitions, so a delayed response
+  // cannot overwrite a newer stop/resume broadcast.
   useEffect(() => {
     let cancelled = false;
-    void fetch('/api/standing-orders')
-      .then(async (res) => (res.ok ? ((await res.json()) as unknown) : []))
-      .then((orders) => {
-        if (cancelled || !Array.isArray(orders)) return;
-        if (stoppedFromOrders(orders as { stoppedByKillSwitch?: boolean }[])) {
-          setAutomationStopped(true);
-        }
-      })
-      .catch(() => undefined);
     void fetch('/api/automation/stop-all-state')
       .then(async (res) => (res.ok ? ((await res.json()) as unknown) : null))
       .then((body) => {
         if (cancelled) return;
-        if (stoppedFromLatch(body)) setAutomationStopped(true);
+        const snapshot = latchSnapshotFromHttp(body);
+        if (snapshot) setAutomationLatch((previous) => reconcileAutomationLatch(previous, snapshot));
       })
       .catch(() => undefined);
     return () => {
       cancelled = true;
     };
   }, []);
-
-  // M3 follow-up (beta re-verification): POST /api/automation/resume never
-  // broadcasts over WS — only the stop-all route does (server/src/
-  // httpServer.ts) — so a client showing the M3 ENGAGED banner has no push
-  // signal telling it another client already released automation. While
-  // `automationStopped` is true, poll the durable latch and clear locally
-  // on an explicit {engaged:false} (pollSaysReleased's own honesty rule: a
-  // failed or malformed poll changes nothing — never clear on absence of
-  // evidence). Stops polling the instant `automationStopped` goes false,
-  // whether from this clear, this client's own RESUME, or a real WS
-  // engage/resume broadcast. `inFlightRef` skips starting a new poll while
-  // one is still pending, so a slow response can never overlap a fresh one.
-  const stopAllPollInFlightRef = useRef(false);
-  useEffect(() => {
-    if (!automationStopped) return;
-    let cancelled = false;
-    const poll = () => {
-      if (stopAllPollInFlightRef.current) return;
-      stopAllPollInFlightRef.current = true;
-      void fetch('/api/automation/stop-all-state')
-        .then(async (res) => (res.ok ? ((await res.json()) as unknown) : null))
-        .then((body) => {
-          if (cancelled) return;
-          if (pollSaysReleased(body)) setAutomationStopped(false);
-        })
-        .catch(() => undefined)
-        .finally(() => {
-          stopAllPollInFlightRef.current = false;
-        });
-    };
-    const timer = setInterval(poll, STOP_ALL_EXTERNAL_RESUME_POLL_MS);
-    return () => {
-      cancelled = true;
-      clearInterval(timer);
-    };
-  }, [automationStopped]);
 
   // Crisis freshness and ACK expiry run at their actual next deadline,
   // rather than polling the whole application twice a second.
@@ -1500,7 +1446,7 @@ export default function App() {
         soundscapeMuted={soundscapeMuted}
         onToggleSoundscape={handleToggleSoundscape}
         automationStopped={automationStopped}
-        onAutomationStoppedChange={setAutomationStopped}
+        automationLatchRevision={automationLatch.revision}
         onToggleGrayscale={() => {
           setGrayscale((value) => !value);
         }}
@@ -1663,7 +1609,7 @@ export default function App() {
           chainRuns={chainRuns}
           chainRunReceivedAt={chainRunReceivedAt}
           automationStopped={automationStopped}
-          onAutomationStoppedChange={setAutomationStopped}
+          automationLatchRevision={automationLatch.revision}
         />
         <ContractsPanel
           isOpen={openPanel === 'contracts'}

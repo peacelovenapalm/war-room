@@ -2000,17 +2000,23 @@ function registerAutomationStopAllRoutes(app: FastifyInstance, options: HttpServ
     // fresh webview (or a server restart) hydrates "stopped" even when this
     // STOP ALL halted ONLY chain runs and left zero durable order flags (the
     // limitation stopAll.ts's header called out). Idempotent.
-    stopAllLatch.engage();
+    const latch = stopAllLatch.engage();
     options.store.broadcast({
       type: 'automationStopped',
       haltedOrderIds: haltedOrders.map((o) => o.id),
       haltedRunIds: haltedRuns.map((r) => r.id),
+      revision: latch.revision,
     });
     notifyBigMoment(
       'stop-all',
       `STOP ALL engaged: ${haltedOrders.length} standing order(s), ${haltedRuns.length} chain run(s) halted.`,
     );
-    reply.send({ ok: true, haltedOrders: haltedOrders.length, haltedRuns: haltedRuns.length });
+    reply.send({
+      ok: true,
+      haltedOrders: haltedOrders.length,
+      haltedRuns: haltedRuns.length,
+      revision: latch.revision,
+    });
   });
 
   app.post('/api/automation/resume', async (_request, reply) => {
@@ -2019,8 +2025,9 @@ function registerAutomationStopAllRoutes(app: FastifyInstance, options: HttpServ
     // exactly: restores the auto-executor + HELD-rollover release.
     autoExecutorStore.resumeAll();
     // C9-1: clear the durable latch in the SAME resume transaction.
-    stopAllLatch.release();
-    reply.send({ ok: true, resumedOrders: resumedOrders.length });
+    const latch = stopAllLatch.release();
+    options.store.broadcast({ type: 'automationResumed', revision: latch.revision });
+    reply.send({ ok: true, resumedOrders: resumedOrders.length, revision: latch.revision });
   });
 
   // C9-1: GET /api/automation/stop-all-state — mount-time hydration source for
@@ -2028,7 +2035,7 @@ function registerAutomationStopAllRoutes(app: FastifyInstance, options: HttpServ
   // the other player-facing GETs; reads the durable latch so a page reload
   // (or a fresh server after a restart) never silently shows "not stopped".
   app.get('/api/automation/stop-all-state', async (_request, reply) => {
-    reply.send({ engaged: stopAllLatch.isEngaged() });
+    reply.send(stopAllLatch.getSnapshot());
   });
 }
 
@@ -2262,6 +2269,21 @@ function registerWebSocketRoute(
       safeSend(socket, { type: 'budgetUpdate', ...snapshot });
     });
     safeSend(socket, { type: 'budgetUpdate', ...budgetStore.getSnapshot() });
+
+    // Revisioned STOP ALL latch snapshot. This is the same transition shape
+    // used live, so reconnect cannot miss a stop or resume while offline.
+    const automationLatch = stopAllLatch.getSnapshot();
+    safeSend(
+      socket,
+      automationLatch.engaged
+        ? {
+            type: 'automationStopped',
+            haltedOrderIds: [],
+            haltedRunIds: [],
+            revision: automationLatch.revision,
+          }
+        : { type: 'automationResumed', revision: automationLatch.revision },
+    );
 
     // ── v3 Living Studio planes (WS-C stage 1 — KICKOFF-v3.1 §3) ──────
     // Same pure-forwarding rationale as the planes above, with one twist:

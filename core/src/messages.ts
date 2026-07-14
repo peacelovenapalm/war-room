@@ -42,6 +42,7 @@ export type ServerMessage =
   | StandingOrderUpdate
   | BudgetUpdate
   | AutomationStopped
+  | AutomationResumed
   | WorldEventFired
   | ContractsUpdated
   | DossierUpdated
@@ -481,6 +482,12 @@ export interface AutomationStopped {
   type: 'automationStopped';
   haltedOrderIds: string[];
   haltedRunIds: string[];
+  revision: number;
+}
+
+export interface AutomationResumed {
+  type: 'automationResumed';
+  revision: number;
 }
 
 export interface WorldEventFired {

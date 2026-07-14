@@ -27,9 +27,9 @@ import { LAYOUT_FILE_DIR } from './constants.js';
 
 const STOP_ALL_FILE_NAME = 'stop-all-latch.json';
 
-interface StopAllLatchState {
+export interface StopAllLatchSnapshot {
   engaged: boolean;
-  updatedAt: number;
+  revision: number;
 }
 
 function defaultLatchFile(): string {
@@ -37,7 +37,7 @@ function defaultLatchFile(): string {
 }
 
 export class StopAllLatch {
-  private state: StopAllLatchState | null = null;
+  private state: StopAllLatchSnapshot | null = null;
   private explicitPath: string | undefined;
   private resolvedPath: string | undefined;
   private usingDefaultPath = false;
@@ -54,25 +54,32 @@ export class StopAllLatch {
     return this.resolvedPath;
   }
 
-  private ensureLoaded(): StopAllLatchState {
+  private ensureLoaded(): StopAllLatchSnapshot {
     if (!this.state) {
-      this.state = this.load() ?? { engaged: false, updatedAt: 0 };
+      this.state = this.load() ?? { engaged: false, revision: 0 };
     }
     return this.state;
   }
 
-  private load(): StopAllLatchState | null {
+  private load(): StopAllLatchSnapshot | null {
     try {
       const raw = JSON.parse(fs.readFileSync(this.persistPath(), 'utf8')) as unknown;
       if (
         raw !== null &&
         typeof raw === 'object' &&
-        typeof (raw as StopAllLatchState).engaged === 'boolean'
+        typeof (raw as StopAllLatchSnapshot).engaged === 'boolean'
       ) {
-        const parsed = raw as StopAllLatchState;
+        const parsed = raw as StopAllLatchSnapshot & { updatedAt?: unknown };
         return {
           engaged: parsed.engaged,
-          updatedAt: typeof parsed.updatedAt === 'number' ? parsed.updatedAt : 0,
+          // Migrate the old timestamp field as a high starting revision so
+          // the first post-upgrade transition remains strictly monotonic.
+          revision:
+            typeof parsed.revision === 'number'
+              ? parsed.revision
+              : typeof parsed.updatedAt === 'number'
+                ? parsed.updatedAt
+                : 0,
         };
       }
     } catch {
@@ -107,24 +114,32 @@ export class StopAllLatch {
     return this.ensureLoaded().engaged;
   }
 
+  getSnapshot(): StopAllLatchSnapshot {
+    return { ...this.ensureLoaded() };
+  }
+
   /** Engage the latch (idempotent — a second engage is a no-op, never a
    *  redundant write). Called from the SAME stop-all transaction as
    *  standingOrderStore.haltAll()/chainOrchestrator.haltAll(). */
-  engage(now: number = Date.now()): void {
+  engage(_now: number = Date.now()): StopAllLatchSnapshot {
     const state = this.ensureLoaded();
-    if (state.engaged) return;
-    state.engaged = true;
-    state.updatedAt = now;
-    this.persist();
+    if (!state.engaged) {
+      state.engaged = true;
+      state.revision += 1;
+      this.persist();
+    }
+    return this.getSnapshot();
   }
 
   /** Release the latch (idempotent). Called from the SAME resume transaction. */
-  release(now: number = Date.now()): void {
+  release(_now: number = Date.now()): StopAllLatchSnapshot {
     const state = this.ensureLoaded();
-    if (!state.engaged) return;
-    state.engaged = false;
-    state.updatedAt = now;
-    this.persist();
+    if (state.engaged) {
+      state.engaged = false;
+      state.revision += 1;
+      this.persist();
+    }
+    return this.getSnapshot();
   }
 }
 
