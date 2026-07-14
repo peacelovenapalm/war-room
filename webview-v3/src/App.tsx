@@ -28,6 +28,7 @@ import { SettingsModal } from './components/SettingsModal';
 import { ShiftPanel } from './components/ShiftPanel';
 import { SpeechBubbleLayer } from './components/SpeechBubbleLayer';
 import { TriageBoard } from './components/TriageBoard';
+import { STOP_ALL_EXTERNAL_RESUME_POLL_MS } from './constants';
 import {
   type CalmTransition,
   displayedWarmth,
@@ -115,7 +116,12 @@ import {
   pruneSpeechBubbles,
   type SpeechBubbleEvent,
 } from './state/speechBubbles';
-import { reduceAutomationStopped, stoppedFromLatch, stoppedFromOrders } from './state/stopAll';
+import {
+  pollSaysReleased,
+  reduceAutomationStopped,
+  stoppedFromLatch,
+  stoppedFromOrders,
+} from './state/stopAll';
 import {
   appendChunk,
   dropStream,
@@ -850,6 +856,42 @@ export default function App() {
       cancelled = true;
     };
   }, []);
+
+  // M3 follow-up (beta re-verification): POST /api/automation/resume never
+  // broadcasts over WS — only the stop-all route does (server/src/
+  // httpServer.ts) — so a client showing the M3 ENGAGED banner has no push
+  // signal telling it another client already released automation. While
+  // `automationStopped` is true, poll the durable latch and clear locally
+  // on an explicit {engaged:false} (pollSaysReleased's own honesty rule: a
+  // failed or malformed poll changes nothing — never clear on absence of
+  // evidence). Stops polling the instant `automationStopped` goes false,
+  // whether from this clear, this client's own RESUME, or a real WS
+  // engage/resume broadcast. `inFlightRef` skips starting a new poll while
+  // one is still pending, so a slow response can never overlap a fresh one.
+  const stopAllPollInFlightRef = useRef(false);
+  useEffect(() => {
+    if (!automationStopped) return;
+    let cancelled = false;
+    const poll = () => {
+      if (stopAllPollInFlightRef.current) return;
+      stopAllPollInFlightRef.current = true;
+      void fetch('/api/automation/stop-all-state')
+        .then(async (res) => (res.ok ? ((await res.json()) as unknown) : null))
+        .then((body) => {
+          if (cancelled) return;
+          if (pollSaysReleased(body)) setAutomationStopped(false);
+        })
+        .catch(() => undefined)
+        .finally(() => {
+          stopAllPollInFlightRef.current = false;
+        });
+    };
+    const timer = setInterval(poll, STOP_ALL_EXTERNAL_RESUME_POLL_MS);
+    return () => {
+      cancelled = true;
+      clearInterval(timer);
+    };
+  }, [automationStopped]);
 
   // Age tick — board ages, poll TTLs (fires go out when a poll expires),
   // and lapsed ACK undo windows committing for real (instance-matched:

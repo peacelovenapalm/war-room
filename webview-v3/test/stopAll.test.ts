@@ -4,6 +4,7 @@ import {
   interpretResumeResponse,
   interpretStopAllResponse,
   isExternalStopTransition,
+  pollSaysReleased,
   reduceAutomationStopped,
   stoppedFromOrders,
 } from '../src/state/stopAll';
@@ -100,5 +101,23 @@ describe('isExternalStopTransition (M3: a local receipt must never survive an ex
     // local receipt/confirm-arm must be cleared.
     expect(isExternalStopTransition(false, true)).toBe(true);
     expect(isExternalStopTransition(true, false)).toBe(true);
+  });
+});
+
+describe('pollSaysReleased (M3 follow-up: external RESUME never broadcasts, so App.tsx polls to clear the ENGAGED banner)', () => {
+  it('clears ONLY on an explicit engaged:false', () => {
+    expect(pollSaysReleased({ engaged: false })).toBe(true);
+  });
+
+  it('never clears on engaged:true, obviously', () => {
+    expect(pollSaysReleased({ engaged: true })).toBe(false);
+  });
+
+  it('never clears on a malformed, missing, or non-boolean body — never clear on absence of evidence', () => {
+    expect(pollSaysReleased(null)).toBe(false);
+    expect(pollSaysReleased(undefined)).toBe(false);
+    expect(pollSaysReleased({})).toBe(false);
+    expect(pollSaysReleased({ engaged: 'false' })).toBe(false);
+    expect(pollSaysReleased('released')).toBe(false);
   });
 });
