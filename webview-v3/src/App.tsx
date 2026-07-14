@@ -139,8 +139,8 @@ import {
   type TailMap,
 } from './state/tailStore';
 import {
-  detectToolNameChanges,
   EMPTY_TOOL_ACTIVITY,
+  reconcileToolNameChanges,
   reduceToolActivity,
   type ToolActivityMap,
   toolNameSnapshot,
@@ -295,7 +295,7 @@ export default function App() {
   // onMessage callback below alongside agentsRef (same ref-is-truth,
   // useState-mirrors-for-render split as every other WS-reduced value).
   const toolActivityRef = useRef<ToolActivityMap>(EMPTY_TOOL_ACTIVITY);
-  const prevToolNamesRef = useRef<Map<number, string | undefined>>(new Map());
+  const prevToolNamesRef = useRef<ReadonlyMap<number, string | undefined>>(new Map());
   const crisisRef = useRef<CrisisState>(EMPTY_CRISIS_STATE);
   const reconnectReplayRef = useRef<ReconnectReplay | null>(null);
   const reconnectReplayTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
@@ -813,6 +813,8 @@ export default function App() {
       const at = Date.now();
       setStatusNow(at);
       applyCrisis(reduceCrisisState(crisisRef.current, agentsRef.current, at));
+      setToolActivity(toolActivityRef.current);
+      prevToolNamesRef.current = toolNameSnapshot(toolActivityRef.current);
     },
     [applyCrisis],
   );
@@ -870,9 +872,14 @@ export default function App() {
         const nextToolActivity = reduceToolActivity(toolActivityRef.current, message, at);
         if (nextToolActivity !== toolActivityRef.current) {
           toolActivityRef.current = nextToolActivity;
-          setToolActivity(nextToolActivity);
-          const toolChanges = detectToolNameChanges(prevToolNamesRef.current, nextToolActivity);
-          prevToolNamesRef.current = toolNameSnapshot(nextToolActivity);
+          const toolNameChanges = reconcileToolNameChanges(
+            prevToolNamesRef.current,
+            nextToolActivity,
+            reconnectReplay !== null,
+          );
+          prevToolNamesRef.current = toolNameChanges.names;
+          if (reconnectReplay === null) setToolActivity(nextToolActivity);
+          const toolChanges = toolNameChanges.changes;
           if (toolChanges.length > 0) {
             setSpeechBubbles((prev) => {
               let next = prev;

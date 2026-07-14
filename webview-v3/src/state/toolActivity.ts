@@ -279,6 +279,29 @@ export function detectToolNameChanges(
   return out;
 }
 
+export interface ToolNameChangeReconciliation {
+  changes: readonly { agentId: number; toolName: string }[];
+  names: ReadonlyMap<number, string | undefined>;
+}
+
+/**
+ * Reconnect replay is a snapshot, not a sequence of newly-started tools.
+ * While that transaction is open, preserve the pre-disconnect name baseline
+ * and suppress change events; the caller replaces the baseline with one
+ * final snapshot when the replay settles.
+ */
+export function reconcileToolNameChanges(
+  prevNames: ReadonlyMap<number, string | undefined>,
+  next: ToolActivityMap,
+  reconnectReplayInFlight: boolean,
+): ToolNameChangeReconciliation {
+  if (reconnectReplayInFlight) return { changes: [], names: prevNames };
+  return {
+    changes: detectToolNameChanges(prevNames, next),
+    names: toolNameSnapshot(next),
+  };
+}
+
 /** Current id→current-tool-name snapshot — callers carry this forward as
  *  next tick's `prevNames` for detectToolNameChanges. */
 export function toolNameSnapshot(agents: ToolActivityMap): Map<number, string | undefined> {

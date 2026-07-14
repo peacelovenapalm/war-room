@@ -1,12 +1,14 @@
 import { describe, expect, it } from 'vitest';
 
 import type { ServerMessage } from '../../core/src/messages.js';
+import { reconnectReplayDeadline, reduceReconnectReplay } from '../src/state/reconnectReplay';
 import {
   currentActiveTool,
   deriveToolName,
   detectToolNameChanges,
   EMPTY_TOOL_ACTIVITY,
   RECENT_TOOLS_MAX,
+  reconcileToolNameChanges,
   reduceToolActivity,
   sortedSubagents,
   type ToolActivityMap,
@@ -240,6 +242,54 @@ describe('reduceToolActivity — reconnect epoch', () => {
     });
 
     expect(next).toBe(EMPTY_TOOL_ACTIVITY);
+  });
+
+  it('does not emit a tool-change event when replay re-announces a still-running tool', () => {
+    let activity = reduceToolActivity(
+      EMPTY_TOOL_ACTIVITY,
+      start({ toolName: 'Read' }),
+      1_000,
+    );
+    let names: ReadonlyMap<number, string | undefined> = toolNameSnapshot(activity);
+    const emitted: { agentId: number; toolName: string }[] = [];
+    const existing: ServerMessage = {
+      type: 'existingAgents',
+      agents: [1],
+      agentMeta: {},
+      folderNames: { '1': 'war-room' },
+      externalAgents: {},
+    };
+
+    // The old App path snapshot the existingAgents reset-to-empty state,
+    // then interpreted this same Read tool replay as a fresh rising edge.
+    const reset = reduceToolActivity(activity, existing, 2_000);
+    const resetNames = toolNameSnapshot(reset);
+    const reannounced = reduceToolActivity(reset, start({ toolName: 'Read' }), 2_002);
+    expect(detectToolNameChanges(resetNames, reannounced)).toEqual([
+      { agentId: 1, toolName: 'Read' },
+    ]);
+
+    // Production path: both frames live inside the shared replay transaction,
+    // so neither rewrites the notification baseline nor publishes an event.
+    let replay = reduceReconnectReplay(null, existing, 2_000)!;
+    activity = reset;
+    let reconciliation = reconcileToolNameChanges(names, activity, replay !== null);
+    emitted.push(...reconciliation.changes);
+    names = reconciliation.names;
+    expect(names.get(1)).toBe('Read');
+
+    const poll: ServerMessage = { type: 'agentPollState', id: 1, state: 'working' };
+    replay = reduceReconnectReplay(replay, poll, 2_001)!;
+    replay = reduceReconnectReplay(replay, start({ toolName: 'Read' }), 2_002)!;
+    activity = reannounced;
+    reconciliation = reconcileToolNameChanges(names, activity, replay !== null);
+    emitted.push(...reconciliation.changes);
+    names = reconciliation.names;
+
+    expect(reconnectReplayDeadline(replay)).toBeGreaterThan(2_002);
+    names = toolNameSnapshot(activity);
+    expect(names.get(1)).toBe('Read');
+    expect(emitted).toEqual([]);
   });
 });
 
