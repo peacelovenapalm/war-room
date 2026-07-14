@@ -1,12 +1,10 @@
-import { type CameraState, type Size, worldToCanvas } from '../engine/camera';
+import { worldToCanvas } from '../engine/camera';
 import { type ChipAnchor, declutterChips } from '../engine/chipLayout';
 import type { Occupant } from '../engine/world';
 import { occupiedDeskAnchors } from '../engine/world';
+import type { ChipFrame } from '../state/worldFrameStore';
 
-export interface ChipFrame {
-  camera: CameraState;
-  cssSize: Size;
-}
+export type { ChipFrame } from '../state/worldFrameStore';
 
 export interface ChipLayerProps {
   frame: ChipFrame | null;

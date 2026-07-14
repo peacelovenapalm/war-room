@@ -7,11 +7,9 @@ import { AgentDrawer } from './components/AgentDrawer';
 import { AutomationPanel } from './components/AutomationPanel';
 import { BriefingPanel } from './components/BriefingPanel';
 import { CallModal, type CallModalPrefill } from './components/CallModal';
-import { type ChipFrame, ChipLayer } from './components/ChipLayer';
 import { ContractsPanel } from './components/ContractsPanel';
 import { DebugView, type DiagnosticsRow } from './components/DebugView';
 import { DispatchTray } from './components/DispatchTray';
-import { DispatchVisitorChips } from './components/DispatchVisitorChips';
 import { DistrictsView } from './components/DistrictsView';
 import { FloorFeed } from './components/FloorFeed';
 import { GraphSearchPanel } from './components/GraphSearchPanel';
@@ -22,12 +20,11 @@ import { MorningPanel } from './components/MorningPanel';
 import { OpsReviewPanel } from './components/OpsReviewPanel';
 import { type DockPanelKind, PanelDock } from './components/PanelDock';
 import { PinDock } from './components/PinDock';
-import { PropHotspots } from './components/PropHotspots';
 import { RealSheet } from './components/RealSheet';
 import { SettingsModal } from './components/SettingsModal';
 import { ShiftPanel } from './components/ShiftPanel';
-import { SpeechBubbleLayer } from './components/SpeechBubbleLayer';
 import { TriageBoard } from './components/TriageBoard';
+import { WorldOverlay } from './components/WorldOverlay';
 import { STOP_ALL_EXTERNAL_RESUME_POLL_MS } from './constants';
 import {
   type CalmTransition,
@@ -42,8 +39,8 @@ import {
   gesturePointerDown,
   gesturePointerMove,
   gesturePointerUp,
-  gestureWheelZoom,
   type GestureState,
+  gestureWheelZoom,
 } from './engine/gesture';
 import type { HotspotKind } from './engine/hotspots';
 import { mapWorldBounds, tileToWorld } from './engine/iso';
@@ -141,6 +138,7 @@ import {
   type ToolActivityMap,
   toolNameSnapshot,
 } from './state/toolActivity';
+import { createWorldFrameStore } from './state/worldFrameStore';
 import { installTestHooksIfE2E } from './testHooks';
 
 /** Board/HUD age tick — visible aging without RAF churn (v1 convention). */
@@ -258,6 +256,7 @@ export default function App() {
   // createSpriteStore's "nothing fetched at construction" contract) —
   // real audio nodes only exist once the user actually unmutes.
   const [soundscapeEngine] = useState(() => createSoundscapeEngine());
+  const [worldFrameStore] = useState(createWorldFrameStore);
   const [soundscapeMuted, setSoundscapeMuted] = useState(() =>
     readSoundscapeMuted(typeof window === 'undefined' ? undefined : window.localStorage),
   );
@@ -328,7 +327,6 @@ export default function App() {
   const [drawerAgentId, setDrawerAgentId] = useState<number | null>(null);
   const [realKind, setRealKind] = useState<RealSheetKind | null>(null);
   const [now, setNow] = useState(() => Date.now());
-  const [chipFrame, setChipFrame] = useState<ChipFrame | null>(null);
 
   // ── Stage-3 panel ports ──────────────────────────────────────────
   const [openPanel, setOpenPanel] = useState<DockPanelKind | null>(null);
@@ -355,7 +353,9 @@ export default function App() {
   const prevLoudAgentIdsRef = useRef<ReadonlySet<number>>(new Set());
   const prevDispatchStatusesRef = useRef<ReadonlyMap<string, DispatchEntry['status']>>(new Map());
   const floorFeedVisible = phoneLayout && view === 'floor';
-  floorFeedVisibleRef.current = floorFeedVisible;
+  useEffect(() => {
+    floorFeedVisibleRef.current = floorFeedVisible;
+  }, [floorFeedVisible]);
 
   const occupants = useMemo(() => toOccupants(agents, now), [agents, now]);
   const occupantsRef = useRef(occupants);
@@ -486,17 +486,8 @@ export default function App() {
     renderCountRef.current += 1;
     lastResolutionRef.current = resolution;
     lastCameraRef.current = camera;
-    setChipFrame((previous) =>
-      previous !== null &&
-      previous.camera.zoom === camera.zoom &&
-      previous.camera.offsetX === camera.offsetX &&
-      previous.camera.offsetY === camera.offsetY &&
-      previous.cssSize.width === cssSize.width &&
-      previous.cssSize.height === cssSize.height
-        ? previous
-        : { camera, cssSize },
-    );
-  }, [propStore, characterStore, imageStore]);
+    worldFrameStore.publish({ camera, cssSize });
+  }, [propStore, characterStore, imageStore, worldFrameStore]);
 
   /** Kick the RAF loop that advances an in-flight camera walk (▸ DESK or a
    *  T6 panel-open flight — either keeps this loop alive). */
@@ -1430,26 +1421,14 @@ export default function App() {
             onPointerCancel={handlePointerUp}
             onWheel={handleWheel}
           />
-          <ChipLayer
-            frame={chipFrame}
+          <WorldOverlay
+            store={worldFrameStore}
             occupants={occupants}
-            onChipClick={handleDesk}
-            alwaysShowLabels={settings?.alwaysShowLabels ?? true}
-          />
-          <DispatchVisitorChips frame={chipFrame} visitors={dispatchVisitors} />
-          <SpeechBubbleLayer
-            frame={chipFrame}
+            visitors={dispatchVisitors}
             bubbles={visibleSpeechBubbles}
-            occupants={occupants}
-            onTapAgent={handleDesk}
-          />
-          {/* Room-is-interface half of the desktop chrome model — desktop
-              only (CSS-hidden on phone, matching the pin dock's own
-              breakpoint: no free camera play there). */}
-          <PropHotspots
-            frame={chipFrame}
-            onOpen={handleOpenHotspot}
             alwaysShowLabels={settings?.alwaysShowLabels ?? true}
+            onDesk={handleDesk}
+            onOpenHotspot={handleOpenHotspot}
           />
         </div>
         <TriageBoard
