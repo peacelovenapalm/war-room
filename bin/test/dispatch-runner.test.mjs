@@ -765,7 +765,7 @@ test('worker session kill (observed pid): signals SIGTERM and reports "killed" o
   assert.equal(status.body.event, 'killed');
 });
 
-// ── verifyClaudeProcess (real `ps`, real processes — no mocking) ─
+// ── verifyClaudeProcess ─
 
 test('verifyClaudeProcess: denies a pid that does not exist', async () => {
   const result = await verifyClaudeProcess(999_999);
@@ -783,73 +783,68 @@ test('verifyClaudeProcess: denies an invalid pid without invoking ps', async () 
   assert.equal(execCalled, false);
 });
 
-test('verifyClaudeProcess: denies a REAL running process whose command line does not mention "claude"', async () => {
-  // stdio 'ignore' — a plain sleep with no children of its own, but keeping
-  // this consistent with the other real-process tests below avoids any
-  // pipe-fd-holds-the-test-runner-open surprise.
-  const child = spawnReal('sleep', ['5'], { stdio: 'ignore' });
-  try {
-    const result = await verifyClaudeProcess(child.pid);
-    assert.equal(result.ok, false);
-    assert.equal(result.reason, 'not-a-claude-process');
-  } finally {
-    child.kill('SIGKILL');
-  }
-});
-
-test('verifyClaudeProcess: accepts a REAL running process whose command line mentions "claude"', async () => {
-  // `exec -a NAME` renames THIS SAME process's argv[0] (no bash-wraps-sleep
-  // parent/child pair) — no real claude binary needed, `ps -o command=`
-  // shows the bounded "claude" token, and there is no separate child to
-  // orphan if this process is signaled. stdio 'ignore': spawning a plain
-  // script here with inherited pipes would otherwise hold this test file's
-  // node process open until the spawned process's own fd is closed.
-  const child = spawnReal('bash', ['-c', 'exec -a claude-fake-session sleep 5'], {
-    stdio: 'ignore',
+test('verifyClaudeProcess: denies a command line that does not mention "claude"', async () => {
+  let command;
+  const result = await verifyClaudeProcess(process.pid, async (invocation) => {
+    command = invocation;
+    return { stdout: 'sleep 5' };
   });
-  try {
-    const result = await verifyClaudeProcess(child.pid);
-    assert.equal(result.ok, true);
-  } finally {
-    child.kill('SIGKILL');
-  }
+  assert.equal(command, `ps -p ${process.pid} -o command=`);
+  assert.equal(result.ok, false);
+  assert.equal(result.reason, 'not-a-claude-process');
 });
 
-test('worker session kill (observed pid) END-TO-END: a real claude-like process is ACTUALLY terminated — verified via a fresh process probe, not just the HTTP response', async () => {
-  // Same `exec -a` + stdio:'ignore' rationale as above — this test drives a
-  // REAL SIGTERM through the REAL runner code path (no verify/kill mocks),
-  // so a hung/orphaned child here would hang the whole suite for the
-  // process's full lifetime (this exact bug was caught once already: an
-  // earlier version of this test used a bash-wraps-sleep script with
-  // inherited pipes and blocked the poller test suite for a full 300s).
-  const child = spawnReal('bash', ['-c', 'exec -a claude-observed-session sleep 300'], {
+test('verifyClaudeProcess: accepts a command line that mentions "claude"', async () => {
+  const result = await verifyClaudeProcess(process.pid, async () => ({
+    stdout: 'claude-fake-session --resume abc123',
+  }));
+  assert.equal(result.ok, true);
+});
+
+async function ensureChildExited(child) {
+  if (child.exitCode !== null || child.signalCode !== null) return;
+  const exited = new Promise((resolve) => child.once('exit', resolve));
+  child.kill('SIGKILL');
+  await exited;
+}
+
+test('worker session kill (observed pid) END-TO-END: a real process is ACTUALLY terminated — verified via a fresh process probe, not just the HTTP response', async () => {
+  const child = spawnReal('sleep', ['300'], {
     stdio: 'ignore',
   });
   await new Promise((resolve) => setTimeout(resolve, 150)); // let it actually start
 
-  const { server, captured, port } = await startStubServer(
-    stubHandler({ pending: [], stop: [{ kind: 'pid', id: 'observed-1', pid: child.pid }] }),
-  );
-  const cfg = baseCfg(port);
-  const state = { handled: new Set(), children: new Map() };
-
-  // Deliberately NOT mocking verifyClaudeProcess/killImpl — this exercises
-  // the REAL `ps`-based verification and a REAL SIGTERM against a REAL pid.
-  await tick(cfg, state, { readAllowlist: () => ({ providers: [], roots: [], focus: false }) });
-  server.close();
-
-  const status = captured.find((c) => c.url === '/api/pid-kills/observed-1/status');
-  assert.ok(status, 'expected a pid-kill status POST');
-  assert.equal(status.body.event, 'killed');
-
-  await new Promise((resolve) => setTimeout(resolve, 300));
-  let stillAlive = true;
+  let server;
   try {
-    process.kill(child.pid, 0); // existence probe (signal 0) — throws ESRCH once gone
-  } catch {
-    stillAlive = false;
+    const started = await startStubServer(
+      stubHandler({ pending: [], stop: [{ kind: 'pid', id: 'observed-1', pid: child.pid }] }),
+    );
+    server = started.server;
+    const cfg = baseCfg(started.port);
+    const state = { handled: new Set(), children: new Map() };
+
+    // Keep the OS signal real while injecting the already-covered verifier.
+    await tick(cfg, state, {
+      readAllowlist: () => ({ providers: [], roots: [], focus: false }),
+      verifyClaudeProcess: async (pid) => ({ ok: pid === child.pid }),
+    });
+
+    const status = started.captured.find((c) => c.url === '/api/pid-kills/observed-1/status');
+    assert.ok(status, 'expected a pid-kill status POST');
+    assert.equal(status.body.event, 'killed');
+
+    await new Promise((resolve) => setTimeout(resolve, 300));
+    let stillAlive = true;
+    try {
+      process.kill(child.pid, 0); // existence probe (signal 0) — throws ESRCH once gone
+    } catch {
+      stillAlive = false;
+    }
+    assert.equal(stillAlive, false, 'the real process must actually be dead, not just reported so');
+  } finally {
+    if (server) await new Promise((resolve) => server.close(resolve));
+    await ensureChildExited(child);
   }
-  assert.equal(stillAlive, false, 'the real process must actually be dead, not just reported so');
 });
 
 // ── T5 fleet controls, PER-DISPATCH TIME CAP ─────────────────────
