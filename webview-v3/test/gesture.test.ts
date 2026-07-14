@@ -9,8 +9,8 @@ import {
   gesturePointerDown,
   gesturePointerMove,
   gesturePointerUp,
-  gestureWheelZoom,
   type GestureState,
+  gestureWheelZoom,
 } from '../src/engine/gesture';
 import { mapWorldBounds } from '../src/engine/iso';
 
