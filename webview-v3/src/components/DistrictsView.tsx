@@ -18,10 +18,22 @@ import {
   districtStatusGlyph,
   fetchDistricts,
   formatDistrictActivity,
+  formatDistrictAge,
   formatDistrictPhase,
   formatDistrictProgress,
+  isDistrictStale,
   isDistrictUnknown,
 } from '../net/districtFacts';
+
+/** Plain-text status word beside the plaque/info-card glyph (house rule:
+ *  shape + WORD, never a bare symbol). Mirrors districtStatusGlyph's own
+ *  branches exactly. */
+function districtStatusWord(progress: number | null): string {
+  if (progress === null) return 'UNKNOWN';
+  if (progress <= 0) return 'NOT STARTED';
+  if (progress >= 1) return 'COMPLETE';
+  return 'IN PROGRESS';
+}
 import { Modal } from './Modal';
 
 export interface DistrictsViewProps {
@@ -38,12 +50,15 @@ interface PlaquePoint {
   y: number;
 }
 
-function InfoCard({ project }: { project: DistrictProject }) {
+function InfoCard({ project, now }: { project: DistrictProject; now: number }) {
   const unknown = isDistrictUnknown(project);
+  const stale = !unknown && isDistrictStale(project.lastActivity, now);
   return (
     <div className="districts__info" data-testid="districts-info-card">
       <div className="districts__info-head">
-        <span>{districtStatusGlyph(project.progress)}</span>
+        <span>
+          {districtStatusGlyph(project.progress)} {districtStatusWord(project.progress)}
+        </span>
         <strong>{project.label}</strong>
       </div>
       {unknown ? (
@@ -54,6 +69,14 @@ function InfoCard({ project }: { project: DistrictProject }) {
         <>
           <div>Phase: {formatDistrictPhase(project.phase)}</div>
           <div>Progress: {formatDistrictProgress(project.progress)}</div>
+          {/* Minor finding: a 2-month-old timestamp read as fresh with no
+              staleness signal — shape+word+human age, raw ISO kept alongside
+              (never hide the real timestamp behind the human one). */}
+          {stale && (
+            <div className="modal__warn" data-testid="districts-stale">
+              ◷ STALE — last activity {formatDistrictAge(project.lastActivity, now)}
+            </div>
+          )}
           <div className="modal__muted">
             Last activity: {formatDistrictActivity(project.lastActivity)}
           </div>
@@ -80,6 +103,10 @@ export function DistrictsView({ isOpen, onClose }: DistrictsViewProps) {
   const [error, setError] = useState(false);
   const [selectedKey, setSelectedKey] = useState<string | null>(null);
   const [plaques, setPlaques] = useState<PlaquePoint[]>([]);
+  // Staleness check needs a "now" — captured once per open (matches the
+  // wasOpen reset pattern below) rather than a ticking clock; a district
+  // view is a poll-refreshed snapshot, not a live timer.
+  const [now] = useState(() => Date.now());
   const cameraRef = useRef<ReturnType<typeof fitToView> | null>(null);
 
   // Plots derived from whatever project list the server returns (v5 C1:
@@ -215,6 +242,19 @@ export function DistrictsView({ isOpen, onClose }: DistrictsViewProps) {
         {snapshot?.projects.map((project) => {
           const plaque = plaques.find((p) => p.key === project.key);
           if (!plaque) return null;
+          // Minor finding: plaques showed only a glyph + project name, no
+          // state WORD. A full word beside the glyph risks re-widening the
+          // plaque and regressing the v5R overlap fix (columns sit exactly
+          // 64 world px apart, tuned against the CURRENT glyph+truncated-
+          // label footprint) — so the word travels as an accessible label
+          // (title + aria-label, always available) plus a single extra
+          // glyph char for the STALE case only, which the collision fix
+          // already budgets a stagger for.
+          const stale = !isDistrictUnknown(project) && isDistrictStale(project.lastActivity, now);
+          const word = districtStatusWord(project.progress);
+          const a11yLabel = stale
+            ? `${project.label} — ${word} — STALE`
+            : `${project.label} — ${word}`;
           return (
             <button
               type="button"
@@ -222,19 +262,22 @@ export function DistrictsView({ isOpen, onClose }: DistrictsViewProps) {
               className="districts__plaque"
               data-testid={`districts-plaque-${project.key}`}
               style={{ left: `${String(plaque.x)}px`, top: `${String(plaque.y)}px` }}
+              title={a11yLabel}
+              aria-label={a11yLabel}
               onClick={() => {
                 setSelectedKey(project.key);
               }}
             >
               <span className="districts__plaque-glyph">
                 {districtStatusGlyph(project.progress)}
+                {stale && <span data-testid={`districts-plaque-stale-${project.key}`}>◷</span>}
               </span>
               <span className="districts__plaque-label">{project.label}</span>
             </button>
           );
         })}
       </div>
-      {selectedProject && <InfoCard project={selectedProject} />}
+      {selectedProject && <InfoCard project={selectedProject} now={now} />}
     </Modal>
   );
 }

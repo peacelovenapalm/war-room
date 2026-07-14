@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 
 import {
   formatEntryAge,
@@ -55,6 +55,7 @@ export function InboxPanel({ isOpen, onClose }: InboxPanelProps) {
   const [openEntry, setOpenEntry] = useState<InboxEntry | null>(null);
   const [content, setContent] = useState<string | null>(null);
   const [contentError, setContentError] = useState(false);
+  const contentRef = useRef<HTMLDivElement | null>(null);
 
   const [wasOpen, setWasOpen] = useState(isOpen);
   if (isOpen !== wasOpen) {
@@ -89,6 +90,15 @@ export function InboxPanel({ isOpen, onClose }: InboxPanelProps) {
       clearInterval(interval);
     };
   }, [isOpen]);
+
+  // Minor finding: tapping a row appended the body after the entire long
+  // list with scrollTop untouched, so the tap looked inert until the user
+  // manually scrolled the whole modal down. Scroll the newly-opened content
+  // into view the moment it mounts.
+  useEffect(() => {
+    if (!openEntry) return;
+    contentRef.current?.scrollIntoView({ block: 'nearest' });
+  }, [openEntry]);
 
   useEffect(() => {
     if (!openEntry) return;
@@ -149,7 +159,7 @@ export function InboxPanel({ isOpen, onClose }: InboxPanelProps) {
       )}
 
       {openEntry && (
-        <div className="inbox__content" data-testid="inbox-content">
+        <div className="inbox__content" data-testid="inbox-content" ref={contentRef}>
           <div className="inbox__content-head">
             {routineGlyph(openEntry.routine)} {openEntry.routine} / {openEntry.filename}
           </div>

@@ -147,7 +147,10 @@ function FindingRow({
         <span className="ops-finding__severity">
           {glyph} {word}
         </span>
-        <span className="ops-finding__summary">{finding.summary}</span>
+        {/* Minor finding: with no separator these two spans rendered
+            glued together ("⚠ WARNagent 7 blocked…") — the severity word
+            and the message need a visible boundary. */}
+        <span className="ops-finding__summary">— {finding.summary}</span>
       </button>
       {expanded && (
         <div className="ops-finding__body" data-testid="ops-finding-detail">
@@ -253,8 +256,12 @@ function SelfHealSection({
           const enabled = status.flags[cls];
           return (
             <li key={cls} data-testid={`ops-self-heal-flag-${cls}`} data-enabled={enabled}>
+              {/* Minor finding: the DISABLE/ENABLE action button implies
+                  the current state (an inverse-labeled toggle), but the
+                  house rule wants the state itself spelled out as a word,
+                  not just implied by which action is offered. */}
               <span>
-                {enabled ? '●' : '○'} {cls}
+                {enabled ? '●' : '○'} {cls} — {enabled ? 'ON' : 'OFF'}
               </span>
               <button
                 type="button"

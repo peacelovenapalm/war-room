@@ -12,11 +12,7 @@ export interface ContractClient {
   payoutRep: number;
   status: 'open' | 'completed' | 'expired';
   completionMethod?:
-    | 'todo-disappeared'
-    | 'gate-flipped'
-    | 'dispatch-result'
-    | 'manual-claim'
-    | 'daily-auto';
+    'todo-disappeared' | 'gate-flipped' | 'dispatch-result' | 'manual-claim' | 'daily-auto';
   createdAt: number;
   deadlineAt?: number;
   completedAt?: number;
@@ -46,11 +42,15 @@ function isRealContract(c: ContractClient): boolean {
   return c.source === 'priority' || c.source === 'backlog' || c.source === 'gate';
 }
 
-function contractWord(c: ContractClient): string {
+function contractWord(c: ContractClient, reissued: boolean): string {
   if (c.completionMethod === 'manual-claim') return 'CLAIMED (unverified)';
   if (c.status === 'completed') return `${SOURCE_LABEL[c.source]} · DONE`;
   if (c.status === 'expired') return `${SOURCE_LABEL[c.source]} · EXPIRED`;
-  return SOURCE_LABEL[c.source];
+  // Minor finding: the SAME underlying sourceKey can show up as an open
+  // contract AND a completed one (a daily/gate cycle re-issuing after a
+  // prior completion) with no explanation — the honest fix is to say so,
+  // not to guess whether it's really the same work or hide one copy.
+  return reissued ? `${SOURCE_LABEL[c.source]} · REISSUED` : SOURCE_LABEL[c.source];
 }
 
 export interface ContractsPanelProps {
@@ -93,6 +93,9 @@ export function ContractsPanel({ isOpen, onClose, onDispatchContract }: Contract
     .filter((c) => c.status !== 'open')
     .sort((a, b) => (b.completedAt ?? b.expiredAt ?? 0) - (a.completedAt ?? a.expiredAt ?? 0))
     .slice(0, 10);
+  const completedSourceKeys = new Set(
+    contracts.filter((c) => c.status === 'completed').map((c) => c.sourceKey),
+  );
 
   const handleClaim = (id: string) => {
     void fetch(`/api/contracts/${encodeURIComponent(id)}/claim`, { method: 'POST' })
@@ -117,7 +120,7 @@ export function ContractsPanel({ isOpen, onClose, onDispatchContract }: Contract
           <div key={c.id} className="automation-card" data-testid="contract-row">
             <div className="automation-card--row">
               <span className={isRealContract(c) ? 'signal-chip' : 'signal-chip signal-chip--sim'}>
-                {SOURCE_GLYPH[c.source]} {contractWord(c)}
+                {SOURCE_GLYPH[c.source]} {contractWord(c, completedSourceKeys.has(c.sourceKey))}
               </span>
               <span>
                 ${c.payoutCash}
@@ -155,7 +158,7 @@ export function ContractsPanel({ isOpen, onClose, onDispatchContract }: Contract
           {resolved.map((c) => (
             <div key={c.id} className="automation-card--row" data-testid="contract-row-resolved">
               <span className={isRealContract(c) ? 'signal-chip' : 'signal-chip signal-chip--sim'}>
-                {SOURCE_GLYPH[c.source]} {contractWord(c)}
+                {SOURCE_GLYPH[c.source]} {contractWord(c, false)}
               </span>
               <span className="modal__muted">{c.title}</span>
             </div>

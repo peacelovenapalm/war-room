@@ -61,6 +61,43 @@ export function formatDistrictActivity(lastActivity: string | null): string {
   return lastActivity && lastActivity.length > 0 ? lastActivity : 'no recorded activity';
 }
 
+/** Minor finding: a 2-month-old "Last activity" timestamp rendered with no
+ *  staleness signal — the raw ISO string reads as fresh unless you do the
+ *  math yourself. Past this window, a district's last-activity fact is
+ *  flagged STALE (shape+word, colorblind hard rule) rather than silently
+ *  trusted. 14 days: long enough that a normal multi-day pause between
+ *  milestones doesn't false-positive, short enough to actually catch a
+ *  genuinely abandoned district (the reported case was ~2 months). */
+export const DISTRICT_STALE_MS = 14 * 24 * 60 * 60 * 1000;
+
+/** true when `lastActivity` parses and is older than DISTRICT_STALE_MS.
+ *  An absent/unparseable timestamp is NOT "stale" — that's the separate
+ *  "no recorded activity" honest-omission case above, never conflated with
+ *  "old data". */
+export function isDistrictStale(lastActivity: string | null, now: number): boolean {
+  if (!lastActivity) return false;
+  const ts = Date.parse(lastActivity);
+  if (Number.isNaN(ts)) return false;
+  return now - ts > DISTRICT_STALE_MS;
+}
+
+/** Human-readable age for the STALE badge — "2mo ago" / "16d ago" / "3h
+ *  ago" — distinct from formatAge's mm:ss timer format (state/crisis.ts),
+ *  which is built for minutes/hours, not the weeks-to-months range a
+ *  district's last activity can honestly span. */
+export function formatDistrictAge(lastActivity: string | null, now: number): string {
+  if (!lastActivity) return '—';
+  const ts = Date.parse(lastActivity);
+  if (Number.isNaN(ts)) return '—';
+  const ms = Math.max(0, now - ts);
+  const days = Math.floor(ms / (24 * 60 * 60 * 1000));
+  if (days >= 60) return `${String(Math.floor(days / 30))}mo ago`;
+  if (days >= 1) return `${String(days)}d ago`;
+  const hours = Math.floor(ms / (60 * 60 * 1000));
+  if (hours >= 1) return `${String(hours)}h ago`;
+  return '<1h ago';
+}
+
 /** true when the provider had no configured/readable STATE.md for this
  *  project (server's source:'unknown' sentinel) — drives the
  *  desaturated-placeholder palette and an explicit "NO DATA" plaque line. */
