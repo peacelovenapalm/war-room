@@ -34,6 +34,12 @@ function roster(...messages: ServerMessage[]): AgentMap {
 }
 
 describe('reduceCrisisState', () => {
+  it('returns the same state when a reduction changes no crisis data', () => {
+    const agents = roster();
+    const first = reduceCrisisState(EMPTY_CRISIS_STATE, agents, NOW);
+    expect(reduceCrisisState(first, agents, NOW + 1_000)).toBe(first);
+  });
+
   it('starts a fire for a needs-input agent, server-anchored via the poll', () => {
     const agents = roster({
       type: 'agentPollState',

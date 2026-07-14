@@ -65,6 +65,7 @@ import { type ConnectionStatus, connectToServer, type ServerConnection } from '.
 import {
   clearTerminalDispatchEntries,
   detectSendFailures,
+  DISPATCH_SEND_TIMEOUT_MS,
   type DispatchActionValue,
   type DispatchEntry,
   type PendingSend,
@@ -112,6 +113,7 @@ import {
   dispatchStatusSnapshot,
   loudAgentIds,
   pruneSpeechBubbles,
+  SPEECH_BUBBLE_TTL_MS,
   type SpeechBubbleEvent,
 } from './state/speechBubbles';
 import {
@@ -138,11 +140,12 @@ import {
   type ToolActivityMap,
   toolNameSnapshot,
 } from './state/toolActivity';
+import { POLL_STATE_TTL_MS } from './state/visualState';
 import { createWorldFrameStore } from './state/worldFrameStore';
 import { installTestHooksIfE2E } from './testHooks';
 
-/** Board/HUD age tick — visible aging without RAF churn (v1 convention). */
-const TICK_MS = 500;
+/** Canvas-only ambient animation cadence (20fps). */
+const AMBIENT_FRAME_MS = 50;
 /** How long the DOCK FULL rejection stays on screen. */
 const DOCK_NOTICE_MS = 3_000;
 
@@ -280,7 +283,7 @@ export default function App() {
   const dispatchVisitorsRef = useRef<DispatchVisitor[]>([]);
   const calmRef = useRef<CalmTransition>(INITIAL_CALM);
   // Source-of-truth refs for values reduced OUTSIDE render (WS callbacks +
-  // the age tick); the matching useState mirrors them for rendering.
+  // deadline timers); the matching useState mirrors them for rendering.
   const agentsRef = useRef<AgentMap>(EMPTY_AGENTS);
   // T1c (FACE-MERGE-PLAN.md) — tool/subagent activity, reduced in the WS
   // onMessage callback below alongside agentsRef (same ref-is-truth,
@@ -291,6 +294,7 @@ export default function App() {
   const acksRef = useRef<AckState>(EMPTY_ACKS);
   const dispatchEntriesRef = useRef<DispatchEntry[]>([]);
   const pendingSendsRef = useRef<PendingSend[]>([]);
+  const pendingSendTimersRef = useRef<Set<ReturnType<typeof setTimeout>>>(new Set());
   const tailsRef = useRef<TailMap>(EMPTY_TAILS);
   const tailFlushRafRef = useRef<number | null>(null);
   const pendingFloorFeedChunksRef = useRef<{ message: OutputChunk; label: string; at: number }[]>(
@@ -326,7 +330,7 @@ export default function App() {
   const [dockNotice, setDockNotice] = useState<string | null>(null);
   const [drawerAgentId, setDrawerAgentId] = useState<number | null>(null);
   const [realKind, setRealKind] = useState<RealSheetKind | null>(null);
-  const [now, setNow] = useState(() => Date.now());
+  const [statusNow, setStatusNow] = useState(() => Date.now());
 
   // ── Stage-3 panel ports ──────────────────────────────────────────
   const [openPanel, setOpenPanel] = useState<DockPanelKind | null>(null);
@@ -357,7 +361,7 @@ export default function App() {
     floorFeedVisibleRef.current = floorFeedVisible;
   }, [floorFeedVisible]);
 
-  const occupants = useMemo(() => toOccupants(agents, now), [agents, now]);
+  const occupants = useMemo(() => toOccupants(agents, statusNow), [agents, statusNow]);
   const occupantsRef = useRef(occupants);
   // T6 item 1 — render-time mirror of dispatchVisitorsRef for the DOM chip
   // layer (the canvas world reads the ref inside draw(); this memo is only
@@ -604,8 +608,8 @@ export default function App() {
   // requests lazily from inside draw() only once it's actually needed.
   // Each store's onChange fires draw() again the moment its sheet lands,
   // so real art pops in as soon as it decodes instead of waiting for the
-  // next unrelated redraw (the 500ms age tick would eventually catch it,
-  // but this is snappier and costs nothing extra — request()/get() are
+  // next unrelated redraw. This is immediate and costs nothing extra —
+  // request()/get() are
   // idempotent no-ops once a sheet is loaded).
   useEffect(() => {
     propStore.request(STATIC_PROP_SPRITE_NAMES);
@@ -648,13 +652,15 @@ export default function App() {
     };
   }, [draw]);
 
-  // Redraw when occupancy/agents/crisis change, AND on the 500ms age tick
-  // (`now`) so ambient walker motion + the calm-channel lerp actually
-  // advance between real-state changes (draw() itself stays a stable ref-
-  // reading callback for the ResizeObserver above).
+  // Refresh frame inputs on real state changes. A separate canvas-only
+  // cadence below advances animation without putting time in App state.
   useEffect(() => {
     occupantsRef.current = occupants;
-    walkerInputsRef.current = classifyWalkerAgents(occupiedDeskAnchors(occupants), agents, now);
+    walkerInputsRef.current = classifyWalkerAgents(
+      occupiedDeskAnchors(occupants),
+      agents,
+      Date.now(),
+    );
     dispatchVisitorsRef.current = deriveDispatchVisitors(dispatchEntries);
     calmRef.current = updateCalmTransition(calmRef.current, openCrisisCount(crisis), Date.now());
 
@@ -705,25 +711,46 @@ export default function App() {
     });
 
     draw();
-  }, [draw, occupants, agents, crisis, now, dispatchEntries, soundscapeEngine]);
+  }, [draw, occupants, agents, crisis, dispatchEntries, soundscapeEngine]);
 
-  // TTL is applied at RENDER time off the existing `now` age tick (not a
-  // second effect+setState) — appendSpeechBubble already caps the
-  // underlying state at MAX_CONCURRENT_BUBBLES, so there's nothing to
-  // proactively garbage-collect, only what's currently worth SHOWING.
-  const visibleSpeechBubbles = useMemo(
-    () => pruneSpeechBubbles(speechBubbles, now),
-    [speechBubbles, now],
-  );
+  useEffect(() => {
+    if (connectionStatus !== 'live') return;
+    let frameId = 0;
+    let lastPaint = 0;
+    const step = (timestamp: number) => {
+      if (timestamp - lastPaint >= AMBIENT_FRAME_MS) {
+        lastPaint = timestamp;
+        draw();
+      }
+      frameId = requestAnimationFrame(step);
+    };
+    frameId = requestAnimationFrame(step);
+    return () => cancelAnimationFrame(frameId);
+  }, [connectionStatus, draw]);
 
-  /** Ack-state writes go through here so the tick's sweep sees them. */
+  useEffect(() => {
+    if (speechBubbles.length === 0) return;
+    const nextExpiry = Math.min(
+      ...speechBubbles.map((bubble) => bubble.createdAt + SPEECH_BUBBLE_TTL_MS),
+    );
+    const timer = setTimeout(
+      () => {
+        setSpeechBubbles((previous) => pruneSpeechBubbles(previous, Date.now()));
+      },
+      Math.max(0, nextExpiry - Date.now() + 1),
+    );
+    return () => clearTimeout(timer);
+  }, [speechBubbles]);
+  const visibleSpeechBubbles = speechBubbles;
+
+  /** Ack-state writes go through here so the deadline sweep sees them. */
   const applyAcks = useCallback((next: AckState) => {
     acksRef.current = next;
     setAcks(next);
   }, []);
 
   /** Crisis-state writes go through here — like agentsRef, the ref is the
-   *  source of truth (reduced in WS callbacks + the age tick, outside
+   *  source of truth (reduced in WS callbacks + deadline timers, outside
    *  render) and the useState mirrors it for rendering. sweepAcks needs to
    *  read the CURRENT crisis synchronously to match ack instances. */
   const applyCrisis = useCallback((next: CrisisState) => {
@@ -780,7 +807,7 @@ export default function App() {
   }, []);
 
   // Live server plane (core/ generated message types) + tail manager. The
-  // crisis state machine reduces HERE (and on the age tick below) — agents
+  // crisis state machine reduces HERE (and on freshness deadlines below) — agents
   // are reduced outside render, so the ref is the source of truth.
   useEffect(() => {
     const connection = connectToServer({
@@ -790,6 +817,7 @@ export default function App() {
         if (nextAgents !== agentsRef.current) {
           agentsRef.current = nextAgents;
           setAgents(nextAgents);
+          setStatusNow(at);
           applyCrisis(reduceCrisisState(crisisRef.current, nextAgents, at));
         }
         // T1c — tool/subagent activity (state/toolActivity.ts), ported
@@ -986,45 +1014,61 @@ export default function App() {
     };
   }, [automationStopped]);
 
-  // Age tick — board ages, poll TTLs (fires go out when a poll expires),
-  // and lapsed ACK undo windows committing for real (instance-matched:
-  // sweepAcks never lets a stale ack sweep a NEW failure reusing its key,
-  // and drops acks whose debris was deleted — crisisStore.ts).
+  // Crisis freshness and ACK expiry run at their actual next deadline,
+  // rather than polling the whole application twice a second.
   useEffect(() => {
-    const timer = setInterval(() => {
-      const at = Date.now();
-      setNow(at);
-      const reduced = reduceCrisisState(crisisRef.current, agentsRef.current, at);
-      const swept = sweepAcks(reduced, acksRef.current, at);
-      if (swept.acks !== acksRef.current) applyAcks(swept.acks);
-      applyCrisis(swept.crisis);
-      // dispatchRequest has no ack on the wire — a send with no matching
-      // dispatchUpdate within DISPATCH_SEND_TIMEOUT_MS is honestly reported
-      // as "not queued" rather than silently doing nothing.
-      if (pendingSendsRef.current.length > 0) {
-        const { stillPending, failed } = detectSendFailures(
-          pendingSendsRef.current,
-          dispatchEntriesRef.current,
-          at,
-        );
-        pendingSendsRef.current = stillPending;
-        if (failed.length > 0) {
-          setSendFailures((previous) => [
-            ...previous,
-            ...failed.map((f) => ({
-              id: f.id,
-              machine: f.machine,
-              action: f.action,
-              detectedAt: at,
-            })),
-          ]);
-        }
-      }
-    }, TICK_MS);
-    return () => {
-      clearInterval(timer);
-    };
-  }, [applyAcks, applyCrisis]);
+    const at = Date.now();
+    const deadlines = [
+      ...[...agents.values()].flatMap((record) =>
+        record.poll && !record.poll.stale && record.poll.receivedAt + POLL_STATE_TTL_MS + 1 > at
+          ? [record.poll.receivedAt + POLL_STATE_TTL_MS + 1]
+          : [],
+      ),
+      ...[...acks.values()].map((ack) => ack.undoUntil),
+    ];
+    if (deadlines.length === 0) return;
+    const nextDeadline = Math.min(...deadlines);
+    const timer = setTimeout(
+      () => {
+        const at = Date.now();
+        setStatusNow(at);
+        const reduced = reduceCrisisState(crisisRef.current, agentsRef.current, at);
+        const swept = sweepAcks(reduced, acksRef.current, at);
+        if (swept.acks !== acksRef.current) applyAcks(swept.acks);
+        applyCrisis(swept.crisis);
+      },
+      Math.max(0, nextDeadline - Date.now()),
+    );
+    return () => clearTimeout(timer);
+  }, [acks, agents, applyAcks, applyCrisis]);
+
+  const checkPendingSends = useCallback(() => {
+    const at = Date.now();
+    const { stillPending, failed } = detectSendFailures(
+      pendingSendsRef.current,
+      dispatchEntriesRef.current,
+      at,
+    );
+    pendingSendsRef.current = stillPending;
+    if (failed.length === 0) return;
+    setSendFailures((previous) => [
+      ...previous,
+      ...failed.map((failure) => ({
+        id: failure.id,
+        machine: failure.machine,
+        action: failure.action,
+        detectedAt: at,
+      })),
+    ]);
+  }, []);
+
+  useEffect(
+    () => () => {
+      for (const timer of pendingSendTimersRef.current) clearTimeout(timer);
+      pendingSendTimersRef.current.clear();
+    },
+    [],
+  );
 
   // DOCK FULL rejection is transient.
   useEffect(() => {
@@ -1266,13 +1310,18 @@ export default function App() {
   const handleDispatchSend = useCallback(
     (machine: string, action: DispatchActionValue, requestId: string) => {
       // The pending id IS the wire requestId (CallModal generated it) — the
-      // tick's detectSendFailures matches the echoed dispatchUpdate on it.
+      // deadline check's detectSendFailures matches the echoed dispatchUpdate on it.
       pendingSendsRef.current = [
         ...pendingSendsRef.current,
         { id: requestId, machine, action, sentAt: Date.now() },
       ];
+      const timer = setTimeout(() => {
+        pendingSendTimersRef.current.delete(timer);
+        checkPendingSends();
+      }, DISPATCH_SEND_TIMEOUT_MS + 1);
+      pendingSendTimersRef.current.add(timer);
     },
-    [],
+    [checkPendingSends],
   );
 
   const handleDispatchTodo = useCallback((prompt: string) => {
@@ -1370,12 +1419,13 @@ export default function App() {
     };
   }, [viewingResult, realKind, openPanel, drawerAgentId, closePanel, handleCloseDrawer]);
 
-  const tally = useMemo(() => tallyAgents(agents, now), [agents, now]);
+  const tally = useMemo(() => tallyAgents(agents, statusNow), [agents, statusNow]);
   const wings = useMemo(() => wingCounts(agents, crisis), [agents, crisis]);
   const openCrises = openCrisisCount(crisis);
   const realContent = useMemo(
-    () => (realKind === null ? null : buildRealSheet(realKind, { agents, crisis, economy }, now)),
-    [realKind, agents, crisis, economy, now],
+    () =>
+      realKind === null ? null : buildRealSheet(realKind, { agents, crisis, economy }, statusNow),
+    [realKind, agents, crisis, economy, statusNow],
   );
   const drawerTailKey = drawerAgentId !== null ? tailKey('agent', String(drawerAgentId)) : null;
 
@@ -1435,7 +1485,6 @@ export default function App() {
           agents={agents}
           crisis={crisis}
           acks={acks}
-          now={now}
           onDesk={handleDesk}
           onAck={(key, since) => {
             applyAcks(requestAck(acksRef.current, key, since, Date.now()));
@@ -1459,7 +1508,6 @@ export default function App() {
             agents={agents}
             toolActivity={toolActivity}
             crisis={crisis}
-            now={now}
             tail={tails.get(drawerTailKey)}
             pinned={pins.includes(drawerAgentId)}
             onTogglePin={() => {
@@ -1477,7 +1525,6 @@ export default function App() {
         pins={pins}
         agents={agents}
         tails={tails}
-        now={now}
         notice={dockNotice}
         onUnpin={handleTogglePin}
         onPromote={handleDesk}
@@ -1557,7 +1604,6 @@ export default function App() {
           onClose={closePanel}
           chainRuns={chainRuns}
           chainRunReceivedAt={chainRunReceivedAt}
-          now={now}
           automationStopped={automationStopped}
           onAutomationStoppedChange={setAutomationStopped}
         />
