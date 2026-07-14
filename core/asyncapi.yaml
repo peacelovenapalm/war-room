@@ -719,6 +719,12 @@ components:
             Verbatim echo of DispatchRequest.requestId, present only when
             the originating client supplied one — the requesting client's
             send-failure detector matches on this exactly.
+        updatedAt:
+          type: integer
+          description: >-
+            Server epoch-ms timestamp of this lifecycle revision. Present on
+            live broadcasts and /api/dispatch/recent snapshots so clients can
+            reject a delayed HTTP row after a newer WebSocket transition.
 
     DispatchActionValue:
       description: >-

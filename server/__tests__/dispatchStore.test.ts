@@ -388,6 +388,25 @@ describe('DispatchStore runner-facing surface', () => {
 });
 
 describe('DispatchStore.decide', () => {
+  it('uses a strictly monotonic updatedAt revision even within one millisecond', () => {
+    const s = new DispatchStore(statePath, auditPath);
+    const enq = s.enqueue(
+      {
+        action: 'dispatch',
+        machine: 'MACBOOK',
+        provider: 'claude',
+        cwd: '/x',
+        prompt: 'p',
+      },
+      100,
+    );
+    if (!enq.ok) throw new Error('unreachable');
+    s.decide(enq.record.id, 'accept', {}, 100);
+    expect(s.getRecent()[0].updatedAt).toBe(101);
+    s.reportStatus(enq.record.id, { event: 'exited', exitCode: 0 }, 100);
+    expect(s.getRecent()[0].updatedAt).toBe(102);
+  });
+
   it('accept transitions ringing -> answered and records pid', () => {
     const s = new DispatchStore(statePath, auditPath);
     const enq = s.enqueue({

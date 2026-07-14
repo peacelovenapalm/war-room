@@ -277,6 +277,7 @@ export interface DispatchUpdate {
   resultTail?: string;
   timeoutSec?: number;
   requestId?: string;
+  updatedAt?: number;
 }
 
 export type DispatchActionValue = 'dispatch' | 'focus' | 'session';

@@ -1,7 +1,7 @@
 import type { PointerEvent as ReactPointerEvent, WheelEvent as ReactWheelEvent } from 'react';
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 
-import type { ClientMessage, OutputChunk } from '../../core/src/messages.js';
+import type { ClientMessage, OutputChunk, ServerMessage } from '../../core/src/messages.js';
 import { createBrowserLoaderDeps, createImageStore, createSpriteStore } from './assets/loader';
 import { AgentDrawer } from './components/AgentDrawer';
 import { AutomationPanel } from './components/AutomationPanel';
@@ -75,6 +75,7 @@ import { TailManager } from './net/tailManager';
 import { type AckState, EMPTY_ACKS, requestAck, undoAck } from './state/ackUndo';
 import { classifyWalkerAgents } from './state/ambient';
 import {
+  reconcileDispatchSnapshot,
   reduceBudget,
   reduceChainRunReceivedAt,
   reduceChainRuns,
@@ -294,6 +295,10 @@ export default function App() {
   const crisisRef = useRef<CrisisState>(EMPTY_CRISIS_STATE);
   const acksRef = useRef<AckState>(EMPTY_ACKS);
   const dispatchEntriesRef = useRef<DispatchEntry[]>([]);
+  const dispatchWsRevisionRef = useRef(0);
+  const dispatchWsRevisionByIdRef = useRef<Map<string, number>>(new Map());
+  const dispatchHydrationRequestRef = useRef(0);
+  const dispatchHydratedOnMountRef = useRef(false);
   const pendingSendsRef = useRef<PendingSend[]>([]);
   const pendingSendTimersRef = useRef<Set<ReturnType<typeof setTimeout>>>(new Set());
   const tailsRef = useRef<TailMap>(EMPTY_TAILS);
@@ -901,6 +906,8 @@ export default function App() {
         setBudget((previous) => reduceBudget(previous, message));
         setAutomationStopped((previous) => reduceAutomationStopped(previous, message));
         if (message.type === 'dispatchUpdate') {
+          dispatchWsRevisionRef.current += 1;
+          dispatchWsRevisionByIdRef.current.set(message.id, dispatchWsRevisionRef.current);
           setDispatchEntries((previous) => {
             const next = reduceDispatchEntries(previous, message, at);
             dispatchEntriesRef.current = next;
@@ -943,6 +950,51 @@ export default function App() {
   const send = useCallback((message: ClientMessage) => {
     connectionRef.current?.send(message);
   }, []);
+
+  // B3: hydrate terminal as well as active dispatches on mount and every
+  // live connection epoch. Server updatedAt prevents delayed HTTP rows from
+  // overwriting newer WS transitions; the local WS revision boundary keeps
+  // a newly-created live id from being pruned because it was absent when
+  // the HTTP snapshot was taken. A newer epoch aborts/invalidates the old
+  // request so responses cannot apply out of order across reconnects.
+  useEffect(() => {
+    if (dispatchHydratedOnMountRef.current && connectionStatus !== 'live') return;
+    dispatchHydratedOnMountRef.current = true;
+    const requestId = ++dispatchHydrationRequestRef.current;
+    const wsRevisionAtStart = dispatchWsRevisionRef.current;
+    const controller = new AbortController();
+    let cancelled = false;
+    void fetch('/api/dispatch/recent', { signal: controller.signal })
+      .then(async (res) => (res.ok ? ((await res.json()) as unknown) : null))
+      .then((body) => {
+        if (
+          cancelled ||
+          requestId !== dispatchHydrationRequestRef.current ||
+          !Array.isArray(body)
+        ) {
+          return;
+        }
+        const snapshot = body.filter(
+          (row): row is Extract<ServerMessage, { type: 'dispatchUpdate' }> =>
+            typeof row === 'object' && row !== null && row.type === 'dispatchUpdate',
+        );
+        const preserveIds = new Set<string>();
+        for (const [id, revision] of dispatchWsRevisionByIdRef.current) {
+          if (revision > wsRevisionAtStart) preserveIds.add(id);
+        }
+        const at = Date.now();
+        setDispatchEntries((previous) => {
+          const next = reconcileDispatchSnapshot(previous, snapshot, preserveIds, at);
+          dispatchEntriesRef.current = next;
+          return next;
+        });
+      })
+      .catch(() => undefined);
+    return () => {
+      cancelled = true;
+      controller.abort();
+    };
+  }, [connectionStatus]);
 
   // STOP ALL hydration (panel finding, StopAllControl.tsx:12): a fresh page
   // must reflect a halt issued earlier or from another client.

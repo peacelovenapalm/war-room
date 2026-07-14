@@ -6,7 +6,11 @@
  */
 
 import type { ServerMessage } from '../../../core/src/messages.js';
-import { type DispatchEntry, upsertDispatchEntry } from '../net/dispatchFacts';
+import {
+  type DispatchEntry,
+  isTerminalDispatchStatus,
+  upsertDispatchEntry,
+} from '../net/dispatchFacts';
 import type { BudgetSnapshotClient } from './budget';
 import { type ChainRunClient, upsertChainRun } from './chain';
 
@@ -33,9 +37,32 @@ export function reduceDispatchEntries(
       // second round trip.
       timeoutSec: message.timeoutSec,
       requestId: message.requestId,
+      updatedAt: message.updatedAt,
     },
     now,
   );
+}
+
+/** Merge GET /api/dispatch/recent into the live WS store. Snapshot rows are
+ * ordered by server updatedAt in reduceDispatchEntries, while reconnect
+ * authoritatively removes old non-terminal rows absent from the snapshot.
+ * IDs updated over WS after this HTTP request began are preserved from the
+ * absence-prune race. Terminal rows remain until the user dismisses them. */
+export function reconcileDispatchSnapshot(
+  entries: DispatchEntry[],
+  snapshot: Extract<ServerMessage, { type: 'dispatchUpdate' }>[],
+  preserveIds: ReadonlySet<string>,
+  now: number = Date.now(),
+): DispatchEntry[] {
+  const snapshotIds = new Set(snapshot.map((message) => message.id));
+  let next = entries.filter(
+    (entry) =>
+      isTerminalDispatchStatus(entry.status) ||
+      snapshotIds.has(entry.id) ||
+      preserveIds.has(entry.id),
+  );
+  for (const message of snapshot) next = reduceDispatchEntries(next, message, now);
+  return next;
 }
 
 export function reduceChainRuns(runs: ChainRunClient[], message: ServerMessage): ChainRunClient[] {
