@@ -9,6 +9,7 @@ import {
   gesturePointerDown,
   gesturePointerMove,
   gesturePointerUp,
+  gestureWheelZoom,
   type GestureState,
 } from '../src/engine/gesture';
 import { mapWorldBounds } from '../src/engine/iso';
@@ -58,6 +59,23 @@ describe('pinch/pan gesture reducer', () => {
     expect(result.camera!.zoom).toBe(zoomedIn.zoom);
     gesture = result.state;
     expect(gesture.pointers.size).toBe(1);
+  });
+
+  it('desktop wheel zoom is cursor-anchored and respects interactive bounds', () => {
+    const bounds = mapWorldBounds(14, 10);
+    const fit = fitToView(PHONE, bounds);
+    const anchor = { x: PHONE.width / 2, y: PHONE.height / 2 };
+    const worldBefore = canvasToWorld(fit, anchor.x, anchor.y);
+    const zoomed = gestureWheelZoom(fit, anchor, -120, PHONE, bounds);
+    const worldAfter = canvasToWorld(zoomed, anchor.x, anchor.y);
+
+    expect(zoomed.zoom).toBeGreaterThan(fit.zoom);
+    expect(worldAfter.x).toBeCloseTo(worldBefore.x, 6);
+    expect(worldAfter.y).toBeCloseTo(worldBefore.y, 6);
+
+    const floor = interactiveZoomBounds(PHONE, bounds).min;
+    const zoomedOut = gestureWheelZoom(zoomed, anchor, 100_000, PHONE, bounds);
+    expect(zoomedOut.zoom).toBeCloseTo(floor, 6);
   });
 
   it('an untracked pointer id produces no camera change', () => {

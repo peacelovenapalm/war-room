@@ -1,4 +1,4 @@
-import type { PointerEvent as ReactPointerEvent } from 'react';
+import type { PointerEvent as ReactPointerEvent, WheelEvent as ReactWheelEvent } from 'react';
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 
 import type { ClientMessage } from '../../core/src/messages.js';
@@ -42,6 +42,7 @@ import {
   gesturePointerDown,
   gesturePointerMove,
   gesturePointerUp,
+  gestureWheelZoom,
   type GestureState,
 } from './engine/gesture';
 import type { HotspotKind } from './engine/hotspots';
@@ -563,6 +564,22 @@ export default function App() {
   const handlePointerUp = useCallback((e: ReactPointerEvent<HTMLCanvasElement>) => {
     gestureRef.current = gesturePointerUp(gestureRef.current, e.pointerId);
   }, []);
+
+  const handleWheel = useCallback(
+    (e: ReactWheelEvent<HTMLCanvasElement>) => {
+      e.preventDefault();
+      if (walkRef.current.from !== null) return;
+      const container = containerRef.current;
+      if (!container) return;
+      const rect = container.getBoundingClientRect();
+      const cssSize = { width: Math.max(1, rect.width), height: Math.max(1, rect.height) };
+      const bounds = mapWorldBounds(DEFAULT_COLS, DEFAULT_ROWS, DEFAULT_MAX_ELEVATION);
+      const camera = userCameraRef.current ?? lastCameraRef.current ?? fitToView(cssSize, bounds);
+      userCameraRef.current = gestureWheelZoom(camera, pointerPoint(e), e.deltaY, cssSize, bounds);
+      scheduleGestureDraw();
+    },
+    [pointerPoint, scheduleGestureDraw],
+  );
 
   // Real-sprite loading (KICKOFF-v3.1 WS-A "wire real sprites in"): the
   // office geometry (floor/walls/desk/coffee/plant) is on screen from
@@ -1332,6 +1349,7 @@ export default function App() {
             onPointerMove={handlePointerMove}
             onPointerUp={handlePointerUp}
             onPointerCancel={handlePointerUp}
+            onWheel={handleWheel}
           />
           <ChipLayer
             frame={chipFrame}
