@@ -71,3 +71,16 @@ export function reduceAutomationStopped(prev: boolean, message: ServerMessage): 
   if (message.type === 'automationStopped') return true;
   return prev;
 }
+
+/** M3 (beta finding): a client-local receipt/confirm-arm ("Resumed 0
+ *  order(s).") must never survive a `stopped` transition that DIDN'T come
+ *  from this instance's own fetch — otherwise it can sit there
+ *  contradicting the live WS-authoritative state (the reported case: a
+ *  stale "Resumed…" tooltip survived another client's external engage).
+ *  `expected` is the value this instance's own last successful call asked
+ *  for (or the initial `stopped` prop, before any call); `actual` is the
+ *  current `stopped` prop. They diverge only when something OTHER than
+ *  this instance moved the state. */
+export function isExternalStopTransition(expected: boolean, actual: boolean): boolean {
+  return expected !== actual;
+}

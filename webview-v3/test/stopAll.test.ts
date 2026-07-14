@@ -3,6 +3,7 @@ import { describe, expect, it } from 'vitest';
 import {
   interpretResumeResponse,
   interpretStopAllResponse,
+  isExternalStopTransition,
   reduceAutomationStopped,
   stoppedFromOrders,
 } from '../src/state/stopAll';
@@ -82,5 +83,22 @@ describe('reduceAutomationStopped (WS plane keeps every instance in sync)', () =
   it('ignores unrelated messages', () => {
     expect(reduceAutomationStopped(false, { type: 'agentClosed', id: 1 })).toBe(false);
     expect(reduceAutomationStopped(true, { type: 'agentClosed', id: 1 })).toBe(true);
+  });
+});
+
+describe('isExternalStopTransition (M3: a local receipt must never survive an external state change)', () => {
+  it('is NOT external when the actual state matches what this instance expected', () => {
+    // This instance's own successful STOP-ALL call set expected=true, and
+    // the prop now reads true — its own receipt is allowed to stand.
+    expect(isExternalStopTransition(true, true)).toBe(false);
+    expect(isExternalStopTransition(false, false)).toBe(false);
+  });
+
+  it('IS external when the state changed to something this instance never asked for', () => {
+    // Another client (or the sibling HUD/AutomationPanel mount) engaged
+    // STOP-ALL — this instance still expects "not stopped", so its stale
+    // local receipt/confirm-arm must be cleared.
+    expect(isExternalStopTransition(false, true)).toBe(true);
+    expect(isExternalStopTransition(true, false)).toBe(true);
   });
 });
