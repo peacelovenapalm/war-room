@@ -12,6 +12,13 @@ export interface ChipLayerProps {
   frame: ChipFrame | null;
   occupants: readonly Occupant[];
   onChipClick: (agentId: number) => void;
+  /** SETTINGS → "Always show labels" (M5 beta finding: this setting
+   *  persisted server-side but had zero visual effect on V3 — desk chips
+   *  always rendered their full label regardless). When true (default —
+   *  matches the pre-fix always-on behavior), every chip shows its full
+   *  status text. When false, chips collapse to just the status glyph and
+   *  reveal the full label on hover/focus (index.css `.desk-chip--compact`). */
+  alwaysShowLabels: boolean;
 }
 
 /** Estimated chip box (CSS px) for declutter — matches .desk-chip metrics. */
@@ -27,7 +34,7 @@ const CHIP_PAD_PX = 14;
  * real button: tap = open that agent's drawer (redundant with the board,
  * per the phone-grammar rule that chip actions are board-reachable too).
  */
-export function ChipLayer({ frame, occupants, onChipClick }: ChipLayerProps) {
+export function ChipLayer({ frame, occupants, onChipClick, alwaysShowLabels }: ChipLayerProps) {
   if (frame === null || occupants.length === 0) return null;
   const { camera, cssSize } = frame;
 
@@ -51,18 +58,24 @@ export function ChipLayer({ frame, occupants, onChipClick }: ChipLayerProps) {
         const occupant = byId.get(chip.id);
         if (!occupant) return null;
         if (chip.x < -chip.width || chip.x > cssSize.width + chip.width) return null;
+        const classes = ['desk-chip'];
+        if (occupant.loud) classes.push('desk-chip--loud');
+        if (!alwaysShowLabels) classes.push('desk-chip--compact');
         return (
           <button
             type="button"
             key={chip.id}
-            className={occupant.loud ? 'desk-chip desk-chip--loud' : 'desk-chip'}
+            className={classes.join(' ')}
             data-testid="desk-chip"
             style={{ left: `${String(chip.x)}px`, top: `${String(chip.y)}px` }}
             onClick={() => {
               onChipClick(chip.id);
             }}
           >
-            {chipText(occupant)}
+            <span className="desk-chip__glyph">{occupant.statusGlyph}</span>
+            <span className="desk-chip__label">
+              {occupant.name} · {occupant.statusWord}
+            </span>
           </button>
         );
       })}
