@@ -86,6 +86,7 @@ import {
   type CrisisState,
   EMPTY_CRISIS_STATE,
   openCrisisCount,
+  reduceCrisisAfterAgentMessage,
   reduceCrisisState,
   sweepAcks,
 } from './state/crisisStore';
@@ -825,7 +826,9 @@ export default function App() {
           agentsRef.current = nextAgents;
           setAgents(nextAgents);
           setStatusNow(at);
-          applyCrisis(reduceCrisisState(crisisRef.current, nextAgents, at));
+          applyCrisis(
+            reduceCrisisAfterAgentMessage(crisisRef.current, nextAgents, message, at),
+          );
         }
         // T1c — tool/subagent activity (state/toolActivity.ts), ported
         // from webview-ui's canvas rendering into ambient telemetry: a

@@ -8,6 +8,7 @@ import {
   debrisKey,
   EMPTY_CRISIS_STATE,
   openCrisisCount,
+  reduceCrisisAfterAgentMessage,
   reduceCrisisState,
   sweepAcks,
 } from '../src/state/crisisStore';
@@ -118,16 +119,18 @@ describe('reduceCrisisState', () => {
     // race, not poll staleness): WS reconnects. Step 1 — existingAgents.
     const T1 = T0 + 30_000;
     const reconnected = reduceAgents(failed, EXISTING, T1);
-    const afterExisting = reduceCrisisState(withDebris, reconnected, T1);
+    const afterExisting = reduceCrisisAfterAgentMessage(withDebris, reconnected, EXISTING, T1);
     expect(afterExisting.debris.has(debrisKey(1, 'failed'))).toBe(true); // no phantom recovery
 
     // Step 2 — the server's agentPollState replay (ageMs re-anchors).
-    const replayed = reduceAgents(
-      reconnected,
-      { type: 'agentPollState', id: 1, state: 'failed', ageMs: T1 - RECEIPT_AT },
-      T1,
-    );
-    const afterReplay = reduceCrisisState(afterExisting, replayed, T1);
+    const replay: ServerMessage = {
+      type: 'agentPollState',
+      id: 1,
+      state: 'failed',
+      ageMs: T1 - RECEIPT_AT,
+    };
+    const replayed = reduceAgents(reconnected, replay, T1);
+    const afterReplay = reduceCrisisAfterAgentMessage(afterExisting, replayed, replay, T1);
     const record = afterReplay.debris.get(debrisKey(1, 'failed'));
     expect(record).toBeDefined();
     // The ORIGINAL spawn anchor, not a reset-to-now: the crate that sat for
