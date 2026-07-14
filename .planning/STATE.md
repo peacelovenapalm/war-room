@@ -1882,3 +1882,23 @@ Authoritative ledger: `.planning/v8/SPRINT-STATE.md`. Handoff:
   findings fixed → verify pass CONFIRMED-FIXED, lane SHIP-WITH-NOTES.
   Awaiting Greg's merge gate.
 - No deploys this session (none authorized). NEXUS unchanged.
+
+## POSITION — 2026-07-14 (Act II run 2: distill pipeline LIVE end-to-end, Act III drafted)
+
+Authoritative ledger: `.planning/v8/SPRINT-STATE.md`. Handoff:
+`SESSION-HANDOFF-2026-07-14.md`.
+
+- Deploys #5 (`14c1840`, beta fixes) and #6 (`c0cf0e3`, client-side
+  distill) both Greg-gated, live-verified. NEXUS live = `c0cf0e3`.
+- V8's real blocker found + fixed: distill had NEVER written a note
+  (46/46 failed receipts, server can't read remote transcripts).
+  Client-side distill shipped (deploy #6) + forwarder enrichment
+  (`35dbaa3`) activated on MACBOOK and MINI, each E2E-verified against
+  live nexus (staged note written + receipted). 7-day clock ARMED —
+  V8 unblock ~2026-07-21 on REAL notes (2 synthetic smokes excluded).
+- V9 ✗ HALT (streak 1/3, zero degraded pushes, earliest ~07-16);
+  V10 D1–D8 gated on rung-1 evidence review (~08-12).
+- Act III drafted (`68005c9`): `.planning/v12/` KICKOFF-ACT3 +
+  V12–V15 DESIGN docs; all Act III code hard-gated on Act II exit
+  evidence. Greg sign-offs pending: v12 identity, v13 cloud trust tier.
+- HEAD `4e53726` = origin. Parking lot in the handoff §4.
