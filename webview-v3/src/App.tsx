@@ -1,28 +1,16 @@
 import type { PointerEvent as ReactPointerEvent, WheelEvent as ReactWheelEvent } from 'react';
-import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { lazy, Suspense, useCallback, useEffect, useMemo, useRef, useState } from 'react';
 
 import type { ClientMessage, OutputChunk, ServerMessage } from '../../core/src/messages.js';
 import { createBrowserLoaderDeps, createImageStore, createSpriteStore } from './assets/loader';
-import { AgentDrawer } from './components/AgentDrawer';
-import { AutomationPanel } from './components/AutomationPanel';
-import { BriefingPanel } from './components/BriefingPanel';
-import { CallModal, type CallModalPrefill } from './components/CallModal';
-import { ContractsPanel } from './components/ContractsPanel';
-import { DebugView, type DiagnosticsRow } from './components/DebugView';
+import type { CallModalPrefill } from './components/CallModal';
+import type { DiagnosticsRow } from './components/DebugView';
 import { DispatchTray } from './components/DispatchTray';
-import { DistrictsView } from './components/DistrictsView';
 import { FloorFeed } from './components/FloorFeed';
-import { GraphSearchPanel } from './components/GraphSearchPanel';
-import { HelpModal } from './components/HelpModal';
 import { HudStrip, type ViewMode } from './components/HudStrip';
-import { InboxPanel } from './components/InboxPanel';
-import { MorningPanel } from './components/MorningPanel';
-import { OpsReviewPanel } from './components/OpsReviewPanel';
 import { type DockPanelKind, PanelDock } from './components/PanelDock';
 import { PinDock } from './components/PinDock';
 import { RealSheet } from './components/RealSheet';
-import { SettingsModal } from './components/SettingsModal';
-import { ShiftPanel } from './components/ShiftPanel';
 import { TriageBoard } from './components/TriageBoard';
 import { WorldOverlay } from './components/WorldOverlay';
 import {
@@ -148,6 +136,53 @@ import {
 import { POLL_STATE_TTL_MS } from './state/visualState';
 import { createWorldFrameStore } from './state/worldFrameStore';
 import { installTestHooksIfE2E } from './testHooks';
+
+const AgentDrawer = lazy(() =>
+  import('./components/AgentDrawer').then((module) => ({ default: module.AgentDrawer })),
+);
+const AutomationPanel = lazy(() =>
+  import('./components/AutomationPanel').then((module) => ({
+    default: module.AutomationPanel,
+  })),
+);
+const BriefingPanel = lazy(() =>
+  import('./components/BriefingPanel').then((module) => ({ default: module.BriefingPanel })),
+);
+const CallModal = lazy(() =>
+  import('./components/CallModal').then((module) => ({ default: module.CallModal })),
+);
+const ContractsPanel = lazy(() =>
+  import('./components/ContractsPanel').then((module) => ({ default: module.ContractsPanel })),
+);
+const DebugView = lazy(() =>
+  import('./components/DebugView').then((module) => ({ default: module.DebugView })),
+);
+const DistrictsView = lazy(() =>
+  import('./components/DistrictsView').then((module) => ({ default: module.DistrictsView })),
+);
+const GraphSearchPanel = lazy(() =>
+  import('./components/GraphSearchPanel').then((module) => ({
+    default: module.GraphSearchPanel,
+  })),
+);
+const HelpModal = lazy(() =>
+  import('./components/HelpModal').then((module) => ({ default: module.HelpModal })),
+);
+const InboxPanel = lazy(() =>
+  import('./components/InboxPanel').then((module) => ({ default: module.InboxPanel })),
+);
+const MorningPanel = lazy(() =>
+  import('./components/MorningPanel').then((module) => ({ default: module.MorningPanel })),
+);
+const OpsReviewPanel = lazy(() =>
+  import('./components/OpsReviewPanel').then((module) => ({ default: module.OpsReviewPanel })),
+);
+const SettingsModal = lazy(() =>
+  import('./components/SettingsModal').then((module) => ({ default: module.SettingsModal })),
+);
+const ShiftPanel = lazy(() =>
+  import('./components/ShiftPanel').then((module) => ({ default: module.ShiftPanel })),
+);
 
 /** Canvas-only ambient animation cadence (20fps). */
 const AMBIENT_FRAME_MS = 50;
@@ -346,6 +381,16 @@ export default function App() {
 
   // ── Stage-3 panel ports ──────────────────────────────────────────
   const [openPanel, setOpenPanel] = useState<DockPanelKind | null>(null);
+  // Deferred panels stay mounted after their first open, preserving the
+  // existing draft/form-state behavior while keeping every never-opened
+  // surface out of the critical entry chunk and render tree.
+  const [mountedPanels, setMountedPanels] = useState<ReadonlySet<DockPanelKind>>(() => new Set());
+  const rememberPanel = useCallback((kind: DockPanelKind) => {
+    setMountedPanels((previous) => {
+      if (previous.has(kind)) return previous;
+      return new Set([...previous, kind]);
+    });
+  }, []);
   // T6 item 4 — CAMERA-MOVE PANEL OPENS: components/Modal.tsx's grow
   // origin, `null` = no anchor / cancelled (plain open, matching every
   // panel's prior appearance exactly).
@@ -821,8 +866,7 @@ export default function App() {
 
   const scheduleReconnectReplayFinish = useCallback(
     (replay: ReconnectReplay) => {
-      if (reconnectReplayTimerRef.current !== null)
-        clearTimeout(reconnectReplayTimerRef.current);
+      if (reconnectReplayTimerRef.current !== null) clearTimeout(reconnectReplayTimerRef.current);
       reconnectReplayTimerRef.current = setTimeout(
         () => finishReconnectReplay(replay),
         Math.max(0, reconnectReplayDeadline(replay) - Date.now()),
@@ -1053,7 +1097,8 @@ export default function App() {
       .then((body) => {
         if (cancelled) return;
         const snapshot = latchSnapshotFromHttp(body);
-        if (snapshot) setAutomationLatch((previous) => reconcileAutomationLatch(previous, snapshot));
+        if (snapshot)
+          setAutomationLatch((previous) => reconcileAutomationLatch(previous, snapshot));
       })
       .catch(() => undefined);
     return () => {
@@ -1254,13 +1299,14 @@ export default function App() {
         target instanceof HTMLElement &&
         (target.tagName === 'INPUT' || target.tagName === 'TEXTAREA' || target.isContentEditable);
       if (typing) return;
+      rememberPanel('help');
       setOpenPanel('help');
     };
     window.addEventListener('keydown', onKey);
     return () => {
       window.removeEventListener('keydown', onKey);
     };
-  }, []);
+  }, [rememberPanel]);
 
   /** T6 item 4 — clears BOTH the JS-driven camera flight and the CSS grow
    *  origin. "Any input cancels": called from the global pointerdown/keydown
@@ -1295,6 +1341,7 @@ export default function App() {
       // render invisibly underneath, showing two active overlay layers
       // with two close buttons.
       setRealKind(null);
+      rememberPanel(kind);
       setOpenPanel(kind);
       const anchor = panelFlightAnchor(kind);
       const container = containerRef.current;
@@ -1319,7 +1366,7 @@ export default function App() {
       });
       ensureWalkLoop();
     },
-    [cancelPanelFlight, ensureWalkLoop],
+    [cancelPanelFlight, ensureWalkLoop, rememberPanel],
   );
 
   const handleOpenHotspot = useCallback(
@@ -1374,18 +1421,26 @@ export default function App() {
     [checkPendingSends],
   );
 
-  const handleDispatchTodo = useCallback((prompt: string) => {
-    setCallPrefill({ prompt });
-    setOpenPanel('call');
-  }, []);
+  const handleDispatchTodo = useCallback(
+    (prompt: string) => {
+      setCallPrefill({ prompt });
+      rememberPanel('call');
+      setOpenPanel('call');
+    },
+    [rememberPanel],
+  );
 
-  const handleDispatchContract = useCallback((contract: { id: string; title: string }) => {
-    setCallPrefill({
-      prompt: `Contract ${contract.id}: ${contract.title}`,
-      contractId: contract.id,
-    });
-    setOpenPanel('call');
-  }, []);
+  const handleDispatchContract = useCallback(
+    (contract: { id: string; title: string }) => {
+      setCallPrefill({
+        prompt: `Contract ${contract.id}: ${contract.title}`,
+        contractId: contract.id,
+      });
+      rememberPanel('call');
+      setOpenPanel('call');
+    },
+    [rememberPanel],
+  );
 
   const handleToggleSound = useCallback(() => {
     setSettings((previous) => {
@@ -1556,23 +1611,25 @@ export default function App() {
             top: 0 and the HUD painted over the close button on desktop
             (found on real-device acceptance, 2026-07-10). */}
         {drawerAgentId !== null && drawerTailKey !== null && (
-          <AgentDrawer
-            key={drawerAgentId}
-            agentId={drawerAgentId}
-            agents={agents}
-            toolActivity={toolActivity}
-            crisis={crisis}
-            tail={tails.get(drawerTailKey)}
-            pinned={pins.includes(drawerAgentId)}
-            onTogglePin={() => {
-              handleTogglePin(drawerAgentId);
-            }}
-            onTogglePause={() => {
-              handleTogglePause(drawerTailKey);
-            }}
-            onClose={handleCloseDrawer}
-            send={send}
-          />
+          <Suspense fallback={null}>
+            <AgentDrawer
+              key={drawerAgentId}
+              agentId={drawerAgentId}
+              agents={agents}
+              toolActivity={toolActivity}
+              crisis={crisis}
+              tail={tails.get(drawerTailKey)}
+              pinned={pins.includes(drawerAgentId)}
+              onTogglePin={() => {
+                handleTogglePin(drawerAgentId);
+              }}
+              onTogglePause={() => {
+                handleTogglePause(drawerTailKey);
+              }}
+              onClose={handleCloseDrawer}
+              send={send}
+            />
+          </Suspense>
         )}
       </div>
       <PinDock
@@ -1616,72 +1673,100 @@ export default function App() {
           context) — only whichever panel is actually `isOpen` ever renders
           it, so this single provider is safe for all of them at once. */}
       <PanelGrowOriginProvider value={panelGrowOrigin}>
-        <HelpModal isOpen={openPanel === 'help'} onClose={closePanel} />
-        <SettingsModal
-          isOpen={openPanel === 'settings'}
-          onClose={closePanel}
-          settings={settings}
-          onToggleSound={handleToggleSound}
-          onToggleWatchAllSessions={handleToggleWatchAllSessions}
-          onToggleHooksEnabled={handleToggleHooksEnabled}
-          onToggleAlwaysShowLabels={handleToggleAlwaysShowLabels}
-        />
-        <DebugView
-          isOpen={openPanel === 'debug'}
-          onClose={closePanel}
-          agents={agents}
-          connectionStatus={connectionStatus}
-          crisis={crisis}
-          economy={economy}
-          diagnostics={diagnostics}
-          onRequestDiagnostics={handleRequestDiagnostics}
-        />
-        <CallModal
-          isOpen={openPanel === 'call'}
-          onClose={() => {
-            closePanel();
-            setCallPrefill(null);
-          }}
-          prefill={callPrefill}
-          send={send}
-          onSend={handleDispatchSend}
-          budget={budget}
-        />
-        <ShiftPanel isOpen={openPanel === 'shift'} onClose={closePanel} />
-        <BriefingPanel
-          isOpen={openPanel === 'briefing'}
-          onClose={closePanel}
-          onDispatchTodo={handleDispatchTodo}
-        />
-        <AutomationPanel
-          isOpen={openPanel === 'automation'}
-          onClose={closePanel}
-          chainRuns={chainRuns}
-          chainRunReceivedAt={chainRunReceivedAt}
-          automationStopped={automationStopped}
-          automationLatchRevision={automationLatch.revision}
-        />
-        <ContractsPanel
-          isOpen={openPanel === 'contracts'}
-          onClose={closePanel}
-          onDispatchContract={handleDispatchContract}
-        />
-        <OpsReviewPanel
-          isOpen={openPanel === 'ops'}
-          onClose={closePanel}
-          send={send}
-          onDispatchSend={handleDispatchSend}
-          dispatchEntries={dispatchEntries}
-          sendFailures={sendFailures}
-        />
-        <GraphSearchPanel isOpen={openPanel === 'graph-search'} onClose={closePanel} />
-        <DistrictsView isOpen={openPanel === 'districts'} onClose={closePanel} />
-        <InboxPanel isOpen={openPanel === 'inbox'} onClose={closePanel} />
-        <MorningPanel
-          isOpen={openPanel === 'morning'}
-          onClose={closePanel}
-          connectionStatus={connectionStatus}
-        />
+        <Suspense fallback={null}>
+          {mountedPanels.has('help') && (
+            <HelpModal isOpen={openPanel === 'help'} onClose={closePanel} />
+          )}
+          {mountedPanels.has('settings') && (
+            <SettingsModal
+              isOpen={openPanel === 'settings'}
+              onClose={closePanel}
+              settings={settings}
+              onToggleSound={handleToggleSound}
+              onToggleWatchAllSessions={handleToggleWatchAllSessions}
+              onToggleHooksEnabled={handleToggleHooksEnabled}
+              onToggleAlwaysShowLabels={handleToggleAlwaysShowLabels}
+            />
+          )}
+          {mountedPanels.has('debug') && (
+            <DebugView
+              isOpen={openPanel === 'debug'}
+              onClose={closePanel}
+              agents={agents}
+              connectionStatus={connectionStatus}
+              crisis={crisis}
+              economy={economy}
+              diagnostics={diagnostics}
+              onRequestDiagnostics={handleRequestDiagnostics}
+            />
+          )}
+          {mountedPanels.has('call') && (
+            <CallModal
+              isOpen={openPanel === 'call'}
+              onClose={() => {
+                closePanel();
+                setCallPrefill(null);
+              }}
+              prefill={callPrefill}
+              send={send}
+              onSend={handleDispatchSend}
+              budget={budget}
+            />
+          )}
+          {mountedPanels.has('shift') && (
+            <ShiftPanel isOpen={openPanel === 'shift'} onClose={closePanel} />
+          )}
+          {mountedPanels.has('briefing') && (
+            <BriefingPanel
+              isOpen={openPanel === 'briefing'}
+              onClose={closePanel}
+              onDispatchTodo={handleDispatchTodo}
+            />
+          )}
+          {mountedPanels.has('automation') && (
+            <AutomationPanel
+              isOpen={openPanel === 'automation'}
+              onClose={closePanel}
+              chainRuns={chainRuns}
+              chainRunReceivedAt={chainRunReceivedAt}
+              automationStopped={automationStopped}
+              automationLatchRevision={automationLatch.revision}
+            />
+          )}
+          {mountedPanels.has('contracts') && (
+            <ContractsPanel
+              isOpen={openPanel === 'contracts'}
+              onClose={closePanel}
+              onDispatchContract={handleDispatchContract}
+            />
+          )}
+          {mountedPanels.has('ops') && (
+            <OpsReviewPanel
+              isOpen={openPanel === 'ops'}
+              onClose={closePanel}
+              send={send}
+              onDispatchSend={handleDispatchSend}
+              dispatchEntries={dispatchEntries}
+              sendFailures={sendFailures}
+            />
+          )}
+          {mountedPanels.has('graph-search') && (
+            <GraphSearchPanel isOpen={openPanel === 'graph-search'} onClose={closePanel} />
+          )}
+          {mountedPanels.has('districts') && (
+            <DistrictsView isOpen={openPanel === 'districts'} onClose={closePanel} />
+          )}
+          {mountedPanels.has('inbox') && (
+            <InboxPanel isOpen={openPanel === 'inbox'} onClose={closePanel} />
+          )}
+          {mountedPanels.has('morning') && (
+            <MorningPanel
+              isOpen={openPanel === 'morning'}
+              onClose={closePanel}
+              connectionStatus={connectionStatus}
+            />
+          )}
+        </Suspense>
       </PanelGrowOriginProvider>
 
       {viewingResult && (
