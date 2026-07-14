@@ -24,6 +24,16 @@ describe('pinch/pan gesture reducer', () => {
     expect(source.includes('devicePixelRatio')).toBe(false);
   });
 
+  it('one pointer pans from the default fully-visible fit camera', () => {
+    const bounds = mapWorldBounds(14, 10);
+    const fit = fitToView(PHONE, bounds);
+    const gesture = gesturePointerDown(EMPTY_GESTURE, { id: 1, x: 100, y: 100 });
+    const result = gesturePointerMove(gesture, { id: 1, x: 124, y: 88 }, fit, PHONE, bounds);
+
+    expect(result.camera?.offsetX).toBeCloseTo(fit.offsetX + 24, 6);
+    expect(result.camera?.offsetY).toBeCloseTo(fit.offsetY - 12, 6);
+  });
+
   it('one pointer pans by the raw drag delta (clamped)', () => {
     const bounds = mapWorldBounds(14, 10);
     // A small square canvas at MAX_ZOOM: the map vastly exceeds the canvas

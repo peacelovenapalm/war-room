@@ -132,14 +132,21 @@ describe('fit-to-view camera', () => {
       expect(phoneBounds.max).toBeLessThanOrEqual(MAX_ZOOM);
     });
 
-    it('clampPanToFit locks a fully-visible map to the centered fit framing (no dead-space pan)', () => {
+    it('clampPanToFit preserves bounded movement while the map is fully visible', () => {
       const bounds = mapWorldBounds(14, 10);
       const fit = fitToView(PHONE, bounds);
-      // Dragged far in every direction while zoomed OUT past fit — the map
-      // is still smaller than the canvas on both axes, so pan is a no-op.
+      const nearby = clampPanToFit(panBy(fit, 12, -18), PHONE, bounds);
+      expect(nearby.offsetX).toBeCloseTo(fit.offsetX + 12, 6);
+      expect(nearby.offsetY).toBeCloseTo(fit.offsetY - 18, 6);
+
+      // An extreme drag is bounded to a small center-relative range rather
+      // than either wandering away or snapping all movement back to fit.
       const dragged = panBy(fit, 5_000, -5_000);
       const clamped = clampPanToFit(dragged, PHONE, bounds);
-      expect(clamped).toEqual(fit);
+      expect(clamped.offsetX).toBeGreaterThan(fit.offsetX);
+      expect(clamped.offsetY).toBeLessThan(fit.offsetY);
+      expect(clamped.offsetX - fit.offsetX).toBeLessThanOrEqual(48);
+      expect(fit.offsetY - clamped.offsetY).toBeLessThanOrEqual(48);
     });
 
     it('clampPanToFit keeps at least a margin of the map on-canvas when zoomed in', () => {
