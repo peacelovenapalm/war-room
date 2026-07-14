@@ -202,6 +202,51 @@ describe('claudeProvider', () => {
       }
     });
 
+    it('passes V8 client-distill fields through SessionEnd unchanged', () => {
+      const note = { sessionId: 'sess-1', date: '2026-07-13' };
+      const withNote = claudeProvider.normalizeHookEvent({
+        hook_event_name: 'SessionEnd',
+        session_id: 'sess-1',
+        reason: 'exit',
+        distilledNote: note,
+      });
+      expect(withNote?.event).toMatchObject({ kind: 'sessionEnd', distilledNote: note });
+
+      const withSkip = claudeProvider.normalizeHookEvent({
+        hook_event_name: 'SessionEnd',
+        session_id: 'sess-1',
+        reason: 'exit',
+        distillSkipped: true,
+      });
+      expect(withSkip?.event).toMatchObject({ kind: 'sessionEnd', distillSkipped: true });
+
+      const withFailure = claudeProvider.normalizeHookEvent({
+        hook_event_name: 'SessionEnd',
+        session_id: 'sess-1',
+        reason: 'exit',
+        distillFailed: true,
+        distillFailReason: 'no-transcript-path',
+      });
+      expect(withFailure?.event).toMatchObject({
+        kind: 'sessionEnd',
+        distillFailed: true,
+        distillFailReason: 'no-transcript-path',
+      });
+
+      const withNeither = claudeProvider.normalizeHookEvent({
+        hook_event_name: 'SessionEnd',
+        session_id: 'sess-1',
+        reason: 'exit',
+      });
+      expect(withNeither?.event).toMatchObject({
+        kind: 'sessionEnd',
+        distilledNote: undefined,
+        distillSkipped: undefined,
+        distillFailed: undefined,
+        distillFailReason: undefined,
+      });
+    });
+
     it('normalizes TeammateIdle to subagentTurnEnd with reason=idle', () => {
       const result = claudeProvider.normalizeHookEvent({
         hook_event_name: 'TeammateIdle',

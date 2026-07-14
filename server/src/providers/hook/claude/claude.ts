@@ -3,7 +3,11 @@ import * as os from 'os';
 import * as path from 'path';
 
 import { normalizeProjectPath } from '../../../../../core/src/normalizeProjectPath.js';
-import type { AgentEvent, HookProvider } from '../../../../../core/src/provider.js';
+import type {
+  AgentEvent,
+  ClientDistilledNote,
+  HookProvider,
+} from '../../../../../core/src/provider.js';
 import {
   BASH_COMMAND_DISPLAY_MAX_LENGTH,
   TASK_DESCRIPTION_DISPLAY_MAX_LENGTH,
@@ -212,6 +216,18 @@ function normalizeHookEvent(
         event: {
           kind: 'sessionEnd',
           reason: typeof raw.reason === 'string' ? raw.reason : undefined,
+          // V8: client-side distill fields attached by the hook script at
+          // SessionEnd (see hooks/claude-hook.ts). distilledNote is passed
+          // through as unvalidated wire data -- memoryDistiller.ts revalidates
+          // every field before it can reach the MemoryStore write chokepoint.
+          distilledNote:
+            raw.distilledNote !== undefined
+              ? (raw.distilledNote as ClientDistilledNote)
+              : undefined,
+          distillSkipped: raw.distillSkipped === true ? true : undefined,
+          distillFailed: raw.distillFailed === true ? true : undefined,
+          distillFailReason:
+            typeof raw.distillFailReason === 'string' ? raw.distillFailReason : undefined,
         },
       };
 

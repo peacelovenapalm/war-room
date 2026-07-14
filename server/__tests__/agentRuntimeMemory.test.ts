@@ -1,11 +1,11 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 
-const { distillEndedSessionMock } = vi.hoisted(() => ({
-  distillEndedSessionMock: vi.fn(() => ({ outcome: 'disabled', receiptId: null })),
+const { distillFromSessionEndMock } = vi.hoisted(() => ({
+  distillFromSessionEndMock: vi.fn(() => ({ outcome: 'disabled', receiptId: null })),
 }));
 
 vi.mock('../src/memoryDistiller.js', () => ({
-  distillEndedSession: distillEndedSessionMock,
+  distillFromSessionEnd: distillFromSessionEndMock,
 }));
 
 import { AgentRuntime } from '../src/agentRuntime.js';
@@ -41,20 +41,21 @@ function makeAgent(isExternal = true): AgentState {
 }
 
 beforeEach(() => {
-  distillEndedSessionMock.mockClear();
+  distillFromSessionEndMock.mockClear();
 });
 
-describe('AgentRuntime V7 session-end trigger', () => {
+describe('AgentRuntime V7/V8 session-end trigger', () => {
   it('manifest/stale removal distills before the agent disappears', () => {
     const store = new AgentStateStore();
     const runtime = new AgentRuntime(store, claudeProvider);
     store.set(1, makeAgent());
     runtime.removeAgent(1);
-    expect(distillEndedSessionMock).toHaveBeenCalledOnce();
-    expect(distillEndedSessionMock).toHaveBeenCalledWith({
+    expect(distillFromSessionEndMock).toHaveBeenCalledOnce();
+    expect(distillFromSessionEndMock).toHaveBeenCalledWith({
       sessionId: 'session-memory-trigger',
       transcriptPath: '/tmp/session-memory-trigger.jsonl',
       model: 'deterministic-v1',
+      clientDistill: undefined,
     });
     expect(store.has(1)).toBe(false);
     runtime.dispose();
@@ -70,8 +71,45 @@ describe('AgentRuntime V7 session-end trigger', () => {
       session_id: 'session-memory-trigger',
       reason: 'exit',
     });
-    expect(distillEndedSessionMock).toHaveBeenCalledOnce();
+    expect(distillFromSessionEndMock).toHaveBeenCalledOnce();
     expect(store.has(1)).toBe(false);
+    runtime.dispose();
+  });
+
+  it('passes a client-distilled note from the SessionEnd hook payload through to distillFromSessionEnd', () => {
+    const store = new AgentStateStore();
+    const runtime = new AgentRuntime(store, claudeProvider);
+    store.set(1, makeAgent());
+    runtime.registerAgent('session-memory-trigger', 1);
+    const note = {
+      sessionId: 'session-memory-trigger',
+      date: '2026-07-13',
+      model: 'deterministic-v1',
+      distilledAt: '2026-07-13T12:00:00.000Z',
+      confidence: 'EXTRACTED',
+      decisions: [],
+      facts: [],
+      openThreads: [],
+      links: [],
+    };
+    runtime.handleHookEvent('claude', {
+      hook_event_name: 'SessionEnd',
+      session_id: 'session-memory-trigger',
+      reason: 'exit',
+      distilledNote: note,
+    });
+    expect(distillFromSessionEndMock).toHaveBeenCalledOnce();
+    expect(distillFromSessionEndMock).toHaveBeenCalledWith({
+      sessionId: 'session-memory-trigger',
+      transcriptPath: '/tmp/session-memory-trigger.jsonl',
+      model: 'deterministic-v1',
+      clientDistill: {
+        distilledNote: note,
+        distillSkipped: undefined,
+        distillFailed: undefined,
+        distillFailReason: undefined,
+      },
+    });
     runtime.dispose();
   });
 });

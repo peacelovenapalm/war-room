@@ -18,6 +18,13 @@ import type { AgentState } from './types.js';
 
 const debug = process.env.PIXEL_AGENTS_DEBUG !== '0';
 
+/** The V8 client-side distill fields carried on a sessionEnd AgentEvent,
+ *  forwarded to RuntimeLifecycleCallbacks.onSessionEnd unchanged. */
+export type SessionEndDistillFields = Pick<
+  Extract<AgentEvent, { kind: 'sessionEnd' }>,
+  'distilledNote' | 'distillSkipped' | 'distillFailed' | 'distillFailReason'
+>;
+
 /** Normalized hook event received from any provider's hook script via the HTTP server. */
 export interface HookEvent {
   /** Hook event name (e.g., 'Stop', 'PermissionRequest', 'Notification') */
@@ -58,8 +65,10 @@ interface SessionLifecycleCallbacks {
   ) => void;
   /** Called when a session is resumed (--resume). Clears dismissals so the file can be re-adopted. */
   onSessionResume?: (transcriptPath: string) => void;
-  /** Called when a session ends (exit/logout). */
-  onSessionEnd?: (agentId: number, reason: string) => void;
+  /** Called when a session ends (exit/logout). `distill` carries the V8
+   *  client-side distill payload from the SessionEnd hook event, if any
+   *  (see AgentEvent's sessionEnd kind in core/src/provider.ts). */
+  onSessionEnd?: (agentId: number, reason: string, distill?: SessionEndDistillFields) => void;
   /** Called when an Agent Teams teammate is detected via SubagentStart hook.
    *  Triggers scanning of the session's subagents/ directory for the teammate's JSONL. */
   onTeammateDetected?: (parentAgentId: number, sessionId: string, agentType: string) => void;
@@ -480,6 +489,12 @@ export class HookEventHandler {
     provider: HookProvider,
   ): void {
     const reason = normEvent.reason;
+    const distill: SessionEndDistillFields = {
+      distilledNote: normEvent.distilledNote,
+      distillSkipped: normEvent.distillSkipped,
+      distillFailed: normEvent.distillFailed,
+      distillFailReason: normEvent.distillFailReason,
+    };
     if (debug)
       console.log(
         `[Pixel Agents] Hook: Agent ${agentId} - SessionEnd(reason=${reason ?? 'unknown'})`,
@@ -500,14 +515,14 @@ export class HookEventHandler {
       setTimeout(() => {
         if (agent.pendingClear) {
           agent.pendingClear = false;
-          this.lifecycleCallbacks.onSessionEnd?.(agentId, reason);
+          this.lifecycleCallbacks.onSessionEnd?.(agentId, reason, distill);
         }
       }, SESSION_END_GRACE_MS);
     } else {
       // Immediate cleanup for exit/logout. onSessionEnd → removeTeammates in the
       // ViewProvider cleans up all teammates of this lead at once.
       this.markAgentWaiting(agent, agentId, provider);
-      this.lifecycleCallbacks.onSessionEnd?.(agentId, reason ?? 'unknown');
+      this.lifecycleCallbacks.onSessionEnd?.(agentId, reason ?? 'unknown', distill);
     }
   }
 
