@@ -57,16 +57,10 @@ export function interpretResumeResponse(httpOk: boolean, body: unknown): ResumeR
   return { ok: true, resumedOrders: count(body.resumedOrders), revision: count(body.revision) };
 }
 
-/** Server-derived stop state: any order halted by the kill switch is still
- *  awaiting RESUME. (See the header for the chain-only-halt limitation.) */
-export function stoppedFromOrders(orders: Array<{ stoppedByKillSwitch?: boolean }>): boolean {
-  return orders.some((order) => order.stoppedByKillSwitch === true);
-}
-
 /** C9-1: durable-latch hydration — GET /api/automation/stop-all-state returns
  *  `{ engaged }`, the server's persisted STOP-ALL record. This is the anchor
- *  that closes stoppedFromOrders' chain-only-halt gap: a STOP ALL that halted
- *  zero standing orders still sets the latch, so a fresh mount reads stopped.
+ *  for every halt: a STOP ALL that halted zero standing orders still sets the
+ *  latch, so a fresh mount reads stopped.
  *  Anything but an explicit `engaged: true` is NOT stopped (a missing/garbled
  *  body must never fabricate a halt). */
 export function latchSnapshotFromHttp(body: unknown): AutomationLatchState | null {

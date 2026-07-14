@@ -8,7 +8,6 @@ import {
   latchSnapshotFromHttp,
   reconcileAutomationLatch,
   reduceAutomationLatch,
-  stoppedFromOrders,
 } from '../src/state/stopAll';
 
 describe('interpretStopAllResponse (hard rule 8: a failed kill switch must SAY so)', () => {
@@ -61,19 +60,6 @@ describe('interpretResumeResponse', () => {
       resumedOrders: 4,
       revision: 9,
     });
-  });
-});
-
-describe('stoppedFromOrders (mount hydration from GET /api/standing-orders)', () => {
-  it('reports stopped when ANY order is kill-switch-halted', () => {
-    expect(stoppedFromOrders([{ stoppedByKillSwitch: false }, { stoppedByKillSwitch: true }])).toBe(
-      true,
-    );
-  });
-
-  it('reports not-stopped for an empty roster or no halted orders', () => {
-    expect(stoppedFromOrders([])).toBe(false);
-    expect(stoppedFromOrders([{}, { stoppedByKillSwitch: false }])).toBe(false);
   });
 });
 
