@@ -704,6 +704,54 @@ describe('HookEventHandler', () => {
     expect(agent.isWaiting).toBe(true);
   });
 
+  it('delivers a clear session distill payload for the old session before reassignment', () => {
+    const agent = createTestAgent({
+      id: 1,
+      sessionId: 'old-sess',
+      projectDir: '/projects/test',
+    });
+    agents.set(1, agent);
+    handler.registerAgent('old-sess', 1);
+    const onSessionDistill = vi.fn();
+    const onSessionClear = vi.fn();
+    handler.setLifecycleCallbacks({ onSessionDistill, onSessionClear });
+    const distilledNote = {
+      sessionId: 'old-sess',
+      date: '2026-07-13',
+      model: 'deterministic-v1',
+      distilledAt: '2026-07-13T12:00:00.000Z',
+      confidence: 'EXTRACTED',
+      decisions: [],
+      facts: [],
+      openThreads: [],
+      links: [],
+    };
+
+    handler.handleEvent('claude', {
+      hook_event_name: 'SessionEnd',
+      session_id: 'old-sess',
+      reason: 'clear',
+      distilledNote,
+    });
+    handler.handleEvent('claude', {
+      hook_event_name: 'SessionStart',
+      session_id: 'new-sess',
+      source: 'clear',
+      transcript_path: '/projects/test/new-sess.jsonl',
+    });
+
+    expect(onSessionDistill).toHaveBeenCalledWith(1, 'old-sess', {
+      distilledNote,
+      distillSkipped: undefined,
+      distillFailed: undefined,
+      distillFailReason: undefined,
+    });
+    expect(onSessionDistill.mock.invocationCallOrder[0]).toBeLessThan(
+      onSessionClear.mock.invocationCallOrder[0] ?? Number.POSITIVE_INFINITY,
+    );
+    expect(onSessionClear).toHaveBeenCalledWith(1, 'new-sess', '/projects/test/new-sess.jsonl');
+  });
+
   it('SessionEnd(reason=exit) calls onSessionEnd immediately', () => {
     const agent = createTestAgent({ id: 1 });
     agents.set(1, agent);

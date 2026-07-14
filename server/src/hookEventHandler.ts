@@ -63,6 +63,13 @@ interface SessionLifecycleCallbacks {
     newSessionId: string,
     newTranscriptPath: string | undefined,
   ) => void;
+  /** Called when /clear or /resume keeps the agent alive but the ended
+   *  session's captured distill payload still needs to be persisted. */
+  onSessionDistill?: (
+    agentId: number,
+    endedSessionId: string,
+    distill: SessionEndDistillFields,
+  ) => void;
   /** Called when a session is resumed (--resume). Clears dismissals so the file can be re-adopted. */
   onSessionResume?: (transcriptPath: string) => void;
   /** Called when a session ends (exit/logout). `distill` carries the V8
@@ -79,6 +86,10 @@ interface SessionLifecycleCallbacks {
 
 export class HookEventHandler {
   private lifecycleCallbacks: SessionLifecycleCallbacks = {};
+  private readonly pendingSessionDistills = new Map<
+    number,
+    { sessionId: string; distill: SessionEndDistillFields }
+  >();
 
   /** Highest HookProvider.protocolVersion this handler understands. */
   private static readonly SUPPORTED_PROTOCOL_VERSION = 1;
@@ -289,6 +300,15 @@ export class HookEventHandler {
               path.resolve(agent.projectDir).toLowerCase() ===
                 path.resolve(projectDir).toLowerCase();
             if (isMatch) {
+              const pendingDistill = this.pendingSessionDistills.get(id);
+              if (pendingDistill?.sessionId === agent.sessionId) {
+                this.pendingSessionDistills.delete(id);
+                this.lifecycleCallbacks.onSessionDistill?.(
+                  id,
+                  pendingDistill.sessionId,
+                  pendingDistill.distill,
+                );
+              }
               agent.pendingClear = false;
               console.log(
                 `[Pixel Agents] Hook: Agent ${id} - /${normEvent.source} detected, reassigning to ${event.session_id}`,
@@ -506,6 +526,7 @@ export class HookEventHandler {
 
     if (expectsFollowUp) {
       agent.pendingClear = true;
+      this.pendingSessionDistills.set(agentId, { sessionId: agent.sessionId, distill });
       this.markAgentWaiting(agent, agentId, provider);
       if (debug)
         console.log(
@@ -513,12 +534,15 @@ export class HookEventHandler {
         );
       // Safety net: if SessionStart never arrives, clean up the zombie agent
       setTimeout(() => {
-        if (agent.pendingClear) {
+        const pendingDistill = this.pendingSessionDistills.get(agentId);
+        if (agent.pendingClear && pendingDistill?.sessionId === agent.sessionId) {
+          this.pendingSessionDistills.delete(agentId);
           agent.pendingClear = false;
-          this.lifecycleCallbacks.onSessionEnd?.(agentId, reason, distill);
+          this.lifecycleCallbacks.onSessionEnd?.(agentId, reason, pendingDistill.distill);
         }
       }, SESSION_END_GRACE_MS);
     } else {
+      this.pendingSessionDistills.delete(agentId);
       // Immediate cleanup for exit/logout. onSessionEnd → removeTeammates in the
       // ViewProvider cleans up all teammates of this lead at once.
       this.markAgentWaiting(agent, agentId, provider);

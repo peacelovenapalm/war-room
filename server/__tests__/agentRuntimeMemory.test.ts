@@ -140,4 +140,51 @@ describe('AgentRuntime V7/V8 session-end trigger', () => {
     consoleError.mockRestore();
     runtime.dispose();
   });
+
+  it('distills the ended session payload before /clear reassigns the agent', () => {
+    const store = new AgentStateStore();
+    const runtime = new AgentRuntime(store, claudeProvider);
+    const agent = makeAgent(false);
+    agent.projectDir = '/tmp/project';
+    store.set(1, agent);
+    runtime.registerAgent('session-memory-trigger', 1);
+    const note = {
+      sessionId: 'session-memory-trigger',
+      date: '2026-07-13',
+      model: 'deterministic-v1',
+      distilledAt: '2026-07-13T12:00:00.000Z',
+      confidence: 'EXTRACTED',
+      decisions: [],
+      facts: [],
+      openThreads: [],
+      links: [],
+    };
+
+    runtime.handleHookEvent('claude', {
+      hook_event_name: 'SessionEnd',
+      session_id: 'session-memory-trigger',
+      reason: 'clear',
+      distilledNote: note,
+    });
+    runtime.handleHookEvent('claude', {
+      hook_event_name: 'SessionStart',
+      session_id: 'new-session',
+      source: 'clear',
+      cwd: '/tmp/project',
+    });
+
+    expect(distillFromSessionEndMock).toHaveBeenCalledWith({
+      sessionId: 'session-memory-trigger',
+      transcriptPath: '/tmp/session-memory-trigger.jsonl',
+      model: 'deterministic-v1',
+      clientDistill: {
+        distilledNote: note,
+        distillSkipped: undefined,
+        distillFailed: undefined,
+        distillFailReason: undefined,
+      },
+    });
+    expect(store.get(1)?.sessionId).toBe('new-session');
+    runtime.dispose();
+  });
 });

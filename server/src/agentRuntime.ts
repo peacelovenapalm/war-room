@@ -162,6 +162,10 @@ export class AgentRuntime {
           this.registerAgent(agent.sessionId, agent.id);
         }
       },
+      onSessionDistill: (agentId, endedSessionId, distill) => {
+        const agent = this.store.get(agentId);
+        if (agent) this.distillAgent(agent, distill, endedSessionId);
+      },
       onSessionResume: (transcriptPath) => {
         this.dismissalTracker.clearDismissal(transcriptPath);
         this.dismissalTracker.clearSeededMtime(transcriptPath);
@@ -228,9 +232,13 @@ export class AgentRuntime {
     this.hookEventHandler.unregisterAgent(sessionId);
   }
 
-  private distillAgent(agent: AgentState, distill?: SessionEndDistillFields): void {
-    if (this.distilledSessionIds.has(agent.sessionId)) return;
-    this.distilledSessionIds.add(agent.sessionId);
+  private distillAgent(
+    agent: AgentState,
+    distill?: SessionEndDistillFields,
+    sessionId = agent.sessionId,
+  ): void {
+    if (this.distilledSessionIds.has(sessionId)) return;
+    this.distilledSessionIds.add(sessionId);
     // V7-1/V8: hook SessionEnd (optionally carrying a client-side distilled
     // note or failure marker -- see memoryDistiller.ts distillFromSessionEnd)
     // and manifest/stale removal both funnel here. The job returns disabled
@@ -238,14 +246,14 @@ export class AgentRuntime {
     // exists; no homedir/vault fallback is possible.
     try {
       distillFromSessionEnd({
-        sessionId: agent.sessionId,
+        sessionId,
         transcriptPath: agent.jsonlFile,
         model: 'deterministic-v1',
         clientDistill: distill,
       });
     } catch (error) {
       console.error(
-        `[Pixel Agents] Failed to distill ended session ${agent.sessionId}; continuing cleanup:`,
+        `[Pixel Agents] Failed to distill ended session ${sessionId}; continuing cleanup:`,
         error,
       );
     }
