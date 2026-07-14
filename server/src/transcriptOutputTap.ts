@@ -29,6 +29,7 @@
 
 import * as path from 'path';
 
+import { appendOutputChunkInBoundedParts } from './outputChunkAppender.js';
 import { outputRingStore } from './outputRingStore.js';
 
 /** Longest rendered argument inside a tool one-liner. */
@@ -89,20 +90,32 @@ function toolPrimaryArg(toolName: string, input: Record<string, unknown>): strin
  * JSON, assistant records without text/tool_use blocks).
  */
 export function renderTranscriptLine(line: string): string | undefined {
-  let record: Record<string, unknown>;
+  let record: unknown;
   try {
-    record = JSON.parse(line) as Record<string, unknown>;
+    record = JSON.parse(line) as unknown;
   } catch {
     return undefined;
   }
-  if (record === null || typeof record !== 'object' || record.type !== 'assistant') {
+  return renderTranscriptRecord(record);
+}
+
+/**
+ * Render an already-parsed transcript record. The remote tail ingest route
+ * also needs token usage from each record, so accepting the parsed value lets
+ * that hot path parse each JSONL line once instead of once here and again for
+ * usage extraction.
+ */
+export function renderTranscriptRecord(record: unknown): string | undefined {
+  if (record === null || typeof record !== 'object') {
     return undefined;
   }
+  const transcriptRecord = record as Record<string, unknown>;
+  if (transcriptRecord.type !== 'assistant') return undefined;
 
   // Same resilient content extraction as transcriptParser.ts: support both
   // record.message.content and record.content across Claude Code versions.
-  const message = record.message as Record<string, unknown> | undefined;
-  const content = message?.content ?? record.content;
+  const message = transcriptRecord.message as Record<string, unknown> | undefined;
+  const content = message?.content ?? transcriptRecord.content;
 
   if (typeof content === 'string') {
     return content.trim() === '' ? undefined : content;
@@ -136,6 +149,26 @@ export function tapTranscriptLine(agentId: number, line: string): void {
     const rendered = renderTranscriptLine(line);
     if (rendered === undefined) return;
     outputRingStore.append('agent', String(agentId), 'transcript', `${rendered}\n`);
+  } catch {
+    // Telemetry only: swallow everything.
+  }
+}
+
+/**
+ * Append the renderable records from one file-watcher poll as the fewest
+ * size-bounded chunks. readNewLines already parsed these records for
+ * lifecycle state, so this avoids both reparsing and one WS fan-out per line
+ * in the same 500ms poll.
+ */
+export function tapTranscriptRecords(agentId: number, records: readonly unknown[]): void {
+  try {
+    const rendered: string[] = [];
+    for (const record of records) {
+      const text = renderTranscriptRecord(record);
+      if (text !== undefined) rendered.push(`${text}\n`);
+    }
+    if (rendered.length === 0) return;
+    appendOutputChunkInBoundedParts('agent', String(agentId), 'transcript', rendered.join(''));
   } catch {
     // Telemetry only: swallow everything.
   }

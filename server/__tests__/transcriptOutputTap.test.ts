@@ -42,6 +42,7 @@ vi.mock('os', async () => {
 });
 
 const { AgentStateStore } = await import('../src/agentStateStore.js');
+const { OUTPUT_CHUNK_APPEND_BYTE_BUDGET } = await import('../src/constants.js');
 const { readNewLines } = await import('../src/fileWatcher.js');
 const { outputRingStore } = await import('../src/outputRingStore.js');
 const { PixelAgentsServer } = await import('../src/server.js');
@@ -89,6 +90,16 @@ function makeAgent(id: number, jsonlFile: string): AgentStateType {
 
 const assistantText = (text: string) =>
   JSON.stringify({ type: 'assistant', message: { content: [{ type: 'text', text }] } });
+
+const assistantUsage = (text: string, inputTokens: number, outputTokens: number) =>
+  JSON.stringify({
+    type: 'assistant',
+    timestamp: new Date().toISOString(),
+    message: {
+      content: [{ type: 'text', text }],
+      usage: { input_tokens: inputTokens, output_tokens: outputTokens },
+    },
+  });
 
 const assistantTool = (name: string, input: Record<string, unknown>) =>
   JSON.stringify({
@@ -197,7 +208,7 @@ describe('readNewLines → ring integration (real JSONL fixtures)', () => {
     return { id, file };
   }
 
-  it('feeds new assistant-text and tool-use lines into the ring with correct seq', () => {
+  it('coalesces assistant text and tool-use lines from one poll into one ring chunk', () => {
     const { id } = seedAgentWithFile([
       assistantText('Starting the fix.'),
       JSON.stringify({ type: 'user', message: { content: 'do it' } }),
@@ -207,10 +218,60 @@ describe('readNewLines → ring integration (real JSONL fixtures)', () => {
     readNewLines(id, agents, waitingTimers, permissionTimers);
 
     const chunks = outputRingStore.replay('agent', String(id));
-    expect(chunks.map((c) => c.chunk)).toEqual(['Starting the fix.\n', '● Bash(npm test)\n']);
-    expect(chunks.map((c) => c.seq)).toEqual([0, 1]);
+    expect(chunks.map((c) => c.chunk)).toEqual(['Starting the fix.\n● Bash(npm test)\n']);
+    expect(chunks.map((c) => c.seq)).toEqual([0]);
     expect(chunks.every((c) => c.source === 'agent' && c.stream === 'transcript')).toBe(true);
     expect(chunks.every((c) => c.id === String(id))).toBe(true);
+  });
+
+  it('splits a large coalesced poll without losing its content or older retained history', () => {
+    const olderChunk = 'already retained\n';
+    const largeTexts = [
+      `first:${'🙂'.repeat(4_500)}`,
+      `second:${'界'.repeat(6_000)}`,
+      `third:${'é'.repeat(9_000)}`,
+    ];
+    const expectedBatch = largeTexts.map((text) => `${text}\n`).join('');
+    expect(Buffer.byteLength(expectedBatch, 'utf8')).toBeGreaterThan(
+      OUTPUT_CHUNK_APPEND_BYTE_BUDGET,
+    );
+    const { id } = seedAgentWithFile(largeTexts.map(assistantText));
+    outputRingStore.append('agent', String(id), 'transcript', olderChunk);
+
+    readNewLines(id, agents, waitingTimers, permissionTimers);
+
+    const replay = outputRingStore.replay('agent', String(id));
+    const batchChunks = replay.slice(1);
+    expect(batchChunks.length).toBeGreaterThan(1);
+    expect(
+      batchChunks.every(
+        (chunk) => Buffer.byteLength(chunk.chunk, 'utf8') <= OUTPUT_CHUNK_APPEND_BYTE_BUDGET,
+      ),
+    ).toBe(true);
+    expect(batchChunks.map((chunk) => chunk.chunk).join('')).toBe(expectedBatch);
+    expect(replay.map((chunk) => chunk.chunk).join('')).toBe(`${olderChunk}${expectedBatch}`);
+    expect(replay[0]).toMatchObject({ chunk: olderChunk, seq: 0, truncated: false });
+    expect(replay.map((chunk) => chunk.seq)).toEqual(replay.map((_, index) => index));
+  });
+
+  it('broadcasts only the final token total for a multi-record poll', () => {
+    const broadcasts: Array<Record<string, unknown>> = [];
+    agents.on('broadcast', (message) => broadcasts.push(message));
+    const { id } = seedAgentWithFile([
+      assistantUsage('inspect', 100, 10),
+      assistantUsage('edit', 200, 20),
+      assistantUsage('test', 300, 30),
+      assistantUsage('report', 400, 40),
+    ]);
+
+    readNewLines(id, agents, waitingTimers, permissionTimers);
+
+    expect(outputRingStore.replay('agent', String(id)).map((chunk) => chunk.chunk)).toEqual([
+      'inspect\nedit\ntest\nreport\n',
+    ]);
+    expect(broadcasts.filter((message) => message.type === 'agentTokenUsage')).toEqual([
+      { type: 'agentTokenUsage', id, inputTokens: 1_000, outputTokens: 100 },
+    ]);
   });
 
   it('appends across successive polls with a monotonic seq (only NEW lines land)', () => {

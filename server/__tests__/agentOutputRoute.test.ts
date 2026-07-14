@@ -313,6 +313,53 @@ describe('POST /api/agents/output', () => {
     outputRingStore.evict('agent', String(agentId));
   });
 
+  it('preserves the tailer batch as one output chunk and one final token update', async () => {
+    const config = await server.start({ embedded: false, store });
+    const machine = uniqueMachine('M');
+    const agentId = newAgentId();
+    const sessionId = crypto.randomUUID();
+    const agent = makeAgent(agentId, sessionId, machine);
+    store.set(agentId, agent);
+
+    const broadcasts: Array<Record<string, unknown>> = [];
+    store.on('broadcast', (message) => broadcasts.push(message));
+    const chunks: Array<{ id: string; chunk: string }> = [];
+    const unsubscribe = outputRingStore.onChunk((chunk) => {
+      if (chunk.source === 'agent' && chunk.id === String(agentId)) chunks.push(chunk);
+    });
+
+    const timestamp = new Date().toISOString();
+    const lines = [
+      assistantUsage('inspect', 100, 10, { timestamp }),
+      assistantUsage('edit', 200, 20, { timestamp }),
+      assistantUsage('test', 300, 30, { timestamp }),
+      assistantUsage('report', 400, 40, { timestamp }),
+    ];
+    const res = await postOutput(
+      config.port,
+      { sessionId, lines },
+      { token: config.token, machine },
+    );
+    expect(await res.json()).toEqual({ ok: true });
+
+    expect(chunks.map(({ id, chunk }) => ({ id, chunk }))).toEqual([
+      { id: String(agentId), chunk: 'inspect\nedit\ntest\nreport\n' },
+    ]);
+    expect(broadcasts.filter((message) => message.type === 'agentTokenUsage')).toEqual([
+      {
+        type: 'agentTokenUsage',
+        id: agentId,
+        inputTokens: 1_000,
+        outputTokens: 100,
+      },
+    ]);
+    expect(agent.inputTokens).toBe(1_000);
+    expect(agent.outputTokens).toBe(100);
+
+    unsubscribe();
+    outputRingStore.evict('agent', String(agentId));
+  });
+
   it('liveness gate: a session with no live agent (post-removal) is a deny — ring never resurrected', async () => {
     const config = await server.start({ embedded: false, store });
     const machine = uniqueMachine('M');
