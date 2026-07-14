@@ -2074,6 +2074,15 @@ components:
 
     # ── Client message variants ────────────────────────────────────
 
+    WebviewClientValue:
+      description: >-
+        Optional face identifier on webviewReady. An absent value is the
+        legacy webview for backward compatibility; webview-v3 identifies the
+        spritesheet-driven Living Studio face, which does not consume the
+        legacy inline sprite/catalog payload.
+      type: string
+      enum: [webview-v3]
+
     WebviewReady:
       description: Client signals it's ready to receive state.
       type: object
@@ -2082,6 +2091,8 @@ components:
       properties:
         type:
           const: webviewReady
+        client:
+          $ref: '#/components/schemas/WebviewClientValue'
 
     LaunchAgent:
       description: Launch a new Claude agent in a new terminal.

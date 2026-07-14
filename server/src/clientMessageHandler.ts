@@ -15,7 +15,8 @@ type WsSend = (message: Record<string, unknown>) => void;
 /** Async hook toggle side effect (install/uninstall + script copy). Provided by cli.ts. */
 export type SetHooksEnabledSideEffect = (enabled: boolean) => Promise<void> | void;
 
-/** Cached assets loaded at server startup. Sent to each WebSocket client on webviewReady. */
+/** Cached legacy-face assets loaded at server startup. V3 loads its own
+ * spritesheets over HTTP and never consumes these inline pixel arrays. */
 export interface AssetCache {
   characters: LoadedCharacterSprites | null;
   pets: LoadedPetSprites | null;
@@ -77,7 +78,7 @@ export function handleClientMessage(
 
   switch (msg.type) {
     case 'webviewReady':
-      handleWebviewReady(send, ctx);
+      handleWebviewReady(send, ctx, msg.client === 'webview-v3');
       break;
 
     case 'saveLayout':
@@ -255,7 +256,7 @@ export function handleClientMessage(
   }
 }
 
-function handleWebviewReady(send: WsSend, ctx: ClientMessageContext): void {
+function handleWebviewReady(send: WsSend, ctx: ClientMessageContext, isV3: boolean): void {
   const { store, runtime, cache } = ctx;
   const adapter = store.getAdapter();
 
@@ -266,8 +267,10 @@ function handleWebviewReady(send: WsSend, ctx: ClientMessageContext): void {
     subagentToolNames: hookProviderCapabilities.subagentToolNames,
   });
 
-  // 2. Assets (from server cache, loaded at startup via pngjs)
-  if (cache) {
+  // 2. Legacy-face assets (from server cache, loaded at startup via pngjs).
+  // V3 owns a lazy HTTP spritesheet loader and ignores all six of these
+  // frames, so do not put ~842 KiB of dead JSON on every V3 connection.
+  if (!isV3 && cache) {
     if (cache.characters) {
       send({ type: 'characterSpritesLoaded', characters: cache.characters.characters });
     }
@@ -293,9 +296,12 @@ function handleWebviewReady(send: WsSend, ctx: ClientMessageContext): void {
     }
   }
 
-  // 3. Layout (saved file, or bundled default)
-  const savedLayout = readLayoutFromFile();
-  send({ type: 'layoutLoaded', layout: savedLayout ?? cache?.defaultLayout ?? null });
+  // 3. The legacy editable office owns this layout format. V3's authored
+  // world is independent and does not handle layoutLoaded.
+  if (!isV3) {
+    const savedLayout = readLayoutFromFile();
+    send({ type: 'layoutLoaded', layout: savedLayout ?? cache?.defaultLayout ?? null });
+  }
 
   // 4. Settings (from adapter, with sensible defaults when adapter is absent)
   const cfg = readConfig();

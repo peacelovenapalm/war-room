@@ -92,7 +92,9 @@ describe('connectToServer — disposed guard', () => {
     const socket = FakeWebSocket.instances[0];
     socket.onopen?.();
     expect(statuses).toEqual(['connecting', 'live']);
-    expect(socket.sent).toEqual([JSON.stringify({ type: 'webviewReady' })]);
+    expect(socket.sent).toEqual([
+      JSON.stringify({ type: 'webviewReady', client: 'webview-v3' }),
+    ]);
   });
 
   it('discards repeated offline diagnostics instead of bursting them on reconnect', () => {
@@ -104,7 +106,9 @@ describe('connectToServer — disposed guard', () => {
     const socket = FakeWebSocket.instances[0];
     socket.readyState = FakeWebSocket.OPEN;
     socket.onopen?.();
-    expect(socket.sent).toEqual([JSON.stringify({ type: 'webviewReady' })]);
+    expect(socket.sent).toEqual([
+      JSON.stringify({ type: 'webviewReady', client: 'webview-v3' }),
+    ]);
   });
 
   it('keeps durable commands queued while classifying transient reads as discardable', () => {

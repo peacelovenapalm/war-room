@@ -727,7 +727,10 @@ export interface AgentDiagnostics {
 
 export interface WebviewReady {
   type: 'webviewReady';
+  client?: WebviewClientValue;
 }
+
+export type WebviewClientValue = 'webview-v3';
 
 export interface LaunchAgent {
   type: 'launchAgent';

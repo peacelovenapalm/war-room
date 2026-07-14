@@ -59,7 +59,10 @@ export function connectToServer(options: ConnectOptions): ServerConnection {
       options.onStatus('live');
       // The server replies to webviewReady with the full current state
       // (existingAgents et al.) — see server/src/clientMessageHandler.ts.
-      const queue: ClientMessage[] = [{ type: 'webviewReady' }, ...pending];
+      const queue: ClientMessage[] = [
+        { type: 'webviewReady', client: 'webview-v3' },
+        ...pending,
+      ];
       pending = [];
       for (const message of queue) socket?.send(JSON.stringify(message));
     };

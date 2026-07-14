@@ -61,6 +61,59 @@ afterEach(() => {
 });
 
 describe('webviewReady authoritative telemetry replay', () => {
+  it('omits legacy inline assets and layout for the spritesheet-driven v3 face', () => {
+    const store = new AgentStateStore();
+    const sent: Record<string, unknown>[] = [];
+    const cache = {
+      characters: { characters: [] },
+      pets: { pets: [], manifests: [] },
+      floorTiles: [],
+      wallTiles: [],
+      furniture: { catalog: [], sprites: new Map() },
+      defaultLayout: { version: 1 },
+    };
+
+    handleClientMessage(
+      { type: 'webviewReady', client: 'webview-v3' },
+      (message) => sent.push(message),
+      { store, cache },
+    );
+
+    expect(sent.some((message) => message.type === 'characterSpritesLoaded')).toBe(false);
+    expect(sent.some((message) => message.type === 'petSpritesLoaded')).toBe(false);
+    expect(sent.some((message) => message.type === 'floorTilesLoaded')).toBe(false);
+    expect(sent.some((message) => message.type === 'wallTilesLoaded')).toBe(false);
+    expect(sent.some((message) => message.type === 'furnitureAssetsLoaded')).toBe(false);
+    expect(sent.some((message) => message.type === 'layoutLoaded')).toBe(false);
+    expect(sent.some((message) => message.type === 'settingsLoaded')).toBe(true);
+    expect(sent.some((message) => message.type === 'existingAgents')).toBe(true);
+  });
+
+  it('keeps sending inline assets and layout to untagged legacy clients', () => {
+    const store = new AgentStateStore();
+    const sent: Record<string, unknown>[] = [];
+    const cache = {
+      characters: { characters: [] },
+      pets: { pets: [], manifests: [] },
+      floorTiles: [],
+      wallTiles: [],
+      furniture: { catalog: [], sprites: new Map() },
+      defaultLayout: { version: 1 },
+    };
+
+    handleClientMessage({ type: 'webviewReady' }, (message) => sent.push(message), {
+      store,
+      cache,
+    });
+
+    expect(sent.some((message) => message.type === 'characterSpritesLoaded')).toBe(true);
+    expect(sent.some((message) => message.type === 'petSpritesLoaded')).toBe(true);
+    expect(sent.some((message) => message.type === 'floorTilesLoaded')).toBe(true);
+    expect(sent.some((message) => message.type === 'wallTilesLoaded')).toBe(true);
+    expect(sent.some((message) => message.type === 'furnitureAssetsLoaded')).toBe(true);
+    expect(sent).toContainEqual({ type: 'layoutLoaded', layout: { version: 1 } });
+  });
+
   it('replays explicit default and active status, permission, poll, token, and tool values', () => {
     const store = new AgentStateStore();
     // #1: a REAL pending tool-permission gate (permissionSent still true).
