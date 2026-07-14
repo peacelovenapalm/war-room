@@ -262,6 +262,39 @@ describe('getOpsReview — BLOCKED-AGE', () => {
     expect(verbs).not.toContain('focus');
   });
 
+  it('uses the server machine label for proposal gates on local agents', () => {
+    const store = new mods.AgentStateStore();
+    const now = Date.now();
+    mods.dispatchStore.recordAdvertisement(
+      'LOCALHOST',
+      { providers: ['claude'], roots: ['/tmp'], focus: true },
+      now,
+    );
+    store.set(
+      18,
+      makeAgent(18, {
+        pid: 818,
+        pollState: {
+          state: 'blocked',
+          waitingFor: 'Approve local action? (y/n)',
+          at: now,
+          since: now - 100_000,
+          lastBroadcastAt: now,
+        },
+      }),
+    );
+
+    const review = mods.getOpsReview(store, now, 'LOCALHOST');
+    const finding = review.findings.find((f: { id: string }) => f.id === 'blocked-age-18');
+    expect(finding.receipts).toContainEqual({ label: 'machine', value: 'LOCALHOST' });
+    expect((finding.proposedActions ?? []).map((a: { verb: string }) => a.verb)).toEqual([
+      'kill',
+      'focus',
+      'dispatch-nudge',
+    ]);
+    expect(finding.proposedActions[0].params.machine).toBe('LOCALHOST');
+  });
+
   it('no KILL/FOCUS proposal when there is no pid, or the machine has no live runner advertisement', () => {
     const store = new mods.AgentStateStore();
     const now = Date.now();

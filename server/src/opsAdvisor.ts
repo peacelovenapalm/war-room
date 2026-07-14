@@ -116,7 +116,11 @@ function formatDuration(ms: number): string {
 
 // ── BLOCKED-AGE ───────────────────────────────────────────────
 
-function blockedAgeFindings(store: AgentStateStore, now: number): OpsFinding[] {
+function blockedAgeFindings(
+  store: AgentStateStore,
+  now: number,
+  machineLabel: string,
+): OpsFinding[] {
   const findings: OpsFinding[] = [];
   // Live-only advertisements (getMachines' TTL filter) — the SAME source
   // dispatchFacts.ts's canKillAgent/machineSupportsFocus read on the
@@ -129,7 +133,7 @@ function blockedAgeFindings(store: AgentStateStore, now: number): OpsFinding[] {
     if (!poll || poll.state !== 'blocked') continue;
     const ageMs = now - poll.since;
     if (ageMs < OPS_BLOCKED_WARN_MS) continue;
-    const machine = agent.machine ?? 'LOCAL';
+    const machine = agent.machine ?? machineLabel;
 
     const proposedActions: OpsProposedAction[] = [];
     const machineAd = liveMachines.find((m) => m.machine === machine);
@@ -441,15 +445,21 @@ function narrativeFindings(now: number): OpsFinding[] {
 
 // ── Assembly + cache ──────────────────────────────────────────
 
-let cache: { at: number; value: OpsReview } | null = null;
+let cache: { at: number; machineLabel: string; value: OpsReview } | null = null;
 
 /** Get the ops review, serving from a short TTL cache when fresh (mirrors
  *  briefingProvider.ts's getBriefing pattern). */
-export function getOpsReview(store: AgentStateStore, now: number = Date.now()): OpsReview {
-  if (cache && now - cache.at < OPS_ADVISOR_CACHE_TTL_MS) return cache.value;
+export function getOpsReview(
+  store: AgentStateStore,
+  now: number = Date.now(),
+  machineLabel = 'LOCAL',
+): OpsReview {
+  if (cache && cache.machineLabel === machineLabel && now - cache.at < OPS_ADVISOR_CACHE_TTL_MS) {
+    return cache.value;
+  }
 
   const findings: OpsFinding[] = [
-    ...blockedAgeFindings(store, now),
+    ...blockedAgeFindings(store, now, machineLabel),
     ...deadTelemetryFindings(now),
     ...dispatchWasteFindings(),
     ...budgetBurnFindings(now),
@@ -470,7 +480,7 @@ export function getOpsReview(store: AgentStateStore, now: number = Date.now()): 
   }
 
   const value: OpsReview = { generatedAt: new Date(now).toISOString(), findings };
-  cache = { at: now, value };
+  cache = { at: now, machineLabel, value };
   return value;
 }
 

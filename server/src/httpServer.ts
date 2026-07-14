@@ -333,7 +333,7 @@ export async function createHttpServer(options: HttpServerOptions): Promise<Http
   // whitelist makes every tick a no-op (autoExecutorStore.runTick's own
   // deny-by-default check returns immediately).
   const autoExecutorTimer = setInterval(() => {
-    autoExecutorStore.runTick(options.store);
+    autoExecutorStore.runTick(options.store, Date.now(), options.machineLabel ?? 'LOCAL');
   }, AUTO_EXECUTOR_TICK_INTERVAL_MS);
   autoExecutorTimer.unref?.();
   app.addHook('onClose', () => clearInterval(autoExecutorTimer));
@@ -521,7 +521,9 @@ function registerBriefingRoute(app: FastifyInstance, options: HttpServerOptions)
   app.get('/api/shift', async () => ({
     today: shiftStats.getReport(),
     yesterday: shiftStats.getYesterdayReport(),
-    opsReview: opsReviewSummary(getOpsReview(options.store)),
+    opsReview: opsReviewSummary(
+      getOpsReview(options.store, Date.now(), options.machineLabel ?? 'LOCAL'),
+    ),
     // T3 rung 3: how many auto-actions actually fired today — the SHIFT
     // fold's honest count, zero on a shipped-empty whitelist.
     autoActionCount: autoExecutorStore.getTodayReceiptCount(),
@@ -534,7 +536,9 @@ function registerBriefingRoute(app: FastifyInstance, options: HttpServerOptions)
   // findings list with receipts. Same trust level as /api/briefing;
   // analyze-on-demand with a short TTL cache (opsAdvisor.ts), never a new
   // polling loop.
-  app.get('/api/ops/review', async () => getOpsReview(options.store));
+  app.get('/api/ops/review', async () =>
+    getOpsReview(options.store, Date.now(), options.machineLabel ?? 'LOCAL'),
+  );
   // Auto-Executor status (T3 rung 3): whitelist state (honest OFF unless
   // Greg has hand-edited the whitelist file) + the receipts ledger. Same
   // trust level, same "no new polling loop" posture — reads the executor's

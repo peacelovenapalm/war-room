@@ -425,7 +425,11 @@ export class AutoExecutorStore {
    *  no new polling loop), filter to whitelisted+guardrail-passing
    *  proposals, execute, receipt. Exported at instance level so tests can
    *  call it directly without waiting on a real timer. */
-  runTick(store: AgentStateStore, now: number = Date.now()): AutoActionReceipt[] {
+  runTick(
+    store: AgentStateStore,
+    now: number = Date.now(),
+    machineLabel = 'LOCAL',
+  ): AutoActionReceipt[] {
     // Codex fix round finding 1 — STOP ALL must reach the auto-executor: an
     // engaged kill switch makes every tick a genuine no-op (checked BEFORE
     // even reading the whitelist), surfaced honestly via getStatus()'s
@@ -434,7 +438,7 @@ export class AutoExecutorStore {
     const requeueCfg = this.isEnabled(REQUEUE_FAILED_DISPATCH_ACTION_KIND);
     if (!requeueCfg) return [];
 
-    const review = getOpsReview(store, now);
+    const review = getOpsReview(store, now, machineLabel);
     const fired: AutoActionReceipt[] = [];
     for (const finding of review.findings) {
       if (finding.id !== 'dispatch-waste-failed') continue;
