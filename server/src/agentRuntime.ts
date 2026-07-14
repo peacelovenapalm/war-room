@@ -236,12 +236,19 @@ export class AgentRuntime {
     // and manifest/stale removal both funnel here. The job returns disabled
     // before any transcript/vault access unless an explicit WAR_ROOM_VAULT_DIR
     // exists; no homedir/vault fallback is possible.
-    distillFromSessionEnd({
-      sessionId: agent.sessionId,
-      transcriptPath: agent.jsonlFile,
-      model: 'deterministic-v1',
-      clientDistill: distill,
-    });
+    try {
+      distillFromSessionEnd({
+        sessionId: agent.sessionId,
+        transcriptPath: agent.jsonlFile,
+        model: 'deterministic-v1',
+        clientDistill: distill,
+      });
+    } catch (error) {
+      console.error(
+        `[Pixel Agents] Failed to distill ended session ${agent.sessionId}; continuing cleanup:`,
+        error,
+      );
+    }
   }
 
   // ── Agent removal (shared cleanup) ──

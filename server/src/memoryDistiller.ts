@@ -231,26 +231,34 @@ export function distillFromSessionEnd(input: DistillFromSessionEndInput): Memory
   const date = new Date(now).toISOString().slice(0, 10);
   const clientDistill = input.clientDistill;
 
-  if (clientDistill?.distilledNote !== undefined) {
-    const note = validateClientDistilledNote(clientDistill.distilledNote, input.sessionId, date);
-    if (note) return store.writeNote(note, now);
-    return store.receiptFailure(input.sessionId, date, 'client-distill-failed', now);
+  try {
+    if (clientDistill?.distilledNote !== undefined) {
+      const note = validateClientDistilledNote(clientDistill.distilledNote, input.sessionId, date);
+      if (note) return store.writeNote(note, now);
+      return store.receiptFailure(input.sessionId, date, 'client-distill-failed', now);
+    }
+    if (clientDistill?.distillSkipped) {
+      return store.receiptSkip(input.sessionId, date, 'skip-tag', now);
+    }
+    if (clientDistill?.distillFailed) {
+      return store.receiptFailure(input.sessionId, date, 'client-distill-failed', now);
+    }
+    if (input.transcriptPath !== '') {
+      return distillEndedSession({
+        sessionId: input.sessionId,
+        transcriptPath: input.transcriptPath,
+        model: input.model,
+        now: input.now,
+        distiller: input.distiller,
+        store,
+      });
+    }
+    return store.receiptFailure(input.sessionId, date, 'transcript-unavailable', now);
+  } catch {
+    try {
+      return store.receiptFailure(input.sessionId, date, 'session-distill-failed', now);
+    } catch {
+      return { outcome: 'failed', receiptId: null, reason: 'audit-ledger-unavailable' };
+    }
   }
-  if (clientDistill?.distillSkipped) {
-    return store.receiptSkip(input.sessionId, date, 'skip-tag', now);
-  }
-  if (clientDistill?.distillFailed) {
-    return store.receiptFailure(input.sessionId, date, 'client-distill-failed', now);
-  }
-  if (input.transcriptPath !== '') {
-    return distillEndedSession({
-      sessionId: input.sessionId,
-      transcriptPath: input.transcriptPath,
-      model: input.model,
-      now: input.now,
-      distiller: input.distiller,
-      store,
-    });
-  }
-  return store.receiptFailure(input.sessionId, date, 'transcript-unavailable', now);
 }

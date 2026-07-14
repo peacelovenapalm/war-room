@@ -1,7 +1,7 @@
 import * as fs from 'fs';
 import * as os from 'os';
 import * as path from 'path';
-import { afterEach, beforeEach, describe, expect, it } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 import { MEMORY_DISTILL_MAX_ITEMS } from '../src/constants.js';
 import {
@@ -319,5 +319,80 @@ describe('distillFromSessionEnd: V8 four (+skip) receipt paths', () => {
       clientDistill: { distilledNote: validNote('session-disabled', '2026-07-13') },
     });
     expect(result).toEqual({ outcome: 'disabled', receiptId: null });
+  });
+
+  it('records a failure when a client-note write throws', () => {
+    const receiptFailure = vi.fn(() => ({
+      outcome: 'failed' as const,
+      receiptId: 'failure-receipt',
+      reason: 'session-distill-failed',
+    }));
+    const result = distillFromSessionEnd({
+      sessionId: 'session-write-error',
+      transcriptPath: '',
+      model: 'deterministic-v1',
+      now: Date.parse('2026-07-13T12:00:00Z'),
+      clientDistill: { distilledNote: validNote('session-write-error', '2026-07-13') },
+      store: {
+        isEnabled: () => true,
+        writeNote: () => {
+          throw new Error('read-only vault');
+        },
+        receiptSkip: vi.fn(),
+        receiptFailure,
+      },
+    });
+
+    expect(result).toMatchObject({
+      outcome: 'failed',
+      receiptId: 'failure-receipt',
+      reason: 'session-distill-failed',
+    });
+    expect(receiptFailure).toHaveBeenCalledWith(
+      'session-write-error',
+      '2026-07-13',
+      'session-distill-failed',
+      Date.parse('2026-07-13T12:00:00Z'),
+    );
+  });
+
+  it('never lets an unavailable audit ledger escape session end', () => {
+    expect(() =>
+      distillFromSessionEnd({
+        sessionId: 'session-ledger-error',
+        transcriptPath: '',
+        model: 'deterministic-v1',
+        clientDistill: { distillSkipped: true },
+        store: {
+          isEnabled: () => true,
+          writeNote: vi.fn(),
+          receiptSkip: () => {
+            throw new Error('read-only vault');
+          },
+          receiptFailure: () => {
+            throw new Error('read-only ledger');
+          },
+        },
+      }),
+    ).not.toThrow();
+
+    expect(
+      distillFromSessionEnd({
+        sessionId: 'session-ledger-error',
+        transcriptPath: '',
+        model: 'deterministic-v1',
+        clientDistill: { distillSkipped: true },
+        store: {
+          isEnabled: () => true,
+          writeNote: vi.fn(),
+          receiptSkip: () => {
+            throw new Error('read-only vault');
+          },
+          receiptFailure: () => {
+            throw new Error('read-only ledger');
+          },
+        },
+      }),
+    ).toEqual({ outcome: 'failed', receiptId: null, reason: 'audit-ledger-unavailable' });
   });
 });

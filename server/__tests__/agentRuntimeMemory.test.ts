@@ -42,6 +42,7 @@ function makeAgent(isExternal = true): AgentState {
 
 beforeEach(() => {
   distillFromSessionEndMock.mockClear();
+  distillFromSessionEndMock.mockReturnValue({ outcome: 'disabled', receiptId: null });
 });
 
 describe('AgentRuntime V7/V8 session-end trigger', () => {
@@ -110,6 +111,33 @@ describe('AgentRuntime V7/V8 session-end trigger', () => {
         distillFailReason: undefined,
       },
     });
+    runtime.dispose();
+  });
+
+  it('continues external-agent cleanup when the distiller throws', () => {
+    const consoleError = vi.spyOn(console, 'error').mockImplementation(() => undefined);
+    distillFromSessionEndMock.mockImplementationOnce(() => {
+      throw new Error('unexpected distiller failure');
+    });
+    const store = new AgentStateStore();
+    const runtime = new AgentRuntime(store, claudeProvider);
+    store.set(1, makeAgent());
+    runtime.registerAgent('session-memory-trigger', 1);
+
+    expect(() =>
+      runtime.handleHookEvent('claude', {
+        hook_event_name: 'SessionEnd',
+        session_id: 'session-memory-trigger',
+        reason: 'exit',
+      }),
+    ).not.toThrow();
+
+    expect(store.has(1)).toBe(false);
+    expect(consoleError).toHaveBeenCalledWith(
+      '[Pixel Agents] Failed to distill ended session session-memory-trigger; continuing cleanup:',
+      expect.any(Error),
+    );
+    consoleError.mockRestore();
     runtime.dispose();
   });
 });
