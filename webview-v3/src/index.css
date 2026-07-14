@@ -7,6 +7,14 @@
   box-sizing: border-box;
 }
 
+:root {
+  /* Live-measured HUD height (HudStrip.tsx's ResizeObserver) — the HUD
+     wraps to a variable number of rows on phone, so this can't be a fixed
+     constant. Consumed by the phone modal-backdrop rule (M2 fix) to keep
+     every modal's title/close below the HUD instead of under it. */
+  --hud-height: 0px;
+}
+
 html,
 body,
 #root {
@@ -52,6 +60,20 @@ body,
      visible, never buried behind a panel). */
   position: relative;
   z-index: 60;
+}
+
+/* M6 fix: at narrower desktop widths (measured overflow at 1024px — HUD
+   content reached ~1395px) the strip used to hide FLOOR/GRAYSCALE/mute
+   behind a thin horizontal scrollbar with no visible affordance. Wrapping
+   is the same strategy the phone breakpoint below already uses; STOP ALL
+   stays wherever it falls in DOM order (right after the spacer, ahead of
+   every low-priority toggle) so it's never among the wrapped controls. */
+@media (max-width: 1400px) and (min-width: 701px) {
+  .hud {
+    flex-wrap: wrap;
+    overflow-x: visible;
+    row-gap: 6px;
+  }
 }
 
 .hud .brand {
@@ -159,6 +181,24 @@ body,
   font-weight: 700;
 }
 
+.desk-chip__glyph {
+  display: inline-block;
+}
+
+/* M5 — "Always show labels" OFF: the glyph alone stays visible always; the
+   name/status text reveals on hover or keyboard focus. This is the honest
+   wiring for a setting that used to persist without doing anything. */
+.desk-chip--compact .desk-chip__label {
+  display: none;
+}
+
+.desk-chip--compact:hover .desk-chip__label,
+.desk-chip--compact:focus .desk-chip__label,
+.desk-chip--compact:focus-visible .desk-chip__label {
+  display: inline;
+  margin-left: 4px;
+}
+
 /* ── Triage board ──────────────────────────────────────────── */
 
 .triage-board {
@@ -201,6 +241,12 @@ body,
 }
 
 .triage-board__rows {
+  /* M1 fix: grow to fill whatever height .triage-board actually has (its
+     own flex-basis, not just "however tall the rows happen to be") so the
+     internal overflow-y scroll region is real — without flex-grow this
+     stayed content-sized and could be squeezed by the parent without ever
+     activating its own scrollbar. */
+  flex: 1 1 auto;
   overflow-y: auto;
   min-height: 0;
 }
@@ -305,6 +351,15 @@ body,
 
 .verb--undo,
 .verb--confirm {
+  font-weight: 700;
+}
+
+/* Shape+word ACTIVE state (colorblind hard rule) — distinct from
+   verb--confirm's urgency styling: this marks "currently selected", e.g.
+   the GRAPH SEARCH depth control (M7 finding). */
+.verb--active {
+  background: #3a4150;
+  border-color: #8a94a8;
   font-weight: 700;
 }
 
@@ -670,8 +725,19 @@ body,
 
   .surfaces[data-view='floor'] .triage-board {
     position: static;
-    flex: 0 1 auto;
+    /* M1 fix: a fixed flex-basis with flex-grow/flex-shrink BOTH 0 means
+       the triage board always gets exactly this share of the remaining
+       height, regardless of how much content the floor feed wants to grow
+       into — under `flex: 0 1 auto` the board could be squeezed down to a
+       sliver (measured 25.8px live) while its crisis rows/actions still
+       painted past its own bounds, underneath the feed. `overflow: hidden`
+       is defense in depth: if content ever DOES exceed this box, it clips
+       instead of bleeding onto the feed below it. Internal scrolling still
+       happens in .triage-board__rows (overflow-y: auto) when there are
+       more rows than fit. */
+    flex: 0 0 42%;
     max-height: 42%;
+    overflow: hidden;
     width: auto;
     border-left: none;
     border-right: none;
@@ -716,6 +782,20 @@ body,
   display: inline-flex;
   align-items: center;
   gap: 6px;
+}
+
+/* M3 — persistent ENGAGED banner: loud, inverted (dark text on light
+   ground) so it reads distinctly from every other HUD chip even in
+   grayscale — shape (■) + word, never color alone. */
+.stop-all__engaged {
+  font-size: 11px;
+  font-weight: 700;
+  letter-spacing: 0.04em;
+  white-space: nowrap;
+  padding: 3px 7px;
+  background: #f2f4f8;
+  color: #14171d;
+  border: 1px solid #f2f4f8;
 }
 
 /* Honest failure state (hard rule 8 + colorblind rule): glyph + word,
@@ -884,11 +964,19 @@ body,
 @media (max-width: 700px) {
   .modal-backdrop {
     align-items: flex-end;
+    /* M2 fix: a tall modal (MORNING) used to center vertically under the
+       fixed HUD, painting its own title/close bar behind it — hit-testing
+       the close button returned the HUD's <header>, and phones have no Esc
+       key, so it was a practical dead end. Reserving the HUD's real
+       (live-measured, HudStrip.tsx) height as top padding keeps every
+       modal's top edge — and therefore its close button — below the HUD,
+       regardless of how many rows the HUD itself wraps to. */
+    padding-top: var(--hud-height, 0px);
   }
 
   .modal {
     width: 100%;
-    max-height: 88vh;
+    max-height: calc(88vh - var(--hud-height, 0px));
   }
 }
 
@@ -1176,7 +1264,14 @@ body,
   display: flex;
   flex-direction: column;
   gap: 2px;
-  z-index: 15;
+  /* Above .modal-backdrop (45): the dock is the "always available, switch
+     panels directly" affordance, but a full-viewport backdrop sitting on
+     top of it silently ate the first click whenever a panel was already
+     open — closing the old panel instead of opening the new one (panel
+     finding: "switching panels takes two clicks"). Still below the HUD
+     (60) and the real-sheet (65), matching their own "always reachable"
+     precedent. */
+  z-index: 47;
 }
 
 .panel-dock__item {
@@ -1219,12 +1314,33 @@ body,
      STAY — glyph-only buttons failed the shape+label audit (▤/▦/▥ are
      indistinguishable shapes; hard rule 1). */
   .panel-dock {
-    position: static;
+    position: relative;
     flex: 0 0 auto;
     flex-direction: row;
     overflow-x: auto;
     padding: 4px 10px;
     border-top: 1px solid #3a4150;
+  }
+
+  /* Minor finding: the scrollable dock gave no hint that ~8 more
+     destinations sit offscreen. A fixed fade + chevron on the trailing
+     edge signals "more" without claiming an exact count (this is a
+     decoration, not a state, so it's exempt from the shape+word rule —
+     nothing here is reporting real data). */
+  .panel-dock::after {
+    content: '›';
+    position: sticky;
+    right: 0;
+    flex: 0 0 auto;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    width: 22px;
+    align-self: stretch;
+    background: linear-gradient(to right, transparent, #14171d 65%);
+    font-size: 16px;
+    font-weight: 700;
+    pointer-events: none;
   }
 
   .panel-dock > .control-tip--flex {
@@ -1275,10 +1391,136 @@ body,
   font-size: 14px;
 }
 
+/* M5 — "Always show labels" OFF, desktop hotspots (same wiring as
+   .desk-chip--compact above): glyph stays put, text label reveals on
+   hover/focus. */
+.prop-hotspot--compact .prop-hotspot__label {
+  display: none;
+}
+
+.prop-hotspot--compact:hover .prop-hotspot__label,
+.prop-hotspot--compact:focus .prop-hotspot__label,
+.prop-hotspot--compact:focus-visible .prop-hotspot__label {
+  display: inline;
+}
+
 @media (max-width: 700px) {
   .prop-hotspots {
     display: none;
   }
+}
+
+/* ── OPS REVIEW panel ───────────────────────────────────────────────── */
+
+.ops-findings {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.ops-finding {
+  border: 1px solid #2c3240;
+}
+
+.ops-finding__head {
+  display: flex;
+  align-items: baseline;
+  gap: 6px;
+  width: 100%;
+  padding: 6px 8px;
+  background: none;
+  border: none;
+  color: inherit;
+  font: inherit;
+  text-align: left;
+  cursor: pointer;
+}
+
+.ops-finding__severity {
+  flex: 0 0 auto;
+  font-weight: 700;
+}
+
+.ops-finding__summary {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.ops-finding__body {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  padding: 0 8px 8px;
+  border-top: 1px solid #232936;
+}
+
+.ops-finding__detail {
+  margin: 6px 0 0;
+}
+
+.ops-finding__receipts {
+  margin: 0;
+  padding-left: 16px;
+}
+
+.ops-proposal {
+  display: flex;
+}
+
+.ops-proposal--confirm {
+  align-items: center;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+
+.ops-auto__heading,
+.ops-self-heal__heading {
+  margin: 4px 0 0;
+  font-size: 12px;
+  font-weight: 700;
+  letter-spacing: 0.05em;
+}
+
+.ops-auto__whitelist-line {
+  padding: 4px 0;
+}
+
+.ops-auto__receipts,
+.ops-self-heal__receipts {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.ops-auto__receipts li,
+.ops-self-heal__receipts li {
+  padding: 4px 6px;
+  border: 1px solid #232936;
+  font-size: 11px;
+}
+
+.ops-self-heal__flags {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+}
+
+.ops-self-heal__flags li {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  padding: 4px 0;
+  border-bottom: 1px solid #232936;
 }
 
 /* ── Automation panel (chains + standing orders) ───────────────────── */

@@ -28,6 +28,7 @@ import { SettingsModal } from './components/SettingsModal';
 import { ShiftPanel } from './components/ShiftPanel';
 import { SpeechBubbleLayer } from './components/SpeechBubbleLayer';
 import { TriageBoard } from './components/TriageBoard';
+import { STOP_ALL_EXTERNAL_RESUME_POLL_MS } from './constants';
 import {
   type CalmTransition,
   displayedWarmth,
@@ -115,7 +116,12 @@ import {
   pruneSpeechBubbles,
   type SpeechBubbleEvent,
 } from './state/speechBubbles';
-import { reduceAutomationStopped, stoppedFromLatch, stoppedFromOrders } from './state/stopAll';
+import {
+  pollSaysReleased,
+  reduceAutomationStopped,
+  stoppedFromLatch,
+  stoppedFromOrders,
+} from './state/stopAll';
 import {
   appendChunk,
   dropStream,
@@ -851,6 +857,42 @@ export default function App() {
     };
   }, []);
 
+  // M3 follow-up (beta re-verification): POST /api/automation/resume never
+  // broadcasts over WS — only the stop-all route does (server/src/
+  // httpServer.ts) — so a client showing the M3 ENGAGED banner has no push
+  // signal telling it another client already released automation. While
+  // `automationStopped` is true, poll the durable latch and clear locally
+  // on an explicit {engaged:false} (pollSaysReleased's own honesty rule: a
+  // failed or malformed poll changes nothing — never clear on absence of
+  // evidence). Stops polling the instant `automationStopped` goes false,
+  // whether from this clear, this client's own RESUME, or a real WS
+  // engage/resume broadcast. `inFlightRef` skips starting a new poll while
+  // one is still pending, so a slow response can never overlap a fresh one.
+  const stopAllPollInFlightRef = useRef(false);
+  useEffect(() => {
+    if (!automationStopped) return;
+    let cancelled = false;
+    const poll = () => {
+      if (stopAllPollInFlightRef.current) return;
+      stopAllPollInFlightRef.current = true;
+      void fetch('/api/automation/stop-all-state')
+        .then(async (res) => (res.ok ? ((await res.json()) as unknown) : null))
+        .then((body) => {
+          if (cancelled) return;
+          if (pollSaysReleased(body)) setAutomationStopped(false);
+        })
+        .catch(() => undefined)
+        .finally(() => {
+          stopAllPollInFlightRef.current = false;
+        });
+    };
+    const timer = setInterval(poll, STOP_ALL_EXTERNAL_RESUME_POLL_MS);
+    return () => {
+      cancelled = true;
+      clearInterval(timer);
+    };
+  }, [automationStopped]);
+
   // Age tick — board ages, poll TTLs (fires go out when a poll expires),
   // and lapsed ACK undo windows committing for real (instance-matched:
   // sweepAcks never lets a stale ack sweep a NEW failure reusing its key,
@@ -1060,6 +1102,12 @@ export default function App() {
    *  honest skip, never a fabricated anchor. */
   const openPanelWithFlight = useCallback(
     (kind: DockPanelKind) => {
+      // M4 (beta finding): opening ANY panel replaces the one-tap-real
+      // sheet rather than stacking behind it — the sheet has a higher
+      // z-index (index.css), so a panel opened while it's up used to
+      // render invisibly underneath, showing two active overlay layers
+      // with two close buttons.
+      setRealKind(null);
       setOpenPanel(kind);
       const anchor = panelFlightAnchor(kind);
       const container = containerRef.current;
@@ -1187,6 +1235,48 @@ export default function App() {
     send({ type: 'requestDiagnostics' });
   }, [send]);
 
+  // M4 — opening the one-tap-real sheet replaces any open panel (the
+  // mirror image of openPanelWithFlight's setRealKind(null) above): the two
+  // overlay families never coexist, so there is only ever one thing to
+  // close.
+  const handleOpenReal = useCallback((kind: RealSheetKind) => {
+    setOpenPanel(null);
+    setRealKind(kind);
+  }, []);
+
+  // M4 (beta finding) — ONE Escape listener for the whole app, closing
+  // whichever overlay is actually topmost (z-index order, index.css):
+  // the RESULT modal > the one-tap-real sheet > a stage-3 panel > the
+  // agent drawer. Previously every Modal instance owned its own Escape
+  // effect with no notion of what else was open, so Escape closed
+  // whatever modal happened to be mounted even when a higher-z-index
+  // sheet was covering it (panel finding: "Esc then closes HELP behind
+  // the sheet, not the frontmost sheet").
+  useEffect(() => {
+    const onKeyDown = (e: KeyboardEvent) => {
+      if (e.key !== 'Escape') return;
+      if (viewingResult !== null) {
+        setViewingResult(null);
+        return;
+      }
+      if (realKind !== null) {
+        setRealKind(null);
+        return;
+      }
+      if (openPanel !== null) {
+        closePanel();
+        return;
+      }
+      if (drawerAgentId !== null) {
+        handleCloseDrawer();
+      }
+    };
+    window.addEventListener('keydown', onKeyDown);
+    return () => {
+      window.removeEventListener('keydown', onKeyDown);
+    };
+  }, [viewingResult, realKind, openPanel, drawerAgentId, closePanel, handleCloseDrawer]);
+
   const tally = useMemo(() => tallyAgents(agents, now), [agents, now]);
   const wings = useMemo(() => wingCounts(agents, crisis), [agents, crisis]);
   const openCrises = openCrisisCount(crisis);
@@ -1216,7 +1306,7 @@ export default function App() {
         onToggleView={() => {
           setView((value) => (value === 'floor' ? 'board' : 'floor'));
         }}
-        onOpenReal={setRealKind}
+        onOpenReal={handleOpenReal}
         onOpenCall={() => {
           openPanelWithFlight('call');
         }}
@@ -1237,7 +1327,12 @@ export default function App() {
             onPointerUp={handlePointerUp}
             onPointerCancel={handlePointerUp}
           />
-          <ChipLayer frame={chipFrame} occupants={occupants} onChipClick={handleDesk} />
+          <ChipLayer
+            frame={chipFrame}
+            occupants={occupants}
+            onChipClick={handleDesk}
+            alwaysShowLabels={settings?.alwaysShowLabels ?? true}
+          />
           <DispatchVisitorChips frame={chipFrame} visitors={dispatchVisitors} />
           <SpeechBubbleLayer
             frame={chipFrame}
@@ -1248,7 +1343,11 @@ export default function App() {
           {/* Room-is-interface half of the desktop chrome model — desktop
               only (CSS-hidden on phone, matching the pin dock's own
               breakpoint: no free camera play there). */}
-          <PropHotspots frame={chipFrame} onOpen={handleOpenHotspot} />
+          <PropHotspots
+            frame={chipFrame}
+            onOpen={handleOpenHotspot}
+            alwaysShowLabels={settings?.alwaysShowLabels ?? true}
+          />
         </div>
         <TriageBoard
           agents={agents}

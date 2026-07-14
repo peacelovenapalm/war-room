@@ -8,12 +8,15 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
 
 import {
+  DISTRICT_STALE_MS,
   type DistrictProject,
   districtStatusGlyph,
   fetchDistricts,
   formatDistrictActivity,
+  formatDistrictAge,
   formatDistrictPhase,
   formatDistrictProgress,
+  isDistrictStale,
   isDistrictUnknown,
   MAX_FLOORS,
   MIN_FLOORS,
@@ -100,6 +103,49 @@ describe('formatDistrictPhase / formatDistrictActivity', () => {
   it('null lastActivity -> honest placeholder', () => {
     expect(formatDistrictActivity(null)).toBe('no recorded activity');
     expect(formatDistrictActivity('2026-07-08')).toBe('2026-07-08');
+  });
+});
+
+describe('isDistrictStale (minor finding: a 2-month-old timestamp read as fresh)', () => {
+  const NOW = Date.parse('2026-07-13T00:00:00Z');
+
+  it('flags a timestamp older than the stale window', () => {
+    const old = new Date(NOW - DISTRICT_STALE_MS - 1000).toISOString();
+    expect(isDistrictStale(old, NOW)).toBe(true);
+  });
+
+  it('does not flag a timestamp within the stale window', () => {
+    const recent = new Date(NOW - 1000).toISOString();
+    expect(isDistrictStale(recent, NOW)).toBe(false);
+  });
+
+  it('never flags an absent or unparseable timestamp as stale — that is the separate "no recorded activity" case', () => {
+    expect(isDistrictStale(null, NOW)).toBe(false);
+    expect(isDistrictStale('not-a-date', NOW)).toBe(false);
+  });
+});
+
+describe('formatDistrictAge', () => {
+  const NOW = Date.parse('2026-07-13T00:00:00Z');
+
+  it('formats sub-day ages in hours', () => {
+    const threeHoursAgo = new Date(NOW - 3 * 60 * 60 * 1000).toISOString();
+    expect(formatDistrictAge(threeHoursAgo, NOW)).toBe('3h ago');
+  });
+
+  it('formats multi-day ages in days', () => {
+    const sixteenDaysAgo = new Date(NOW - 16 * 24 * 60 * 60 * 1000).toISOString();
+    expect(formatDistrictAge(sixteenDaysAgo, NOW)).toBe('16d ago');
+  });
+
+  it('formats 60+ day ages in months', () => {
+    const twoMonthsAgo = new Date(NOW - 61 * 24 * 60 * 60 * 1000).toISOString();
+    expect(formatDistrictAge(twoMonthsAgo, NOW)).toBe('2mo ago');
+  });
+
+  it('is honest ("—") for missing or unparseable timestamps, never a fabricated age', () => {
+    expect(formatDistrictAge(null, NOW)).toBe('—');
+    expect(formatDistrictAge('garbage', NOW)).toBe('—');
   });
 });
 

@@ -1,6 +1,7 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
 
 import {
+  dedupeMatches,
   formatEdgeLine,
   type GraphEdge,
   type GraphNeighborEdge,
@@ -74,6 +75,25 @@ describe('groupEdgesByHop', () => {
 
   it('returns an empty array for no edges', () => {
     expect(groupEdgesByHop([])).toEqual([]);
+  });
+});
+
+describe('dedupeMatches (minor finding: the same node rendered as both a match and the resolved block)', () => {
+  const nodes: GraphNode[] = [
+    { id: 'project:war-room', title: 'War Room' },
+    { id: 'note:other', title: 'Other Note' },
+  ];
+
+  it('drops the match whose id equals the resolved node id', () => {
+    expect(dedupeMatches(nodes, 'project:war-room')).toEqual([nodes[1]]);
+  });
+
+  it('leaves matches untouched when nothing resolved (resolvedId undefined)', () => {
+    expect(dedupeMatches(nodes, undefined)).toEqual(nodes);
+  });
+
+  it('leaves matches untouched when the resolved id matches none of them', () => {
+    expect(dedupeMatches(nodes, 'project:unrelated')).toEqual(nodes);
   });
 });
 

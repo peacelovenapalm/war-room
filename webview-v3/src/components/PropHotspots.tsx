@@ -4,6 +4,10 @@ import type { ChipFrame } from './ChipLayer';
 export interface PropHotspotsProps {
   frame: ChipFrame | null;
   onOpen: (kind: HotspotKind) => void;
+  /** SETTINGS → "Always show labels" (M5 beta finding) — see ChipLayer's
+   *  matching prop doc. When false, hotspot text labels reveal only on
+   *  hover/focus; the glyph stays visible either way. */
+  alwaysShowLabels: boolean;
 }
 
 /**
@@ -15,7 +19,7 @@ export interface PropHotspotsProps {
  * breakpoint, matching the pin dock) — phone reaches every panel through
  * PanelDock.tsx instead, since there is no free camera play on phone.
  */
-export function PropHotspots({ frame, onOpen }: PropHotspotsProps) {
+export function PropHotspots({ frame, onOpen, alwaysShowLabels }: PropHotspotsProps) {
   if (frame === null) return null;
   const placed = placeHotspots(frame.camera);
 
@@ -25,7 +29,7 @@ export function PropHotspots({ frame, onOpen }: PropHotspotsProps) {
         <button
           type="button"
           key={hotspot.kind}
-          className="prop-hotspot"
+          className={alwaysShowLabels ? 'prop-hotspot' : 'prop-hotspot prop-hotspot--compact'}
           data-testid={`hotspot-${hotspot.kind}`}
           style={{ left: `${String(hotspot.x)}px`, top: `${String(hotspot.y)}px` }}
           title={hotspot.label}

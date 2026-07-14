@@ -118,6 +118,16 @@ export interface HopGroup {
   edges: GraphNeighborEdge[];
 }
 
+/** Minor finding: the server can return the same node as BOTH a plain
+ *  match AND the resolved block (one real match plus its own resolved
+ *  detail) — the UI used to render the identical row twice. Drops any
+ *  match whose id equals the resolved node's id; a search with no resolved
+ *  block (`resolvedId` undefined) returns `matches` unchanged. */
+export function dedupeMatches(matches: GraphNode[], resolvedId: string | undefined): GraphNode[] {
+  if (resolvedId === undefined) return matches;
+  return matches.filter((node) => node.id !== resolvedId);
+}
+
 /** Groups resolved edges by hop distance, ascending — `[hop 1]` before
  *  `[hop 2]` etc., preserving each hop's original edge order. */
 export function groupEdgesByHop(edges: GraphNeighborEdge[]): HopGroup[] {

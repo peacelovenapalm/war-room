@@ -71,3 +71,36 @@ export function reduceAutomationStopped(prev: boolean, message: ServerMessage): 
   if (message.type === 'automationStopped') return true;
   return prev;
 }
+
+/** M3 (beta finding): a client-local receipt/confirm-arm ("Resumed 0
+ *  order(s).") must never survive a `stopped` transition that DIDN'T come
+ *  from this instance's own fetch — otherwise it can sit there
+ *  contradicting the live WS-authoritative state (the reported case: a
+ *  stale "Resumed…" tooltip survived another client's external engage).
+ *  `expected` is the value this instance's own last successful call asked
+ *  for (or the initial `stopped` prop, before any call); `actual` is the
+ *  current `stopped` prop. They diverge only when something OTHER than
+ *  this instance moved the state. */
+export function isExternalStopTransition(expected: boolean, actual: boolean): boolean {
+  return expected !== actual;
+}
+
+/** M3 follow-up (post-fix visual re-verification): an EXTERNAL resume —
+ *  another client's POST /api/automation/resume — releases the durable
+ *  latch server-side but never broadcasts (only the stop-all route emits
+ *  `automationStopped`; see httpServer.ts). Left alone, `stopped` latches
+ *  true forever once WS-set, and the loud M3 ENGAGED banner becomes a
+ *  standing false alarm — the same multi-client dishonesty class M3
+ *  targets, inverted. App.tsx polls GET /api/automation/stop-all-state
+ *  while `stopped` is true and calls this to decide whether to clear it.
+ *
+ *  Deliberately asymmetric with stoppedFromLatch: this only returns true
+ *  on an EXPLICIT `engaged: false` — a malformed body, an error response
+ *  turned into `null`, or any other shape changes nothing. A standing
+ *  false ENGAGED banner is the safe failure direction; incorrectly
+ *  clearing a real halt is not. */
+export function pollSaysReleased(body: unknown): boolean {
+  return (
+    typeof body === 'object' && body !== null && (body as { engaged?: unknown }).engaged === false
+  );
+}

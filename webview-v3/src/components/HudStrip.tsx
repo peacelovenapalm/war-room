@@ -1,3 +1,5 @@
+import { useEffect, useRef } from 'react';
+
 import type { ConnectionStatus } from '../net/connection';
 import type { EconomySnapshot } from '../state/economy';
 import { formatCashChip, formatRepChip } from '../state/economy';
@@ -65,8 +67,29 @@ export function HudStrip({
   onOpenShift,
   onOpenHelp,
 }: HudStripProps) {
+  const headerRef = useRef<HTMLElement | null>(null);
+  // M2 (beta finding): a tall mobile modal (MORNING) used to center under
+  // the fixed HUD, hiding its own title/close behind it — the HUD wraps to
+  // 2-3 rows on phone (hard rule 1: GRAYSCALE/FLOOR stay visible there
+  // rather than hidden), so its real height isn't a fixed constant. This
+  // measures it live and publishes it as `--hud-height`; index.css's phone
+  // modal rule reads it to keep the modal's top edge below the HUD.
+  useEffect(() => {
+    const el = headerRef.current;
+    if (!el) return;
+    const publish = () => {
+      document.documentElement.style.setProperty('--hud-height', `${String(el.offsetHeight)}px`);
+    };
+    publish();
+    const observer = new ResizeObserver(publish);
+    observer.observe(el);
+    return () => {
+      observer.disconnect();
+    };
+  }, []);
+
   return (
-    <header className="hud">
+    <header className="hud" ref={headerRef}>
       <span className="brand">WAR ROOM · V3</span>
       <ControlTip label="WS connection to the real server.">
         <span className="chip" data-testid="hud-connection">
