@@ -152,3 +152,22 @@ export function tapTranscriptLine(agentId: number, line: string): void {
     // Telemetry only: swallow everything.
   }
 }
+
+/**
+ * Append the renderable records from one file-watcher poll as one chunk.
+ * readNewLines already parsed these records for lifecycle state, so this
+ * avoids both reparsing and one WS fan-out per line in the same 500ms poll.
+ */
+export function tapTranscriptRecords(agentId: number, records: readonly unknown[]): void {
+  try {
+    const rendered: string[] = [];
+    for (const record of records) {
+      const text = renderTranscriptRecord(record);
+      if (text !== undefined) rendered.push(`${text}\n`);
+    }
+    if (rendered.length === 0) return;
+    outputRingStore.append('agent', String(agentId), 'transcript', rendered.join(''));
+  } catch {
+    // Telemetry only: swallow everything.
+  }
+}

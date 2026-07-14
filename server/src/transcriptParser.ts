@@ -141,7 +141,8 @@ export function processTranscriptLine(
   agents: AgentStateStore,
   waitingTimers: Map<number, ReturnType<typeof setTimeout>>,
   permissionTimers: Map<number, ReturnType<typeof setTimeout>>,
-): void {
+  tokenUsageBatch?: TokenUsageDelta[],
+): Record<string, unknown> | undefined {
   const agent = agents.get(agentId);
   if (!agent) return;
   agent.lastDataAt = Date.now();
@@ -185,7 +186,9 @@ export function processTranscriptLine(
       // file offset and re-stream historical usage records — counting those
       // would double the day's "money spent". See isRecentEnoughForShiftSpend's
       // doc for the shared (local + remote) replay-cutoff contract.
-      applyTokenUsage(agentId, agent, usage, agents, isRecentEnoughForShiftSpend(record));
+      const delta = { usage, countForShift: isRecentEnoughForShiftSpend(record) };
+      if (tokenUsageBatch) tokenUsageBatch.push(delta);
+      else applyTokenUsage(agentId, agent, usage, agents, delta.countForShift);
     }
 
     // Resilient content extraction: support both record.message.content and record.content
@@ -488,8 +491,10 @@ export function processTranscriptLine(
         }
       }
     }
+    return record as Record<string, unknown>;
   } catch {
     // Ignore malformed lines
+    return undefined;
   }
 }
 
