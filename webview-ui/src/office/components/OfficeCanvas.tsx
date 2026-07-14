@@ -20,7 +20,7 @@ import { stageForAge } from '../crisis.js';
 import { canPlaceFurniture, getWallPlacementRow } from '../editor/editorActions.js';
 import type { EditorState } from '../editor/editorState.js';
 import type { OfficeState } from '../engine/officeState.js';
-import { startPixiApp } from '../engine/pixiApp.js';
+import { resizePixiRenderer, startPixiApp } from '../engine/pixiApp.js';
 import type {
   DeleteButtonBounds,
   PixiEditorState,
@@ -449,7 +449,7 @@ export function OfficeCanvas({
         observer = new ResizeObserver(() => {
           const container = containerRef.current;
           if (!container) return;
-          app.renderer.resize(container.clientWidth, container.clientHeight);
+          resizePixiRenderer(app.renderer, container.clientWidth, container.clientHeight);
         });
         if (containerRef.current) observer.observe(containerRef.current);
       })

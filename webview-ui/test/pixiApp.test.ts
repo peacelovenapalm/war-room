@@ -66,7 +66,8 @@ const { MockApplication, resetMockApplication } = vi.hoisted(() => {
 
 vi.mock('pixi.js', () => ({ Application: MockApplication }));
 
-const { startPixiApp, getPixiInitCount } = await import('../src/office/engine/pixiApp.js');
+const { startPixiApp, getPixiInitCount, resizePixiRenderer } =
+  await import('../src/office/engine/pixiApp.js');
 
 function fakeCanvas(): HTMLCanvasElement {
   return { parentElement: null } as unknown as HTMLCanvasElement;
@@ -132,4 +133,21 @@ test('startPixiApp: passes autoDensity + resolution (devicePixelRatio) to Applic
   assert.equal(options.resolution, 1);
 
   handle.dispose();
+});
+
+test('resizePixiRenderer: updates stale resolution from live devicePixelRatio before resize', () => {
+  window.devicePixelRatio = 2;
+  const calls: Array<{ width: number; height: number; resolution: number }> = [];
+  const renderer = {
+    resolution: 1,
+    resize(width: number, height: number) {
+      calls.push({ width, height, resolution: this.resolution });
+    },
+  };
+
+  resizePixiRenderer(renderer, 640, 360);
+
+  assert.equal(renderer.resolution, 2);
+  assert.deepEqual(calls, [{ width: 640, height: 360, resolution: 2 }]);
+  window.devicePixelRatio = 1;
 });

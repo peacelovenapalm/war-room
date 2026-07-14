@@ -1,4 +1,4 @@
-import type { Ticker } from 'pixi.js';
+import type { Renderer, Ticker } from 'pixi.js';
 import { Application } from 'pixi.js';
 
 import { MAX_DELTA_TIME_SEC } from '../../constants.js';
@@ -37,6 +37,19 @@ let pixiInitCount = 0;
  *  across view-switch/zoom/edit/resize interactions. */
 export function getPixiInitCount(): number {
   return pixiInitCount;
+}
+
+/** Keep Pixi's backing-store resolution aligned with the live browser DPR.
+ *  Browser zoom and moving a window between displays can change DPR after
+ *  Application.init(), so every observed container resize rechecks it. */
+export function resizePixiRenderer(
+  renderer: Pick<Renderer, 'resolution' | 'resize'>,
+  width: number,
+  height: number,
+): void {
+  const dpr = window.devicePixelRatio || 1;
+  if (renderer.resolution !== dpr) renderer.resolution = dpr;
+  renderer.resize(width, height);
 }
 
 export function startPixiApp(
