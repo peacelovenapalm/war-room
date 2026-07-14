@@ -24,6 +24,24 @@
 # empty, the header is simply omitted and FOCUS stays honestly disabled for
 # that session ("NO PID -- use COPY ID").
 #
+# SessionEnd client-side distill (2026-07-13): deploy #6 (c0cf0e3) shipped
+# client-side transcript distillation, but ONLY inside the bundled Claude
+# hook script (dist/hooks/claude-hook.js) -- the app's own hook installer
+# target. THIS runbook's forwarder never ran that code: it's a plain shell
+# script that curls the raw hook payload straight to the server. Result: on
+# real machines running this runbook (Greg's Macs), every SessionEnd
+# produced a `transcript-unavailable` receipt and zero notes -- 46/46
+# failed receipts, caught during the V8 precondition check. This runbook
+# now also installs ~/.war-room/war-room-distill.js (the standalone CLI
+# built alongside the hook bundle, same distill core, zero copy-paste) and
+# the forwarder pipes SessionEnd payloads through it before the POST. Every
+# other event is untouched -- detection is a cheap shell pattern match, and
+# `node` discovery only runs on the SessionEnd path so it adds zero latency
+# to the other 13 events. If `node` isn't found or the script is missing,
+# the payload goes out unenriched exactly as before, and the server's
+# honest `transcript-unavailable` receipt stays the fallback -- this change
+# can only add notes, never break delivery.
+#
 # WHY command hooks, not `type:"http"` (redesigned 2026-07-07):
 #   Claude Code hard-blocks http hooks whose URL resolves to a private or
 #   link-local address — Tailscale 100.x IPs included. The first install
@@ -33,9 +51,16 @@
 #   the server in a detached background job and always exits 0.
 #
 # What it changes:
-#   1. ~/.war-room/env      — WAR_ROOM_TOKEN + WAR_ROOM_URL + WAR_ROOM_MACHINE
-#                             (chmod 600; existing token is kept)
-#   2. ~/.war-room/hook.sh  — the forwarder script (written by this runbook)
+#   1. ~/.war-room/env                 — WAR_ROOM_TOKEN + WAR_ROOM_URL +
+#                                         WAR_ROOM_MACHINE (chmod 600;
+#                                         existing token is kept)
+#   2. ~/.war-room/hook.sh             — the forwarder script (written by
+#                                         this runbook)
+#   2b. ~/.war-room/war-room-distill.js — standalone SessionEnd distill CLI,
+#                                         copied from dist/hooks/ in THIS
+#                                         checkout (npm run package builds
+#                                         it). Non-fatal if missing/stale --
+#                                         the forwarder just skips enrichment.
 #   3. ~/.claude/settings.json — one command hook entry per event
 #      (BACKED UP FIRST; idempotent; also REMOVES any legacy http entries
 #       from the 2026-07-06 design and the legacy ~/.zshenv token line)
@@ -55,6 +80,12 @@ SETTINGS="${HOME}/.claude/settings.json"
 ENV_DIR="${HOME}/.war-room"
 ENV_FILE="${ENV_DIR}/env"
 HOOK_SCRIPT="${ENV_DIR}/hook.sh"
+DISTILL_CLI_DEST="${ENV_DIR}/war-room-distill.js"
+# This script lives at <repo>/.planning/runbooks/ -- resolve the repo root
+# so we can pick up the built dist/hooks/war-room-distill.js from THIS
+# checkout (run `npm run package` first if it's missing/stale).
+REPO_ROOT="$(cd "$(dirname "$0")/../.." && pwd)"
+DISTILL_CLI_SRC="${REPO_ROOT}/dist/hooks/war-room-distill.js"
 TS="$(date +%Y%m%d-%H%M%S)"
 
 ok()   { printf '[OK]   %s\n' "$1"; }
@@ -119,6 +150,51 @@ ENV_FILE="${HOME}/.war-room/env"
 [ -n "${WAR_ROOM_URL:-}" ] || exit 0
 PAYLOAD="$(cat)"
 [ -n "${PAYLOAD}" ] || exit 0
+# SessionEnd client-side distill (2026-07-13): cheap shell pattern match --
+# no grep/jq spawn -- so non-SessionEnd events (13 of 14) pay zero cost.
+# Only on the SessionEnd path do we bother discovering `node`, since Claude
+# Code hook shells don't reliably inherit a PATH that has it. On ANY miss
+# (no node, no script, timeout, bad output) the ORIGINAL payload ships
+# unenriched -- the server's honest transcript-unavailable receipt is the
+# fallback; this can only add notes, never break or delay delivery.
+case "${PAYLOAD}" in
+  *'"hook_event_name":"SessionEnd"'*|*'"hook_event_name": "SessionEnd"'*)
+    DISTILL_NODE=""
+    if command -v node >/dev/null 2>&1; then
+      DISTILL_NODE="$(command -v node)"
+    elif [ -x /opt/homebrew/bin/node ]; then
+      DISTILL_NODE=/opt/homebrew/bin/node
+    elif [ -x /usr/local/bin/node ]; then
+      DISTILL_NODE=/usr/local/bin/node
+    fi
+    DISTILL_SCRIPT="${HOME}/.war-room/war-room-distill.js"
+    if [ -n "${DISTILL_NODE}" ] && [ -f "${DISTILL_SCRIPT}" ]; then
+      DISTILL_TMP="$(mktemp "${TMPDIR:-/tmp}/warroom-distill.XXXXXX" 2>/dev/null || echo "")"
+      if [ -n "${DISTILL_TMP}" ]; then
+        printf '%s' "${PAYLOAD}" > "${DISTILL_TMP}" 2>/dev/null
+        # Hard 5s timeout so a pathological hang in the CLI can never block
+        # this forwarder: run it in the background, race it against a sleep
+        # watchdog that kills it, then always continue.
+        ENRICHED="$(
+          "${DISTILL_NODE}" "${DISTILL_SCRIPT}" < "${DISTILL_TMP}" 2>/dev/null &
+          DISTILL_PID=$!
+          ( sleep 5; kill -9 "${DISTILL_PID}" 2>/dev/null ) &
+          WATCH_PID=$!
+          wait "${DISTILL_PID}" 2>/dev/null
+          kill "${WATCH_PID}" 2>/dev/null
+          wait "${WATCH_PID}" 2>/dev/null
+        )"
+        rm -f "${DISTILL_TMP}"
+        # Cheap sanity check (no jq dependency in the runtime forwarder):
+        # only adopt output that at least looks like a JSON object.
+        case "${ENRICHED}" in
+          '{'*'}') PAYLOAD="${ENRICHED}" ;;
+          *) : ;;
+        esac
+      fi
+    fi
+    ;;
+esac
 # PID telemetry: Claude Code runs this hook as a direct child of the claude
 # process, so $PPID here is the session's own OS pid -- forwarded as X-Pid
 # for the agent-drawer FOCUS button. Omitted (not sent as "X-Pid:") when
@@ -141,6 +217,15 @@ exit 0
 HOOKEOF
 chmod 700 "${HOOK_SCRIPT}"
 ok "forwarder written to ${HOOK_SCRIPT} (mode 700)"
+
+# ── 2b. Standalone SessionEnd distill CLI (copied from THIS checkout) ────────
+if [ -f "${DISTILL_CLI_SRC}" ]; then
+  cp "${DISTILL_CLI_SRC}" "${DISTILL_CLI_DEST}"
+  chmod 700 "${DISTILL_CLI_DEST}"
+  ok "distill CLI copied to ${DISTILL_CLI_DEST}"
+else
+  warn "dist/hooks/war-room-distill.js not found in ${REPO_ROOT} (run 'npm run package' first) — SessionEnd notes stay disabled until you re-run this script after building"
+fi
 
 # ── 3. Legacy cleanup: 2026-07-06 http-hook design leftovers ─────────────────
 if grep -qs 'war-room-token' "${HOME}/.zshenv"; then

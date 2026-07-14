@@ -125,6 +125,51 @@ function topicLink(topic: string): string {
     .replace(/\s+/g, ' ');
 }
 
+/** V8: client-side distill fields, attached to the SessionEnd hook payload
+ *  before it's POSTed (or emitted by the standalone distill CLI). Mirrors
+ *  AgentEvent's sessionEnd kind (core/src/provider.ts). Runs on the
+ *  session's OWN machine so the server never needs (or gets) the raw
+ *  transcript -- only the finished note. */
+export interface SessionEndDistillFields {
+  distilledNote?: unknown;
+  distillSkipped?: boolean;
+  distillFailed?: boolean;
+  distillFailReason?: string;
+}
+
+/** Never throws: any failure becomes an honest distillFailed marker so the
+ *  server can record a distinct 'client-distill-failed' receipt instead of
+ *  silently dropping the session. Never fabricates a note. Shared by
+ *  claude-hook.ts (spawned per-event from the app) and the standalone
+ *  war-room-distill.js CLI (spawned from the ~/.war-room/hook.sh forwarder
+ *  on machines that don't run the bundled hook script). */
+export function distillForSessionEnd(data: Record<string, unknown>): SessionEndDistillFields {
+  try {
+    const transcriptPath = typeof data.transcript_path === 'string' ? data.transcript_path : '';
+    const sessionId = typeof data.session_id === 'string' ? data.session_id : '';
+    if (transcriptPath === '') {
+      return { distillFailed: true, distillFailReason: 'no-transcript-path' };
+    }
+    const lines = readTranscriptTextLines(transcriptPath);
+    if (carriesDistillSkipTag(lines)) {
+      return { distillSkipped: true };
+    }
+    const now = Date.now();
+    const note = new DeterministicSessionDistiller().distill(lines, {
+      sessionId,
+      date: new Date(now).toISOString().slice(0, 10),
+      model: 'deterministic-v1',
+      distilledAt: new Date(now).toISOString(),
+    });
+    return { distilledNote: note };
+  } catch (e) {
+    return {
+      distillFailed: true,
+      distillFailReason: e instanceof Error ? e.message.slice(0, 200) : 'distill-error',
+    };
+  }
+}
+
 export class DeterministicSessionDistiller implements SessionDistiller {
   distill(lines: TranscriptTextLine[], context: DistillContext): DistilledNote {
     const decisions: DecisionReceipt[] = [];
