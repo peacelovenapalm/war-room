@@ -97,3 +97,48 @@ describe('webviewReady hook-plane replay (M4 extended)', () => {
     expect(statuses.some((m) => m.id === 1)).toBe(false);
   });
 });
+
+describe('requestDiagnostics', () => {
+  it('returns the shared agent diagnostic snapshot on the standalone message path', () => {
+    const projectDir = path.join(tmpBase, 'project');
+    const jsonlFile = path.join(projectDir, 'session.jsonl');
+    fs.mkdirSync(projectDir);
+    fs.writeFileSync(jsonlFile, 'one\ntwo\n');
+    const store = new AgentStateStore();
+    store.set(
+      7,
+      makeAgent(7, {
+        projectDir,
+        jsonlFile,
+        fileOffset: 4,
+        lastDataAt: 123_456,
+        linesProcessed: 2,
+      }),
+    );
+    const sent: Record<string, unknown>[] = [];
+
+    handleClientMessage({ type: 'requestDiagnostics' }, (message) => sent.push(message), {
+      store,
+      cache: null,
+    });
+
+    expect(sent).toEqual([
+      {
+        type: 'agentDiagnostics',
+        agents: [
+          {
+            id: 7,
+            projectDir,
+            projectDirExists: true,
+            jsonlFile,
+            jsonlExists: true,
+            fileSize: 8,
+            fileOffset: 4,
+            lastDataAt: 123_456,
+            linesProcessed: 2,
+          },
+        ],
+      },
+    ]);
+  });
+});

@@ -1,3 +1,4 @@
+import { buildAgentDiagnostics } from './agentDiagnostics.js';
 import type { AgentRuntime } from './agentRuntime.js';
 import type { AgentStateStore } from './agentStateStore.js';
 import type { LoadedAssets, LoadedCharacterSprites, LoadedPetSprites } from './assetLoader.js';
@@ -122,6 +123,10 @@ export function handleClientMessage(
 
     case 'setHooksInfoShown':
       adapter?.setSetting(KEY_HOOKS_INFO_SHOWN, true);
+      break;
+
+    case 'requestDiagnostics':
+      send({ type: 'agentDiagnostics', agents: buildAgentDiagnostics(store) });
       break;
 
     // Dispatch (v1 mechanic #6b — "call a coworker"): enqueue only. The

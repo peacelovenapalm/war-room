@@ -4,6 +4,7 @@ import * as path from 'path';
 import * as vscode from 'vscode';
 
 import type { StateAdapter } from '../../core/src/adapter.js';
+import { buildAgentDiagnostics } from '../../server/src/agentDiagnostics.js';
 import { AgentRuntime } from '../../server/src/agentRuntime.js';
 import { AgentStateStore } from '../../server/src/agentStateStore.js';
 import type {
@@ -546,31 +547,10 @@ export class PixelAgentsViewProvider implements vscode.WebviewViewProvider {
         })();
         sendExistingAgents(this.store, this.adapter, this.webview);
       } else if (message.type === 'requestDiagnostics') {
-        // Send connection diagnostics for all agents to the Debug View
-        const diagnostics: Array<Record<string, unknown>> = [];
-        for (const [, agent] of this.store) {
-          let jsonlExists = false;
-          let fileSize = 0;
-          try {
-            const stat = fs.statSync(agent.jsonlFile);
-            jsonlExists = true;
-            fileSize = stat.size;
-          } catch {
-            /* file doesn't exist */
-          }
-          diagnostics.push({
-            id: agent.id,
-            projectDir: agent.projectDir,
-            projectDirExists: fs.existsSync(agent.projectDir),
-            jsonlFile: agent.jsonlFile,
-            jsonlExists,
-            fileSize,
-            fileOffset: agent.fileOffset,
-            lastDataAt: agent.lastDataAt,
-            linesProcessed: agent.linesProcessed,
-          });
-        }
-        this.webview?.postMessage({ type: 'agentDiagnostics', agents: diagnostics });
+        this.webview?.postMessage({
+          type: 'agentDiagnostics',
+          agents: buildAgentDiagnostics(this.store),
+        });
       } else if (message.type === 'openSessionsFolder') {
         const projectDir = getProjectDirPath();
         if (projectDir && fs.existsSync(projectDir)) {
