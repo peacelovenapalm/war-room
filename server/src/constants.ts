@@ -89,6 +89,14 @@ export const MAX_AGENT_OUTPUT_TOTAL_LINE_BYTES = 1_048_576; // 1MB
  *  double in size once escaped into a JSON string; 2MB left too little
  *  margin for a genuinely worst-case 1MB batch). */
 export const MAX_AGENT_OUTPUT_BODY_BYTES = 4 * 1024 * 1024; // 4MB
+/** Fastify route-level bodyLimit for POST /api/dispatch/:id/output — the
+ *  runner's output forwarder flushes at 8KB buffered, but a single pipe
+ *  'data' event can add one ~64KB read on top before the flush check runs
+ *  (~72KB raw), and ANSI-heavy terminal output JSON-escapes control bytes
+ *  at up to 6x. 512KB covers that worst case with margin; the process-wide
+ *  MAX_HOOK_BODY_SIZE (64KB) 413'd real oversized chunks, which the
+ *  forwarder then dropped silently. */
+export const MAX_DISPATCH_OUTPUT_BODY_BYTES = 512 * 1024; // 512KB
 /** Defensive cap on the remote transcript-path retention map (registerHookRoute) —
  *  bounds a runaway/malicious remote's ability to grow server memory via
  *  distinct (machine, sessionId) pairs. Oldest entry evicted first. */

@@ -25,6 +25,8 @@
  * server-assigned seq stays monotonic without trusting network reordering.
  */
 
+import { StringDecoder } from 'node:string_decoder';
+
 /** Default coalescing window. */
 export const OUTPUT_FLUSH_INTERVAL_MS = 1_000;
 /** Default per-stream byte threshold for an immediate flush. */
@@ -62,7 +64,7 @@ export function createOutputForwarder({
   maxPendingPosts = OUTPUT_MAX_PENDING_POSTS,
   log = () => {},
 }) {
-  /** @type {Map<string, { parts: string[], bytes: number, seq: number }>} */
+  /** @type {Map<string, { parts: string[], bytes: number, seq: number, decoder: StringDecoder }>} */
   const streams = new Map();
   let timer = null;
   let stopped = false;
@@ -75,7 +77,10 @@ export function createOutputForwarder({
   function streamState(stream) {
     let state = streams.get(stream);
     if (!state) {
-      state = { parts: [], bytes: 0, seq: 0 };
+      // Per-stream StringDecoder: pipe 'data' events split at arbitrary
+      // byte offsets, so a multi-byte code point can straddle two events —
+      // the decoder carries the partial bytes instead of emitting U+FFFD.
+      state = { parts: [], bytes: 0, seq: 0, decoder: new StringDecoder('utf8') };
       streams.set(stream, state);
     }
     return state;
@@ -93,7 +98,7 @@ export function createOutputForwarder({
     pendingPosts += 1;
     chain = chain.then(async () => {
       try {
-        await fetchImpl(`${url}/api/dispatch/${id}/output`, {
+        const res = await fetchImpl(`${url}/api/dispatch/${id}/output`, {
           method: 'POST',
           headers: {
             'content-type': 'application/json',
@@ -102,6 +107,12 @@ export function createOutputForwarder({
           body: JSON.stringify({ stream, chunk, seq }),
           signal: AbortSignal.timeout(POST_TIMEOUT_MS),
         });
+        // A non-2xx (e.g. a 413 on an oversized body) drops the chunk just
+        // as silently as a network failure would without this line.
+        if (res && typeof res === 'object' && 'ok' in res && res.ok === false) {
+          const status = 'status' in res ? String(res.status) : '?';
+          log(`⚠ output POST rejected for ${id}/${stream} (HTTP ${status}) — chunk dropped`);
+        }
       } catch (err) {
         // Fire-and-forget: a dead server costs this chunk, nothing else.
         const m = err instanceof Error ? err.message : String(err);
@@ -138,9 +149,9 @@ export function createOutputForwarder({
     /** Buffer one piece of output. `data` may be a Buffer or string. */
     push(stream, data) {
       if (stopped) return;
-      const text = typeof data === 'string' ? data : data.toString('utf8');
-      if (text === '') return;
       const state = streamState(stream);
+      const text = typeof data === 'string' ? data : state.decoder.write(data);
+      if (text === '') return;
       state.parts.push(text);
       state.bytes += Buffer.byteLength(text, 'utf8');
       if (state.bytes >= maxBytes) {
@@ -157,6 +168,15 @@ export function createOutputForwarder({
       if (timer !== null) {
         clearTimeout(timer);
         timer = null;
+      }
+      // Drain any partial code point each decoder is still carrying before
+      // the final flush (it decodes to U+FFFD, but is never silently lost).
+      for (const state of streams.values()) {
+        const tail = state.decoder.end();
+        if (tail !== '') {
+          state.parts.push(tail);
+          state.bytes += Buffer.byteLength(tail, 'utf8');
+        }
       }
       flushAll();
       return chain;

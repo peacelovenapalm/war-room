@@ -25,6 +25,7 @@ import {
   MAX_AGENT_OUTPUT_LINE_BYTES,
   MAX_AGENT_OUTPUT_LINES_PER_POST,
   MAX_AGENT_OUTPUT_TOTAL_LINE_BYTES,
+  MAX_DISPATCH_OUTPUT_BODY_BYTES,
   MAX_HOOK_BODY_SIZE,
   MORNING_PUSH_CHECK_INTERVAL_MS,
   SELF_HEAL_TICK_INTERVAL_MS,
@@ -1461,7 +1462,9 @@ function registerDispatchRoutes(app: FastifyInstance, options: HttpServerOptions
   // runner's forwarder is fire-and-forget either way.
   app.post<{ Params: { id: string }; Body: Record<string, unknown> }>(
     '/api/dispatch/:id/output',
-    { preHandler: bearerAuth(options.token) },
+    // Route-level bodyLimit: the forwarder's worst-case JSON-escaped chunk
+    // clears the process-wide 64KB default — see the constant's doc.
+    { preHandler: bearerAuth(options.token), bodyLimit: MAX_DISPATCH_OUTPUT_BODY_BYTES },
     async (request, reply) => {
       const body = request.body ?? {};
       const stream = body.stream === 'stdout' || body.stream === 'stderr' ? body.stream : undefined;
@@ -1481,7 +1484,7 @@ function registerDispatchRoutes(app: FastifyInstance, options: HttpServerOptions
       // The ring assigns the authoritative wire seq; the runner's own seq is
       // validated above but not trusted for ordering (the forwarder already
       // serializes its POSTs per dispatch).
-      outputRingStore.append('dispatch', request.params.id, stream, chunk);
+      appendOutputChunkInBoundedParts('dispatch', request.params.id, stream, chunk);
       reply.send({ ok: true });
     },
   );
