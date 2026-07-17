@@ -38,7 +38,8 @@ export interface GraphSearchResult {
   query: string;
   matches: GraphNode[];
   resolved?: { node: GraphNode; edges: GraphNeighborEdge[] };
-  decisions: DecisionSearchLane;
+  /** Absent on pre-V7 servers and partial responses — render as memory-unavailable, never crash. */
+  decisions?: DecisionSearchLane;
 }
 
 export interface DecisionSearchReceipt {

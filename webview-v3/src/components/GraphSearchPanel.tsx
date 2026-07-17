@@ -249,7 +249,7 @@ export function GraphSearchPanel({ isOpen, onClose }: GraphSearchPanelProps) {
         </div>
       )}
 
-      {hasQuery && !loading && result && result.decisions.available && (
+      {hasQuery && !loading && result?.decisions?.available && (
         <section className="graph-search__decisions" data-testid="graph-search-decisions">
           <div className="graph-search__lane-label">◆ DECISIONS — ANSWER FIRST</div>
           {result.decisions.matches.length === 0 ? (
@@ -262,7 +262,7 @@ export function GraphSearchPanel({ isOpen, onClose }: GraphSearchPanelProps) {
         </section>
       )}
 
-      {hasQuery && !loading && result && !result.decisions.available && (
+      {hasQuery && !loading && result && !result.decisions?.available && (
         <div className="modal__warn" data-testid="graph-search-decisions-unavailable">
           ⊘ NO MEMORY — WAR_ROOM_VAULT_DIR not configured
         </div>

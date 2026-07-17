@@ -360,19 +360,24 @@ async function serveV3Dist(
       }
       res.writeHead(200, { 'Content-Type': 'application/json' });
       res.end(
-        JSON.stringify({ ok: true, haltedOrders: 0, haltedRuns: 0, revision: automationLatchRevision }),
+        JSON.stringify({
+          ok: true,
+          haltedOrders: 0,
+          haltedRuns: 0,
+          revision: automationLatchRevision,
+        }),
       );
       return;
     }
     if (requestPath === '/api/automation/resume' && req.method === 'POST') {
       automationLatchRevision += 1;
       for (const client of wss.clients) {
-        client.send(JSON.stringify({ type: 'automationResumed', revision: automationLatchRevision }));
+        client.send(
+          JSON.stringify({ type: 'automationResumed', revision: automationLatchRevision }),
+        );
       }
       res.writeHead(200, { 'Content-Type': 'application/json' });
-      res.end(
-        JSON.stringify({ ok: true, resumedOrders: 0, revision: automationLatchRevision }),
-      );
+      res.end(JSON.stringify({ ok: true, resumedOrders: 0, revision: automationLatchRevision }));
       return;
     }
     // OPS REVIEW rung-2 proposals — the exact real endpoints being reused
@@ -1818,7 +1823,12 @@ test.describe('stage-3 panel ports (desktop chrome model)', () => {
       graphSearchOverride: {
         available: true,
         query: 'ops',
-        matches: [{ id: 'note-ops-review', kind: 'note', title: 'Ops Review Design' }],
+        // note-ops-review is also the resolved node, so its match row dedupes
+        // away (e0a3b20) — note-ops-arch is the row the match assertions target.
+        matches: [
+          { id: 'note-ops-review', kind: 'note', title: 'Ops Review Design' },
+          { id: 'note-ops-arch', kind: 'note', title: 'Ops Arch Sketch' },
+        ],
         resolved: {
           node: { id: 'note-ops-review', kind: 'note', title: 'Ops Review Design' },
           edges: [
@@ -1848,10 +1858,14 @@ test.describe('stage-3 panel ports (desktop chrome model)', () => {
       await page.getByTestId('dock-graph-search').click();
       await page.getByTestId('graph-search-input').fill('ops');
 
-      const match = page.getByTestId('graph-search-match').first();
+      // The resolved node never duplicates as a match row — only the
+      // non-resolved match renders.
+      const matchRows = page.getByTestId('graph-search-match');
+      await expect(matchRows).toHaveCount(1);
+      const match = matchRows.first();
       await expect(match).toContainText('▤');
-      await expect(match).toContainText('Ops Review Design');
-      await expect(match).toContainText('note-ops-review');
+      await expect(match).toContainText('Ops Arch Sketch');
+      await expect(match).toContainText('note-ops-arch');
 
       // Resolved block renders with hop-grouped edges — hop 1 before hop 2.
       const resolved = page.getByTestId('graph-search-resolved');
@@ -1867,7 +1881,7 @@ test.describe('stage-3 panel ports (desktop chrome model)', () => {
 
       // Tapping the match row re-queries with the exact id.
       await match.click();
-      await expect(page.getByTestId('graph-search-input')).toHaveValue('note-ops-review');
+      await expect(page.getByTestId('graph-search-input')).toHaveValue('note-ops-arch');
     } finally {
       await context.close();
       await host.close();
