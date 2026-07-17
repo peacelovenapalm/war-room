@@ -11,9 +11,11 @@ everything, fix what's confirmed, push, leave the system stable.
   hardening). **Pushed; local and origin identical (0/0)**. Earlier this
   session the 44 previously-unpushed commits (`3115ecf..fbf1aab`) were also
   pushed — before that, three sessions of work existed only on this laptop.
-- **Live nexus**: `curl https://nexus.tail722a2e.ts.net:8484/api/version` →
-  sha `731b8ab` (the 7/14 deploy). **Live is 2 commits behind local** — the
-  redeploy is gated and was left to Greg (see §4).
+- **Live nexus**: Greg ran the gated deploy runbook himself at ~6:05pm before
+  leaving. Independently re-verified after: `curl .../api/version` → sha
+  `923743d`, **exact match to this handoff's HEAD**; root 200 in 43ms. All
+  runbook checks passed (health, briefing, funnel tailnet-only, V3 face at
+  root, /v3 redirect).
 - **Gates, fresh on `10431e4`**: check-types ✓, lint ✓, asyncapi drift-0 ✓,
   test:server 1177/1177 ✓, test:webview-v3 545/545 ✓, test:poller 226/226 ✓.
 - **e2e/v3: 38 passed / 1 failed** — up from 36/3. The only remaining failure
@@ -60,10 +62,8 @@ everything, fix what's confirmed, push, leave the system stable.
 
 ## 4. Deferred / gated
 
-- **Nexus redeploy** (GATED, Greg runs it): live is `731b8ab`, local is
-  `10431e4`. Live was verified clean this session, and both fixes are
-  panel-robustness/telemetry-plane — **safe to leave until after the trip**.
-  Unblock: `bash .planning/runbooks/nexus-war-room-deploy.sh -y`.
+- ~~Nexus redeploy~~ — **DONE by Greg at ~6:05pm** (`923743d` live, verified
+  by direct curl, see §1). No longer deferred.
 - **CLS 0.927 on live load** (confirmed medium, the only failing Web Vital):
   97% is one shift at ~244ms — the HUD toolbar re-wraps when live data lands
   and pushes the office viewport (`DIV.prop-hotspots`) down 34px. Suggested
@@ -105,32 +105,30 @@ everything, fix what's confirmed, push, leave the system stable.
 
 ## 6. Next steps (max 3)
 
-1. **(~2 min, optional, anytime)** Deploy `10431e4` to nexus:
-   `bash .planning/runbooks/nexus-war-room-deploy.sh -y`, then verify
-   `curl -s https://nexus.tail722a2e.ts.net:8484/api/version` returns sha
-   `10431e4...`. Fine to skip until after the trip — live `731b8ab` is clean.
-2. **CLS fix** (startable <5 min): open `webview-v3/src/index.css`, find the
+1. **CLS fix** (startable <5 min): open `webview-v3/src/index.css`, find the
    701–1400px `.hud` media query, add a `min-height` sized to the wrapped
    state; verify CLS <0.1 with the scratchpad `perf/audit.mjs` script against
    a local build.
-3. **File tickets** for §4's low-severity findings + the CI gap (now including
+2. **File tickets** for §4's low-severity findings + the CI gap (now including
    the `compile`-doesn't-build-v3 sharpening).
+3. **Decide on `macbook-hooks-install.sh`** — still the deploy runbook's own
+   suggested next step, still gated, still unrun.
 
 ## 7. Kickoff prompt
 
 ```
-Context: /Users/greg/code/war-room on war-room/v3 @ 10431e4, pushed to
-origin (identical). Live nexus runs 731b8ab (2 commits behind — redeploy
-is gated on Greg, optional). Verify first:
+Context: /Users/greg/code/war-room on war-room/v3, pushed to origin
+(identical). Live nexus runs 923743d, deployed and verified 2026-07-16.
+Verify first (drift check):
   curl -s https://nexus.tail722a2e.ts.net:8484/api/version
 Read SESSION-HANDOFF-2026-07-16.md for full context.
 
-State: 2026-07-16 preflight audit complete — gates all green on 10431e4,
-e2e/v3 at 38/1 (only the known mobile dock bug remains), live deploy
-probed clean, everything pushed. Nothing pending merge or review.
+State: 2026-07-16 preflight audit complete — gates all green, e2e/v3 at
+38/1 (only the known mobile dock bug remains), fixes deployed live and
+independently verified. Nothing pending merge or review.
 
-First task: ask Greg whether to (a) run the nexus deploy runbook to ship
-10431e4, (b) take the CLS 0.93 fix (handoff §4 has the diagnosis and the
-ready-made measurement scripts), or (c) file the low-severity tickets —
-don't pick up gated/deferred items without asking.
+First task: ask Greg whether to (a) take the CLS 0.93 fix (handoff §4
+has the diagnosis and ready-made measurement scripts), (b) file the
+low-severity tickets, or (c) something new — don't pick up
+gated/deferred items without asking.
 ```

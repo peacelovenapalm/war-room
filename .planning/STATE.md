@@ -2024,6 +2024,8 @@ Handoff: `SESSION-HANDOFF-2026-07-16.md`.
   pipe reads. Found by adversarial hotspot review, verified before fix.
 - **Live nexus probed clean** (0 console errors, 0 failed requests,
   16/16 interactions, all perf budgets pass except CLS 0.93 — deferred
-  with full diagnosis in the handoff). Live stays at `731b8ab`, 2 behind
-  local; redeploy gated on Greg, safe to skip until after the trip.
-- war-room/v3 @ `10431e4`, all gates green, pushed, local==origin.
+  with full diagnosis in the handoff).
+- **Greg ran the gated deploy runbook himself at ~6:05pm** before
+  leaving; independently re-verified: /api/version returns `923743d`,
+  exact match to HEAD. All runbook checks passed, funnel tailnet-only.
+- war-room/v3 @ `923743d`, all gates green, pushed, local==origin==live.
