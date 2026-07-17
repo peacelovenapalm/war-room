@@ -2002,3 +2002,28 @@ Handoff: `SESSION-HANDOFF-2026-07-14-merge-and-deploy.md`.
   gated, not run), 3 parking-lot tickets (CI gap for webview-v3/poller,
   1 mobile bug, 2 flaky GRAPH SEARCH tests), stale root `CLAUDE.md`
   architecture docs.
+
+## POSITION — 2026-07-16 (preflight blitz before MacBook service drop-off)
+
+Handoff: `SESSION-HANDOFF-2026-07-16.md`.
+
+- ~35-minute ultracode audit before Greg dropped the MacBook off for
+  service: 9-agent workflow (live smoke, live web-perf, merge-window
+  review, hotspot review, codex gpt-5.6-sol second opinion, standalone
+  boot) + fresh gates + two full e2e/v3 runs.
+- **Pushed 44 stranded commits** (`3115ecf..fbf1aab`) — three sessions
+  of work had never left this laptop — then 2 new fixes (`..10431e4`).
+- **The "2 flaky GRAPH SEARCH e2e tests" ticket was a misdiagnosis**:
+  they failed deterministically — V7 MEMORY (`0222c15`) read
+  `result.decisions.available` unguarded (any lane-less response blanked
+  the panel) and one fixture predated the `e0a3b20` dedupe. Fixed in
+  `060221f`. e2e/v3 baseline is now **38/1** (only the mobile dock bug).
+- `10431e4` hardened the dispatch output leg: bounded 32KB ring appends
+  (was the only bypass site), 512KB route bodyLimit + forwarder non-2xx
+  logging (was silently 413-dropping), StringDecoder for UTF-8 across
+  pipe reads. Found by adversarial hotspot review, verified before fix.
+- **Live nexus probed clean** (0 console errors, 0 failed requests,
+  16/16 interactions, all perf budgets pass except CLS 0.93 — deferred
+  with full diagnosis in the handoff). Live stays at `731b8ab`, 2 behind
+  local; redeploy gated on Greg, safe to skip until after the trip.
+- war-room/v3 @ `10431e4`, all gates green, pushed, local==origin.
